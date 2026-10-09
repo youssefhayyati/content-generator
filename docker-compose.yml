@@ -9,7 +9,8 @@ services:
       # Windows bind mount on every request made each one take over a second.
       - vendor:/app/vendor
     ports:
-      - "8000:8000"
+      # 8000/8001 are taken by other apps on this box; override per stack, e.g. API_PORT=8010.
+      - "${API_PORT:-8002}:8000"
     environment:
       # Serve a few requests at once; the SPA fires several in parallel.
       PHP_CLI_SERVER_WORKERS: 4
@@ -40,12 +41,28 @@ services:
     depends_on:
       - api
 
+  # FlowAI Sound: voices (Kokoro), listening (Whisper) and the composer, on CPU. Models load on
+  # first use, take turns (one in memory at a time) and unload when idle: about 140 MB at rest,
+  # under 1 GB at its busiest.
+  sound:
+    build: ./sound
+    mem_limit: 1000m
+    restart: unless-stopped
+
   # Catches every email the API sends. Inbox at http://localhost:8025
   mailpit:
     image: axllent/mailpit
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+
+  # Local text models, free and private, at http://ollama:11434 from the API.
+  # Pull a model once: docker compose exec ollama ollama pull llama3.1:8b
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
 
 volumes:
   vendor:
+  ollama:

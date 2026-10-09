@@ -13,14 +13,14 @@ use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * The media library: upload images and videos, list them, serve them to their owner.
+ * The media library: upload images, videos and sound, list them, serve them to their owner.
  */
 class AssetController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
         $filters = $request->validate([
-            'kind' => ['nullable', Rule::in(['image', 'video'])],
+            'kind' => ['nullable', Rule::in(['image', 'video', 'audio'])],
             'source' => ['nullable', Rule::in(['upload', 'generated', 'screenshot', 'intake'])],
             'q' => ['nullable', 'string', 'max:100'],
             'ids' => ['nullable', 'string', 'max:2000'],
@@ -44,9 +44,9 @@ class AssetController extends Controller
     {
         $request->validate([
             'files' => ['required', 'array', 'min:1', 'max:20'],
-            'files.*' => ['file', 'mimetypes:'.implode(',', [...AssetStore::IMAGE_TYPES, ...AssetStore::VIDEO_TYPES]), 'max:204800'],
+            'files.*' => ['file', 'mimetypes:'.implode(',', [...AssetStore::IMAGE_TYPES, ...AssetStore::VIDEO_TYPES, ...AssetStore::AUDIO_TYPES]), 'max:204800'],
         ], [
-            'files.*.mimetypes' => 'Use JPG, PNG, WebP or GIF images, or MP4, MOV or WebM videos.',
+            'files.*.mimetypes' => 'Use JPG, PNG, WebP or GIF images; MP4, MOV or WebM videos; or MP3, M4A, WAV, OGG or FLAC audio.',
             'files.*.max' => 'Each file can be up to 200 MB.',
         ]);
 

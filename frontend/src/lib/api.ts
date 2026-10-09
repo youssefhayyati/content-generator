@@ -47,7 +47,7 @@ export type Post = {
 /** An image or video in the media library. */
 export type Asset = {
   id: number
-  kind: 'image' | 'video'
+  kind: 'image' | 'video' | 'audio'
   source: 'upload' | 'generated' | 'screenshot' | 'intake'
   name: string | null
   url: string
@@ -57,8 +57,52 @@ export type Asset = {
   width: number | null
   height: number | null
   duration: number | null
+  /** For sound (and reels): the waveform, whose voice or which mood, whether its words are timed. */
+  sound?: AssetSound | null
   created_at: string
 }
+
+export type AssetSound = {
+  type: 'voice' | 'music' | 'reel' | 'audio'
+  peaks?: number[]
+  voice?: string
+  voice_name?: string
+  lang?: string
+  script?: string
+  mood?: string
+  label?: string
+  bpm?: number
+  key?: string
+  seed?: number
+  style?: string
+  timed?: boolean
+  transcript?: 'running' | 'done' | 'failed'
+}
+
+export type TimedWord = { text: string; start: number; end: number }
+
+/** GET /assets/{id}/words */
+export type AssetWords = {
+  words: TimedWord[]
+  text: string | null
+  segments: Array<{ start: number; end: number; text: string }>
+  language: string | null
+  status: 'running' | 'done' | 'failed' | null
+  error: string | null
+}
+
+/** GET /sound: what the Sound tab offers. */
+export type SoundCatalog = {
+  available: boolean
+  reason: string | null
+  voices: Array<{ id: string; name: string; lang: string; language: string; gender: 'female' | 'male'; style: string; sample: string; sample_url: string }>
+  moods: Array<{ id: string; label: string; detail: string; bpm: [number, number]; colors: [string, string] }>
+  styles: Array<{ id: 'bold' | 'editorial' | 'pulse'; label: string; detail: string }>
+  listen: boolean
+  max_reel_seconds: number
+}
+
+export type AccountSound = { voice: string; speed: number; mood: string; accent: string }
 
 export type EditorialProfile = Partial<Record<'tone' | 'topics' | 'style' | 'do' | 'avoid' | 'language' | 'hashtags', string>>
 
@@ -98,6 +142,13 @@ export type Account = {
   autonomy: 'approve_all' | 'rules'
   min_gap_minutes: number
   profile: EditorialProfile
+  /** Storm Guard's settings for the account. */
+  storm_guard: StormSettings
+  /** Set while Storm Guard holds the account's publishing. */
+  storm_at: string | null
+  storm_reason: string | null
+  /** The account's voice, signature music mood and reel accent. */
+  sound: AccountSound
   posts_count?: number
   created_at: string
 }
@@ -138,6 +189,19 @@ export type InboxItem = {
   tone: 'fail' | 'warn' | 'plan' | 'accent'
   /** Set on publish_failed / publish_unconfirmed: the post the recovery actions act on. */
   post_id?: number
+  /** Set on flow_approval: the run holding at an "Ask me first", and the draft it holds. */
+  run_id?: number
+  flow?: string
+  ask?: string
+  draft?: string | null
+  /** A reel the flow made, to watch before approving. */
+  media?: { kind: 'video'; url: string; poster_url: string | null } | null
+  account?: string | null
+  platform?: PlatformId | null
+  /** Set on note: the note to dismiss. */
+  note_id?: number
+  /** Set on storm: the frozen account. */
+  account_id?: number
 }
 
 /** One attempt to publish a post from a phone — the hand-in record, plus what it belongs to. */
@@ -170,7 +234,7 @@ export type PublishingUsage = {
 /* Autonomy (mode B rules), reposts, comments                          */
 /* ------------------------------------------------------------------ */
 
-export type AutonomyAction = 'publish.approved_post' | 'profile.apply_ai_change' | 'comment.send_reply' | 'repost.schedule'
+export type AutonomyAction = 'publish.approved_post' | 'profile.apply_ai_change' | 'comment.send_reply' | 'repost.schedule' | 'flow.schedule_post'
 
 export type AutonomyRuleInfo = {
   id: number
@@ -229,9 +293,136 @@ export type Comment = {
   draft: string | null
   reply: string | null
   sent_at: string | null
+  /** -100 (furious) … 100 (delighted): read on arrival, refined by triage. */
+  sentiment: number | null
   account: { id: number; platform: PlatformId; handle: string } | null
   created_at: string
 }
+
+/* ------------------------------------------------------------------ */
+/* Storm Guard                                                         */
+/* ------------------------------------------------------------------ */
+
+export type StormSettings = { enabled: boolean; window_minutes: number; min_comments: number; threshold: number }
+
+/** GET /storm-guard: one account's weather. */
+export type StormPressure = StormSettings & {
+  account_id: number
+  handle: string
+  platform: PlatformId
+  total: number
+  negative: number
+  /** % of the window's comments that are negative. */
+  share: number
+  /** 0–100: how close the guard is to tripping. */
+  pressure: number
+  tripped: boolean
+  storm_at: string | null
+  reason: string | null
+  held_posts: number
+}
+
+/* ------------------------------------------------------------------ */
+/* Flows                                                               */
+/* ------------------------------------------------------------------ */
+
+export type FlowGroup = 'trigger' | 'ai' | 'logic' | 'human' | 'action'
+export type FlowPort = 'next' | 'yes' | 'no' | 'approved' | 'rejected'
+
+export type FlowNode = { id: string; type: string; x: number; y: number; config: Record<string, string | number | null> }
+export type FlowEdge = { from: string; to: string; port: FlowPort }
+export type FlowGraph = { nodes: FlowNode[]; edges: FlowEdge[] }
+
+export type FlowField = {
+  key: string
+  label: string
+  kind: 'text' | 'textarea' | 'number' | 'select' | 'time' | 'account' | 'voice'
+  default?: string | number
+  placeholder?: string
+  hint?: string
+  options?: Array<{ value: string; label: string }>
+  /** Only shown when another setting has this value. */
+  when?: Record<string, string>
+}
+
+export type FlowNodeKind = { group: FlowGroup; label: string; detail: string; ports: FlowPort[]; fields: FlowField[]; produces: string[] }
+
+export type FlowTemplate = { key: string; name: string; tagline: string; detail: string; graph: FlowGraph }
+
+/** GET /flows/catalog */
+export type FlowCatalog = { groups: Record<FlowGroup, string>; nodes: Record<string, FlowNodeKind>; templates: FlowTemplate[] }
+
+export type FlowRunStatus = 'running' | 'waiting' | 'approval' | 'done' | 'failed' | 'stopped'
+
+export type FlowRunSummary = {
+  id: number
+  flow_id: number
+  flow: string | null
+  status: FlowRunStatus
+  cause: string | null
+  steps: number
+  error: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+export type TrailEntry = {
+  node: string
+  type: string
+  status: 'ok' | 'ended' | 'waiting' | 'approval' | 'failed'
+  port: FlowPort | null
+  summary: string
+  ms: number
+  at: string
+}
+
+/** GET /flow-runs/{id} */
+export type FlowRun = {
+  id: number
+  flow_id: number
+  flow: string | null
+  status: FlowRunStatus
+  cause: string | null
+  vars: Record<string, unknown>
+  trail: TrailEntry[]
+  /** The node working right now. */
+  next: string | null
+  waiting_on: string | null
+  resume_at: string | null
+  approval: {
+    ask: string
+    draft: string | null
+    account: string | null
+    platform: PlatformId | null
+    /** A reel the run made, to watch before saying yes. */
+    media: { kind: 'video'; url: string; poster_url: string | null; duration: number | null } | null
+    since: string
+  } | null
+  error: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+export type FlowSummary = {
+  id: number
+  name: string
+  description: string | null
+  enabled: boolean
+  trigger: string
+  trigger_label: string
+  template: string | null
+  graph: FlowGraph
+  next_run_at: string | null
+  runs_count: number
+  last_run: { id: number; status: FlowRunStatus; cause: string | null; created_at: string } | null
+  problem: string | null
+  updated_at: string
+}
+
+export type FlowDetail = FlowSummary & { runs: FlowRunSummary[] }
+
+/** GET /flows */
+export type FlowList = { flows: FlowSummary[]; runs: FlowRunSummary[]; stats: { on: number; runs_today: number; waiting_on_you: number } }
 
 /** One finding of an investigation. */
 export type Finding = {
@@ -262,11 +453,11 @@ export type Investigation = {
 /** A model in the registry: local or cloud, and whether it can run right now. */
 export type ModelInfo = {
   id: string
-  provider: 'anthropic' | 'gateway' | 'ollama' | 'higgsfield'
+  provider: string
   model: string
   label: string
-  kind: 'text' | 'image' | 'video'
-  /** How it's reached: Claude API, Gateway, Ollama, Higgsfield API. */
+  kind: 'text' | 'image' | 'video' | 'voice' | 'music' | 'listen'
+  /** How it's reached: Claude API, Gateway, Ollama, Higgsfield API, FlowAI Sound. */
   reach: string
   local: boolean
   available: boolean
@@ -299,7 +490,7 @@ export type Registry = { models: ModelInfo[]; providers: ModelProvider[]; recipe
 
 export type Generation = {
   id: number
-  kind: 'text' | 'image' | 'video'
+  kind: 'text' | 'image' | 'video' | 'voice' | 'music' | 'reel'
   model: string
   model_label: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'

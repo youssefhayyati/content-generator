@@ -55,7 +55,7 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <ReactLenis root options={{ lerp: 0.1, smoothWheel: !reduce, anchors: { offset: -80 } }}>
+      <ReactLenis root options={{ lerp: 0.1, smoothWheel: !reduce, anchors: { offset: -80 }, allowNestedScroll: true }}>
         <Router>
           <SessionProvider>
             <SiteChrome />

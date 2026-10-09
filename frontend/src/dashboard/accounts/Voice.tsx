@@ -5,6 +5,7 @@ import { cn } from '../../lib/cn'
 import { fmtRelative } from '../data'
 import { useToast } from '../toast'
 import { Btn, inputClass, Label, Modal } from '../ui'
+import { AccountSoundForm } from './Sound'
 
 const FIELD_LABELS: Record<keyof EditorialProfile, string> = {
   tone: 'Tone',
@@ -25,7 +26,7 @@ const FIELDS = Object.keys(FIELD_LABELS) as (keyof EditorialProfile)[]
 export function Voice({ account, onClose }: { account: Account; onClose: () => void }) {
   const toast = useToast()
   const [voice, setVoice] = useState<AccountVoice | null>(null)
-  const [tab, setTab] = useState<'profile' | 'memory'>('profile')
+  const [tab, setTab] = useState<'profile' | 'memory' | 'sound'>('profile')
 
   const load = useCallback(
     () =>
@@ -41,7 +42,7 @@ export function Voice({ account, onClose }: { account: Account; onClose: () => v
   return (
     <Modal open onClose={onClose} title={`Voice · @${account.handle}`} className="max-w-2xl">
       <div className="mb-4 flex gap-1.5">
-        {(['profile', 'memory'] as const).map((t) => (
+        {(['profile', 'memory', 'sound'] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -51,12 +52,14 @@ export function Voice({ account, onClose }: { account: Account; onClose: () => v
               tab === t ? 'bg-white/[0.08] text-fg' : 'text-dim hover:text-muted',
             )}
           >
-            {t === 'profile' ? `Voice profile${pending.length ? ` · ${pending.length} waiting` : ''}` : 'Memory'}
+            {t === 'profile' ? `Voice profile${pending.length ? ` · ${pending.length} waiting` : ''}` : t === 'memory' ? 'Memory' : 'Sound'}
           </button>
         ))}
       </div>
 
-      {!voice ? (
+      {tab === 'sound' ? (
+        <AccountSoundForm account={account} />
+      ) : !voice ? (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
             <div key={i} className="skeleton h-10 rounded-lg" />

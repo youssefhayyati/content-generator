@@ -5,6 +5,7 @@ import type { PlatformId } from '../components/ui/PlatformIcon'
 import { apiStream, ApiError, type AiOptions, type PostFormat } from '../lib/api'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
+import { Dictate } from './sound/Dictate'
 import { useApi } from './data'
 import { ModelPicker } from './studio/parts'
 import { useUser } from './Shell'
@@ -207,6 +208,7 @@ export function Writer({ body, onBody, format, platforms, onWriting }: Props) {
                 : 'What’s the post about? A launch, a tip, a story from this week…'
             }
           />
+          {!writing && !blocked && <Dictate iconOnly label="Say the brief" onText={(t) => setBrief((b) => (b.trim() ? `${b.trim()} ${t}` : t))} className="h-8 border-transparent px-2" />}
           {writing ? (
             <button
               type="button"

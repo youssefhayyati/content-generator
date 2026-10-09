@@ -50,7 +50,7 @@ class StudioFoundationsTest extends TestCase
         $this->actingAs(User::factory()->create())->spa()->get($url)->assertForbidden();
 
         $this->spa()->post('/api/assets', ['files' => [UploadedFile::fake()->create('brief.pdf', 10, 'application/pdf')]])
-            ->assertJsonValidationErrors(['files.0' => 'Use JPG, PNG, WebP or GIF images, or MP4, MOV or WebM videos.']);
+            ->assertJsonValidationErrors(['files.0' => 'Use JPG, PNG, WebP or GIF images; MP4, MOV or WebM videos; or MP3, M4A, WAV, OGG or FLAC audio.']);
     }
 
     public function test_videos_are_measured_with_ffprobe_and_get_a_poster(): void

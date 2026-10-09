@@ -1,9 +1,11 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { animate, AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
@@ -461,7 +463,18 @@ export function Modal({
 
 export type MenuItem = { label: string; icon?: LucideIcon; onSelect: () => void; danger?: boolean; hint?: ReactNode }
 
-/** A small dropdown. Closes on outside click, Escape, or picking something. */
+/** Where the anchored dropdown should go, in viewport coordinates. */
+function useAnchor(open: boolean, ref: RefObject<HTMLDivElement | null>, align: 'left' | 'right') {
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open || !ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    setPos(align === 'right' ? { top: r.bottom + 6, right: window.innerWidth - r.right } : { top: r.bottom + 6, left: r.left })
+  }, [open, ref, align])
+  return pos
+}
+
+/** A small dropdown. Closes on outside click, Escape, scroll, or picking something. */
 export function Menu({
   trigger,
   items,
@@ -477,35 +490,40 @@ export function Menu({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const pos = useAnchor(open, ref, align)
 
   useEffect(() => {
     if (!open) return
     const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    const onScroll = () => setOpen(false)
     window.addEventListener('pointerdown', onDown)
     window.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
     return () => {
       window.removeEventListener('pointerdown', onDown)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
     }
   }, [open])
 
   return (
     <div ref={ref} className={cn('relative', className)}>
       {trigger({ open, toggle: () => setOpen((o) => !o) })}
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            role="menu"
-            className={cn(
-              'absolute top-full z-50 mt-1.5 min-w-[200px] origin-top overflow-hidden rounded-lg border border-line-2 bg-panel-3 p-1 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
-              align === 'right' ? 'right-0' : 'left-0',
-            )}
-            initial={{ opacity: 0, y: -6, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.2, ease }}
-          >
+      {createPortal(
+        <AnimatePresence>
+          {open && pos && (
+            <motion.div
+              role="menu"
+              style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right }}
+              className={cn(
+                'z-[130] min-w-[200px] origin-top overflow-hidden rounded-lg border border-line-2 bg-panel-3 p-1 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
+              )}
+              initial={{ opacity: 0, y: -6, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.98 }}
+              transition={{ duration: 0.2, ease }}
+            >
             {header}
             {items.map((item) => {
               const Icon = item.icon
@@ -529,9 +547,11 @@ export function Menu({
                 </button>
               )
             })}
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   )
 }

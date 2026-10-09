@@ -253,6 +253,45 @@ class CampaignEngineTest extends TestCase
         $this->assertDatabaseHas('account_memories', ['account_id' => $this->insta->id, 'kind' => 'example', 'content' => 'Rewritten 1, calmer.']);
     }
 
+    public function test_without_a_video_model_the_media_team_makes_the_video_with_a_voice_and_music(): void
+    {
+        $this->fakeClaude(['plan' => ['big_idea' => 'x', 'pillars' => [], 'items' => [
+            ['title' => 'Light it at nine', 'pillar' => 'p', 'format' => 'video', 'message' => 'A quiet ritual for the end of the day.', 'hook' => 'This is my 9 pm.', 'account_ids' => [$this->insta->id]],
+        ]]]);
+        $this->insta->update(['sound' => ['voice' => 'bf_emma', 'mood' => 'linen', 'accent' => '#f5b04c']]);
+        $wav = function (float $seconds) {
+            $data = '';
+            for ($i = 0, $n = (int) ($seconds * 24000); $i < $n; $i++) {
+                $data .= pack('v', ((int) (9000 * sin(2 * M_PI * 220 * $i / 24000))) & 0xFFFF);
+            }
+
+            return 'RIFF'.pack('V', 36 + strlen($data)).'WAVEfmt '.pack('VvvVVvv', 16, 1, 1, 24000, 48000, 2, 16).'data'.pack('V', strlen($data)).$data;
+        };
+        config(['ai.providers.sound.url' => 'http://sound.test']);
+        Http::fake([
+            'sound.test/health' => Http::response(['ok' => true]),
+            'sound.test/v1/voices' => Http::response([['id' => 'bf_emma', 'name' => 'Emma', 'lang' => 'en-gb', 'language' => 'English · UK', 'gender' => 'female', 'style' => 'Poised.', 'sample' => 'Hi.']]),
+            'sound.test/v1/speech' => fn ($r) => Http::response(['duration' => 0.9, 'audio' => base64_encode($wav(0.9)), 'voice' => $r['voice'], 'lang' => 'en-gb', 'words' => [['text' => 'This', 'start' => 0.0, 'end' => 0.2], ['text' => 'is', 'start' => 0.2, 'end' => 0.35], ['text' => 'my', 'start' => 0.35, 'end' => 0.5], ['text' => '9', 'start' => 0.5, 'end' => 0.7], ['text' => 'pm.', 'start' => 0.7, 'end' => 0.9]]]),
+            'sound.test/v1/music' => fn ($r) => Http::response(['duration' => 3.0, 'audio' => base64_encode($wav(3.0)), 'meta' => ['mood' => $r['mood'], 'label' => 'Linen', 'key' => 'D major', 'bpm' => 66.0, 'seed' => 3]]),
+        ]);
+
+        $campaign = $this->formCampaign();
+        $this->spa()->postJson("/api/campaigns/{$campaign->id}/plan");
+        $this->spa()->postJson("/api/campaigns/{$campaign->id}/approve-plan")->assertOk();
+
+        $item = CampaignItem::first();
+        $this->assertSame('ready', $item->status, (string) $item->error);
+        $video = Asset::find($item->asset_ids[0]);
+        $this->assertSame(['video', 'reel', 1080, 1920], [$video->kind, $video->meta['sound'], $video->width, $video->height]);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/v1/speech') && $r['voice'] === 'bf_emma' && str_contains($r['text'], 'This is my 9 pm.'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/v1/music') && $r['mood'] === 'linen');
+
+        $step = $campaign->steps()->where('agent', 'media')->where('model', 'sound/kokoro')->sole();
+        $this->assertSame('done', $step->status);
+        $this->assertStringContainsString('Made the video for “Light it at nine”: Emma reads it, Linen plays under it', $step->summary);
+        $this->assertSame('content_review', $campaign->fresh()->stage, 'Production carries on to the adapter and QA.');
+    }
+
     public function test_without_media_models_the_operator_uploads_and_production_carries_on(): void
     {
         $this->fakeClaude(['plan' => ['big_idea' => 'x', 'pillars' => [], 'items' => [

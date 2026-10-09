@@ -130,6 +130,38 @@ class StudioGenerationTest extends TestCase
         Http::assertSent(fn (Request $r) => $r->url() === 'https://gw.example/v1/models' && $r->hasHeader('Authorization', 'Bearer team-key'));
     }
 
+    public function test_groq_and_openrouter_models_are_discovered_and_only_the_free_ones_are_kept(): void
+    {
+        $this->fakeClaude();
+        config([
+            'ai.providers.groq.key' => 'gsk-test',
+            'ai.providers.openrouter.key' => 'sk-or-test',
+        ]);
+        Http::fake([
+            'api.groq.com/openai/v1/models' => Http::response(['data' => [['id' => 'llama-3.3-70b-versatile'], ['id' => 'gemma2-9b-it']]]),
+            'openrouter.ai/api/v1/models' => Http::response(['data' => [['id' => 'deepseek/deepseek-r1:free'], ['id' => 'openai/gpt-5'], ['id' => 'meta-llama/llama-3.3-70b-instruct:free']]]),
+        ]);
+
+        $list = collect($this->actingAs(User::factory()->create())->spa()->getJson('/api/models')->assertOk()->json('models'))->keyBy('id');
+
+        // Groq's short list comes through whole; the free models say so.
+        $this->assertSame(['Groq', true, true], [$list['groq/llama-3.3-70b-versatile']['reach'], $list['groq/llama-3.3-70b-versatile']['local'], $list['groq/llama-3.3-70b-versatile']['available']]);
+        $this->assertFalse($list['groq/gemma2-9b-it']['local']);
+        // OpenRouter keeps only the ':free' ids.
+        $this->assertTrue($list['openrouter/deepseek/deepseek-r1:free']['available']);
+        $this->assertArrayNotHasKey('openrouter/openai/gpt-5', $list);
+        // The key goes with the discovery call.
+        Http::assertSent(fn (Request $r) => $r->url() === 'https://api.groq.com/openai/v1/models' && $r->hasHeader('Authorization', 'Bearer gsk-test'));
+
+        // A free Groq model generates text through its OpenAI-compatible API.
+        $sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Fast \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"draft.\"}}]}\n\ndata: [DONE]\n\n";
+        Http::fake(['api.groq.com/openai/v1/chat/completions' => Http::response($sse, 200, ['Content-Type' => 'text/event-stream'])]);
+        $events = $this->events($this->spa()->postJson('/api/generations/text', ['prompt' => 'A quick line', 'model' => 'groq/llama-3.3-70b-versatile']));
+        $this->assertSame('done', end($events)['event']);
+        $this->assertSame('Fast draft.', Generation::latest('id')->first()->output_text);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/chat/completions') && $r['model'] === 'llama-3.3-70b-versatile');
+    }
+
     public function test_text_streams_in_and_is_kept_whether_it_works_or_not(): void
     {
         $fake = $this->fakeClaude();

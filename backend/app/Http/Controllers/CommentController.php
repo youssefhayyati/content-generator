@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\ActionLog;
 use App\Models\Comment;
 use App\Services\Community\Community;
+use App\Services\Flows\Flows;
 use App\Services\Studio\Autonomy;
+use App\Services\Studio\StormGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -26,7 +28,7 @@ class CommentController extends Controller
     }
 
     /** A comment lands in the inbox (the connector's job in production; by hand here). */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, StormGuard $guard, Flows $flows): JsonResponse
     {
         $data = $request->validate([
             'account_id' => ['required', Rule::exists('accounts', 'id')->where('user_id', $request->user()->id)],
@@ -35,13 +37,17 @@ class CommentController extends Controller
             'post_ref' => ['nullable', 'string', 'max:300'],
         ]);
 
-        $comment = $request->user()->comments()->create($data);
+        $comment = $request->user()->comments()->create([...$data, 'sentiment' => $guard->read($data['body'])]);
+        $comment->load('account');
+        // Storm Guard looks at every comment the moment it lands, then flows listening for comments run.
+        $guard->check($comment->account);
+        rescue(fn () => $flows->commentArrived($comment));
 
-        return response()->json($this->out($comment->load('account')), 201);
+        return response()->json($this->out($comment->fresh('account')), 201);
     }
 
     /** AI triage: reply (drafted), ignore, or send to a human. Mode B may send replies itself. */
-    public function triage(Request $request, Comment $comment, Community $community): JsonResponse
+    public function triage(Request $request, Comment $comment, Community $community, StormGuard $guard): JsonResponse
     {
         $this->own($request, $comment);
         abort_unless($comment->status === 'new', 409, 'This comment was already triaged.');
@@ -49,6 +55,11 @@ class CommentController extends Controller
 
         $result = $community->triage($comment);
         $account = $comment->account;
+        if ($result['sentiment'] !== null) {
+            // The AI read the mood better than the word lists did: Storm Guard takes its word.
+            $comment->update(['sentiment' => $result['sentiment']]);
+            $guard->check($account);
+        }
 
         if ($result['decision'] === 'reply' && $result['draft']) {
             $comment->update(['triage' => ['decision' => 'reply', 'reason' => $result['reason']], 'draft' => $result['draft'], 'status' => 'drafted']);
@@ -123,6 +134,7 @@ class CommentController extends Controller
             'draft' => $c->draft,
             'reply' => $c->reply,
             'sent_at' => $c->sent_at?->toIso8601ZuluString(),
+            'sentiment' => $c->sentiment,
             'account' => $c->relationLoaded('account') && $c->account ? ['id' => $c->account->id, 'platform' => $c->account->platform, 'handle' => $c->account->handle] : null,
             'created_at' => $c->created_at?->toIso8601ZuluString(),
         ];

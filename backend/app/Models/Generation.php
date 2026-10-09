@@ -8,14 +8,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Collection;
 
 /**
- * One request to a model for text, an image or a video, and what came back. A failed one can
+ * One request for text, an image, a video, a voiceover, music or a reel, and what came back. A failed one can
  * be retried, sent to another model, or rerun with an edited prompt: each makes a new
  * generation that points back at it (`retry_of`).
  */
 #[Fillable(['project_id', 'campaign_item_id', 'shot', 'kind', 'model', 'prompt', 'params', 'input_asset_ids', 'status', 'external_id', 'status_url', 'output_text', 'output_asset_ids', 'error', 'retry_of', 'recipe', 'recipe_step', 'parent_id', 'cost', 'started_at', 'finished_at'])]
 class Generation extends Model
 {
-    public const KINDS = ['text', 'image', 'video'];
+    public const KINDS = ['text', 'image', 'video', 'voice', 'music', 'reel'];
 
     /**
      * Get the attributes that should be cast.

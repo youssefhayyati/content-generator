@@ -158,6 +158,30 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
+     * @return HasMany<Flow, $this>
+     */
+    public function flows(): HasMany
+    {
+        return $this->hasMany(Flow::class);
+    }
+
+    /**
+     * @return HasMany<FlowRun, $this>
+     */
+    public function flowRuns(): HasMany
+    {
+        return $this->hasMany(FlowRun::class);
+    }
+
+    /**
+     * @return HasMany<InboxNote, $this>
+     */
+    public function inboxNotes(): HasMany
+    {
+        return $this->hasMany(InboxNote::class);
+    }
+
+    /**
      * Accounts created through Google or GitHub have no password until they set one.
      */
     public function hasPassword(): bool

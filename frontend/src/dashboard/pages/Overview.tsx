@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AlertTriangle, ArrowRight, CalendarDays, Check, Clock3, PenLine, Plus, Workflow } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarDays, Check, Clock3, CloudLightning, PenLine, Plus, Workflow } from 'lucide-react'
 import { PLATFORMS, PlatformIcon } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import type { Post } from '../../lib/api'
@@ -100,6 +100,49 @@ function Board({ overview }: { overview: OverviewData }) {
               Review <ArrowRight className="size-3.5" />
             </button>
           </div>
+        </Stagger>
+      )}
+
+      {overview.automation?.frozen.length > 0 && (
+        <Stagger>
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard/comments')}
+            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-fail/30 bg-fail/[0.07] px-4 py-3 text-left text-[13px] transition-colors hover:bg-fail/[0.1]"
+          >
+            <CloudLightning className="size-4 text-fail" strokeWidth={1.75} />
+            <p className="text-muted">
+              <span className="text-fg">Storm Guard froze {overview.automation.frozen.map((a) => `@${a.handle}`).join(', ')}.</span> Comments turned negative fast, so nothing
+              approved before the storm goes out until you give the all clear.
+            </p>
+            <span className="ml-auto flex items-center gap-1.5 font-medium text-fail">
+              Look <ArrowRight className="size-3.5" />
+            </span>
+          </button>
+        </Stagger>
+      )}
+
+      {overview.automation && (overview.automation.flows_on > 0 || overview.automation.waiting_on_you > 0) && (
+        <Stagger>
+          <button
+            type="button"
+            onClick={() => navigate(overview.automation.waiting_on_you ? '/dashboard/inbox' : '/dashboard/flows')}
+            className="group flex w-full flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border border-line bg-panel px-4 py-3 text-left text-[12.5px] transition-colors hover:border-line-2"
+          >
+            <Workflow className="size-4 text-accent-soft" strokeWidth={1.75} />
+            <span className="text-muted">
+              <span className="text-fg">{overview.automation.flows_on}</span> {overview.automation.flows_on === 1 ? 'flow' : 'flows'} working
+            </span>
+            <span className="text-muted">
+              <span className="text-fg">{overview.automation.runs_today}</span> {overview.automation.runs_today === 1 ? 'run' : 'runs'} today
+            </span>
+            {overview.automation.waiting_on_you > 0 && (
+              <span className="text-[#ff8fa3]">
+                {overview.automation.waiting_on_you} {overview.automation.waiting_on_you === 1 ? 'draft wants' : 'drafts want'} your yes
+              </span>
+            )}
+            <ArrowRight className="ml-auto size-3.5 text-dim transition-transform duration-300 group-hover:translate-x-0.5 group-hover:text-fg" />
+          </button>
         </Stagger>
       )}
 

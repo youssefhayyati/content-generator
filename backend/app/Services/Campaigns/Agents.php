@@ -71,8 +71,12 @@ class Agents
                 'medium',
             );
 
+            // Models sometimes answer with the natural name instead of the schema's.
+            $plan['items'] = $plan['items'] ?? $plan['posts'] ?? [];
+            $plan['pillars'] = collect($plan['pillars'] ?? [])->map(fn ($p) => is_array($p) ? $p : ['name' => (string) $p, 'why' => ''])->all();
+
             // Only accounts that are actually in the campaign.
-            $plan['items'] = collect($plan['items'] ?? [])->take(16)->map(fn (array $i) => [
+            $plan['items'] = collect($plan['items'])->take(16)->map(fn (array $i) => [
                 ...$i,
                 'account_ids' => array_values(array_intersect($i['account_ids'] ?? [], $accounts)) ?: $accounts,
                 'format' => in_array($i['format'] ?? null, CampaignItem::FORMATS, true) ? $i['format'] : 'image',

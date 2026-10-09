@@ -38,6 +38,11 @@ class Autonomy
             'detail' => 'A repost with recorded permission and attribution is scheduled without asking.',
             'mode_b' => 'Runs when a rule allows it.',
         ],
+        'flow.schedule_post' => [
+            'label' => 'Schedule posts from flows',
+            'detail' => 'A flow puts a post it wrote on the calendar.',
+            'mode_b' => 'Never on its own: a flow schedules only what a person approved in the run.',
+        ],
     ];
 
     /** Kinds a rule can govern (publishing keeps its own switch; gate 6B is always a person). */

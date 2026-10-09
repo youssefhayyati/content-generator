@@ -9,6 +9,7 @@ use App\Models\ActionLog;
 use App\Models\Post;
 use App\Models\User;
 use App\Services\Campaigns\Voice;
+use App\Services\Flows\Flows;
 use App\Services\PostQueue;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -161,6 +162,7 @@ class PostController extends Controller
 
         if ($post->status === PostStatus::Published && ($post->wasChanged('status') || $post->wasRecentlyCreated)) {
             app(Voice::class)->published($post);
+            rescue(fn () => app(Flows::class)->postPublished($post));
         }
 
         if ($post->wasChanged('status') || $post->wasRecentlyCreated) {

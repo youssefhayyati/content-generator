@@ -10,6 +10,7 @@ use App\Services\Ai\Media\HiggsfieldClient;
 use App\Services\Ai\OpenAiCompatibleGenerator;
 use App\Services\Ai\TextGenerator;
 use App\Services\Ai\UsageMeter;
+use App\Services\Sound\SoundClient;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -23,7 +24,7 @@ use Throwable;
  */
 class ModelRegistry
 {
-    public const PROVIDERS = ['anthropic', 'gateway', 'ollama', 'higgsfield'];
+    public const PROVIDERS = ['anthropic', 'gateway', 'groq', 'openrouter', 'ollama_cloud', 'ollama', 'higgsfield', 'sound'];
 
     public function __construct(private readonly TextGenerator $claude, private readonly UsageMeter $usage) {}
 
@@ -32,7 +33,7 @@ class ModelRegistry
      */
     public function all(?string $kind = null): array
     {
-        $models = [...$this->anthropic(), ...$this->gateway(), ...$this->ollama(), ...$this->higgsfield()];
+        $models = [...$this->anthropic(), ...$this->openAi('gateway'), ...$this->openAi('groq'), ...$this->openAi('openrouter'), ...$this->openAi('ollama_cloud'), ...$this->ollama(), ...$this->higgsfield(), ...$this->sound()];
         $scores = ModelEval::query()
             ->selectRaw('model, avg(score) as score')
             ->whereIn('id', ModelEval::query()->selectRaw('max(id)')->groupBy('model', 'task'))
@@ -82,8 +83,8 @@ class ModelRegistry
 
         return [match ($model['provider']) {
             'anthropic' => $this->claude,
-            'gateway' => new OpenAiCompatibleGenerator('gateway', rtrim(config('ai.providers.gateway.url'), '/'), config('ai.providers.gateway.key'), $this->usage),
             'ollama' => new OpenAiCompatibleGenerator('ollama', rtrim(config('ai.providers.ollama.url'), '/').'/v1', null, $this->usage),
+            default => new OpenAiCompatibleGenerator($model['provider'], rtrim(config("ai.providers.{$model['provider']}.url"), '/'), config("ai.providers.{$model['provider']}.key"), $this->usage),
         }, $model['model']];
     }
 
@@ -96,9 +97,10 @@ class ModelRegistry
         try {
             $message = match ($provider) {
                 'anthropic' => $this->testAnthropic(),
-                'gateway' => $this->testOpenAi(rtrim((string) config('ai.providers.gateway.url'), '/').'/models', config('ai.providers.gateway.key')),
                 'ollama' => $this->testOllama(),
                 'higgsfield' => app(HiggsfieldClient::class)->test(),
+                'sound' => $this->testSound(),
+                default => $this->testOpenAi(rtrim((string) config("ai.providers.{$provider}.url"), '/').'/models', config("ai.providers.{$provider}.key"), $provider),
             };
             $ok = true;
         } catch (Throwable $e) {
@@ -132,8 +134,12 @@ class ModelRegistry
                 'setup' => [
                     'anthropic' => 'Set ANTHROPIC_API_KEY.',
                     'gateway' => 'Set AI_GATEWAY_URL (an OpenAI-compatible /v1 base) and AI_GATEWAY_KEY.',
+                    'groq' => 'Set GROQ_API_KEY (free at console.groq.com/keys).',
+                    'openrouter' => 'Set OPENROUTER_API_KEY (free at openrouter.ai/keys).',
+                    'ollama_cloud' => 'Set OLLAMA_CLOUD_API_KEY (free at ollama.com/settings/keys).',
                     'ollama' => 'Set OLLAMA_URL to an Ollama server, e.g. http://ollama:11434.',
                     'higgsfield' => 'Set HIGGSFIELD_KEY_ID and HIGGSFIELD_KEY_SECRET, and HIGGSFIELD_PLAN to the models your plan includes.',
+                    'sound' => 'Run the sound service (docker compose up -d sound) and set SOUND_URL, e.g. http://sound:8000.',
                 ][$p],
                 'test' => $test ? ['ok' => $test->ok, 'message' => $test->message, 'latency_ms' => $test->latency_ms, 'at' => $test->created_at?->toIso8601ZuluString()] : null,
             ];
@@ -145,8 +151,10 @@ class ModelRegistry
         return match ($provider) {
             'anthropic' => $this->claude->enabled(),
             'gateway' => filled(config('ai.providers.gateway.url')),
+            'groq', 'openrouter', 'ollama_cloud' => filled(config("ai.providers.{$provider}.key")),
             'ollama' => filled(config('ai.providers.ollama.url')),
             'higgsfield' => filled(config('ai.providers.higgsfield.key_id')) && filled(config('ai.providers.higgsfield.key_secret')),
+            'sound' => app(SoundClient::class)->configured(),
             default => false,
         };
     }
@@ -178,28 +186,53 @@ class ModelRegistry
             ->values()->all();
     }
 
-    private function gateway(): array
+    /**
+     * Text models discovered from an OpenAI-compatible GET {url}/models. `suffix` keeps only
+     * the ids that end with it (OpenRouter's ':free' list); `local_models` marks the
+     * effectively-free ones, and can pin the list exactly instead of discovering.
+     */
+    private function openAi(string $provider): array
     {
-        if (! $this->configured('gateway')) {
+        if (! $this->configured($provider)) {
             return [];
         }
-        $local = config('ai.providers.gateway.local_models', []);
-        $text = Cache::remember('models.gateway', 300, function () {
-            try {
-                $r = Http::timeout(4)->withToken((string) config('ai.providers.gateway.key'))->acceptJson()
-                    ->get(rtrim(config('ai.providers.gateway.url'), '/').'/models');
-
-                return $r->successful() ? collect($r->json('data', []))->pluck('id')->filter()->values()->all() : [];
-            } catch (Throwable) {
-                return [];
+        $local = config("ai.providers.{$provider}.local_models", []);
+        $suffix = (string) config("ai.providers.{$provider}.suffix", '');
+        // A slow or unreachable provider must not empty the picker: cache only real lists, and
+        // serve the last good one while the provider is having a moment.
+        $cacheKey = "models.{$provider}";
+        try {
+            $r = Http::timeout(8)->when(filled(config("ai.providers.{$provider}.key")), fn ($h) => $h->withToken((string) config("ai.providers.{$provider}.key")))
+                ->acceptJson()->get(rtrim(config("ai.providers.{$provider}.url"), '/').'/models');
+            $found = $r->successful() ? collect($r->json('data', []))->pluck('id')->filter()->values()->all() : [];
+            if ($found) {
+                Cache::put($cacheKey, $found, 300);
+                $text = $found;
+            } else {
+                $text = Cache::get($cacheKey, []);
             }
-        });
-        $images = config('ai.providers.gateway.image_models', []);
+        } catch (Throwable) {
+            $text = Cache::get($cacheKey, []);
+        }
+        if ($suffix !== '') {
+            $text = array_values(array_filter($text, fn ($id) => str_ends_with($id, $suffix)));
+        }
+        if ($local && $provider === 'openrouter') {
+            $text = $text ? array_values(array_intersect($text, $local)) : $local;
+        }
+        // Effectively free: pinned in local_models, or kept by a ':free'-style suffix filter.
+        $free = fn ($id) => in_array($id, $local, true) || ($suffix !== '' && str_ends_with($id, $suffix));
+        $images = config("ai.providers.{$provider}.image_models", []);
+        $reach = config("ai.providers.{$provider}.reach");
+        // Speech models come back in the same list: Whisper listens, and voices aren't writers.
+        $listen = array_values(array_filter($text, fn ($id) => str_contains(strtolower($id), 'whisper')));
+        $text = array_values(array_filter($text, fn ($id) => ! preg_match('/whisper|tts|playai|orpheus|guard|distil-/i', $id)));
 
         return [
             ...collect($text)->reject(fn ($id) => in_array($id, $images, true))
-                ->map(fn ($id) => $this->entry('gateway', $id, $id, 'text', in_array($id, $local, true) ? 'Local: effectively free, for prototyping' : 'Gateway model', true, null, in_array($id, $local, true)))->all(),
-            ...collect($images)->map(fn ($id) => $this->entry('gateway', $id, $id, 'image', 'Images through the gateway', true, null))->all(),
+                ->map(fn ($id) => $this->entry($provider, $id, $id, 'text', $free($id) ? 'Free tier: effectively free, for prototyping' : "{$reach} model", true, null, $free($id)))->all(),
+            ...collect($listen)->map(fn ($id) => $this->entry($provider, $id, $id, 'listen', "Transcripts through {$reach}", true, null))->all(),
+            ...collect($images)->map(fn ($id) => $this->entry($provider, $id, $id, 'image', "Images through {$reach}", true, null))->all(),
         ];
     }
 
@@ -208,15 +241,18 @@ class ModelRegistry
         if (! $this->configured('ollama')) {
             return [];
         }
-        $tags = Cache::remember('models.ollama', 300, function () {
-            try {
-                $r = Http::timeout(4)->acceptJson()->get(rtrim(config('ai.providers.ollama.url'), '/').'/api/tags');
-
-                return $r->successful() ? collect($r->json('models', []))->pluck('name')->filter()->values()->all() : [];
-            } catch (Throwable) {
-                return [];
+        try {
+            $r = Http::timeout(8)->acceptJson()->get(rtrim(config('ai.providers.ollama.url'), '/').'/api/tags');
+            $found = $r->successful() ? collect($r->json('models', []))->pluck('name')->filter()->values()->all() : [];
+            if ($found) {
+                Cache::put('models.ollama', $found, 300);
+                $tags = $found;
+            } else {
+                $tags = Cache::get('models.ollama', []);
             }
-        });
+        } catch (Throwable) {
+            $tags = Cache::get('models.ollama', []);
+        }
 
         return collect($tags)->map(fn ($id) => $this->entry('ollama', $id, $id, 'text', 'Installed locally: free, private, for prototyping', true, null))->values()->all();
     }
@@ -241,6 +277,41 @@ class ModelRegistry
         })->values()->all();
     }
 
+    /**
+     * FlowAI Sound: voices, the composer and the listener, on this server. Available whenever the
+     * service answers.
+     */
+    private function sound(): array
+    {
+        $client = app(SoundClient::class);
+        if (! $client->configured()) {
+            return [];
+        }
+        $up = $client->up();
+        $reason = 'FlowAI Sound isn’t answering. Start it with docker compose up -d sound.';
+
+        return [
+            $this->entry('sound', 'kokoro', 'Kokoro voices', 'voice', 'Natural voiceovers in seven languages, made on this server', $up, $reason),
+            $this->entry('sound', 'composer', 'FlowAI Composer', 'music', 'Original, licence-free music for every post', $up, $reason),
+            $this->entry('sound', 'whisper', 'Whisper', 'listen', 'Transcripts, dictation and word timing for captions', $up, $reason),
+        ];
+    }
+
+    private function testSound(): string
+    {
+        $client = app(SoundClient::class);
+        if (! $client->configured()) {
+            throw new GenerationFailed('No SOUND_URL is set.');
+        }
+        Cache::forget('sound.up');
+        $r = Http::timeout(6)->acceptJson()->get($client->url().'/health');
+        if (! $r->successful()) {
+            throw new GenerationFailed("FlowAI Sound answered {$r->status()}.");
+        }
+
+        return 'Connected. '.$r->json('voices').' voices, '.count($r->json('moods', [])).' music moods, Whisper '.$r->json('whisper').'.';
+    }
+
     private function testAnthropic(): string
     {
         if (! $this->claude->enabled()) {
@@ -252,17 +323,18 @@ class ModelRegistry
         return "Connected. The key can see {$n}+ models.";
     }
 
-    private function testOpenAi(string $url, ?string $key): string
+    private function testOpenAi(string $url, ?string $key, string $provider = 'gateway'): string
     {
-        if (! filled(config('ai.providers.gateway.url'))) {
-            throw new GenerationFailed('No gateway URL is set.');
+        $name = config("ai.providers.{$provider}.reach", 'The gateway');
+        if (! filled(config("ai.providers.{$provider}.url"))) {
+            throw new GenerationFailed("No {$name} URL is set.");
         }
-        $r = Http::timeout(6)->withToken((string) $key)->acceptJson()->get($url);
+        $r = Http::timeout(6)->when(filled($key), fn ($h) => $h->withToken((string) $key))->acceptJson()->get($url);
         if ($r->status() === 401 || $r->status() === 403) {
-            throw new GenerationFailed('The gateway rejected the key.');
+            throw new GenerationFailed("{$name} rejected the key.");
         }
         if (! $r->successful()) {
-            throw new GenerationFailed("The gateway answered {$r->status()}.");
+            throw new GenerationFailed("{$name} answered {$r->status()}.");
         }
 
         return 'Connected. '.count($r->json('data', [])).' models available.';

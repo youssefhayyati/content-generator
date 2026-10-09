@@ -82,7 +82,7 @@ export function useCampaign(id: number, initial: Campaign) {
 export function Stepper({ stage, tab, onTab }: { stage: CampaignStage; tab: Tab; onTab: (t: Tab) => void }) {
   const at = stageStep(stage)
   return (
-    <nav aria-label="Campaign steps" className="no-scrollbar flex gap-1 overflow-x-auto rounded-xl border border-line bg-panel p-1" data-lenis-prevent>
+    <nav aria-label="Campaign steps" className="no-scrollbar flex gap-1 overflow-x-auto rounded-xl border border-line bg-panel p-1">
       {STEPS.map((s, i) => {
         const done = i < at || (i === at && stage === 'scheduled')
         const current = i === at && stage !== 'scheduled'

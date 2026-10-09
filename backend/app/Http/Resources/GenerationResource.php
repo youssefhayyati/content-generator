@@ -26,7 +26,7 @@ class GenerationResource extends JsonResource
             'id' => $this->id,
             'kind' => $this->kind,
             'model' => $this->model,
-            'model_label' => $labels[$this->model] ?? $this->model,
+            'model_label' => $labels[$this->model] ?? ($this->model === 'studio/reel' ? 'Reel renderer' : $this->model),
             'status' => $this->status,
             'prompt' => $this->prompt,
             'params' => (object) ($this->params ?? []),

@@ -19,7 +19,7 @@ return [
     */
 
     // What the composer and the generators start on.
-    'default_text' => 'anthropic/claude-opus-5',
+    'default_text' => env('AI_DEFAULT_TEXT', 'anthropic/claude-opus-5'),
 
     'providers' => [
 
@@ -44,7 +44,46 @@ return [
             'local_models' => array_values(array_filter(explode(',', (string) env('AI_GATEWAY_LOCAL_MODELS', '')))),
         ],
 
+        // Groq: free key at console.groq.com/keys. Fast Llama and Gemma, all free-tier.
+        'groq' => [
+            'reach' => 'Groq',
+            'url' => env('GROQ_URL', 'https://api.groq.com/openai/v1'),
+            'key' => env('GROQ_API_KEY'),
+            // Discovered models are kept only when their id ends with this ('' keeps all).
+            'suffix' => '',
+            // Effectively free: the free tier covers prototyping and then some.
+            'local_models' => array_values(array_filter(explode(',', (string) env('GROQ_FREE_MODELS', 'llama-3.3-70b-versatile,llama-3.1-8b-instant')))),
+        ],
+
+        // OpenRouter: free key at openrouter.ai/keys. Hundreds of models; the picker keeps
+        // the ':free' ones only, or exactly OPENROUTER_MODELS when it's set.
+        'openrouter' => [
+            'reach' => 'OpenRouter',
+            'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
+            'key' => env('OPENROUTER_API_KEY'),
+            'suffix' => env('OPENROUTER_SUFFIX', ':free'),
+            'local_models' => array_values(array_filter(explode(',', (string) env('OPENROUTER_MODELS', '')))),
+        ],
+
         // Local models on Ollama, used through its OpenAI-compatible API.
+        // Ollama Cloud (ollama.com): hosted frontier-size models, free-tier key. OpenAI-compatible.
+        'ollama_cloud' => [
+            'reach' => 'Ollama Cloud',
+            'url' => env('OLLAMA_CLOUD_URL', 'https://ollama.com/v1'),
+            'key' => env('OLLAMA_CLOUD_API_KEY'),
+            'suffix' => '',
+            // Effectively free during the cloud preview, big enough for real writing.
+            'local_models' => array_values(array_filter(explode(',', (string) env('OLLAMA_CLOUD_MODELS', 'gpt-oss:120b,gpt-oss:20b')))),
+        ],
+
+        // FlowAI Sound (sound/): voices (Kokoro), listening (Whisper) and the composer, on this
+        // server. docker compose runs it; nothing to sign up for.
+        'sound' => [
+            'reach' => 'FlowAI Sound',
+            'local' => true,
+            'url' => env('SOUND_URL', 'http://sound:8000'),
+        ],
+
         'ollama' => [
             'reach' => 'Ollama',
             'url' => env('OLLAMA_URL'),
@@ -88,7 +127,7 @@ return [
     */
 
     'agents' => [
-        'model' => 'anthropic/claude-opus-5-5',
+        'model' => env('AI_AGENTS_MODEL', 'anthropic/claude-opus-5-5'),
         'image_model' => 'higgsfield/ideogram-4',
         'video_model' => 'higgsfield/wan-2-7-i2v',
     ],

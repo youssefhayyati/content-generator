@@ -66,25 +66,86 @@ class OpenAiCompatibleGenerator implements TextGenerator
 
     public function json(string $model, string $system, string|array $content, array $schema, ?string $effort = null): array
     {
-        $response = $this->send([
-            'model' => $model,
-            'messages' => [
-                ['role' => 'system', 'content' => $system."\n\nReply with one JSON object only."],
-                ['role' => 'user', 'content' => is_string($content) ? $content : $this->blocks($content)],
-            ],
-            'response_format' => ['type' => 'json_schema', 'json_schema' => ['name' => 'reply', 'schema' => $schema, 'strict' => true]],
-        ]);
+        $messages = [
+            ['role' => 'system', 'content' => $system."\n\nReply with one JSON object only."],
+            // Some providers ignore response_format entirely; the shape goes in the prompt too.
+            ['role' => 'user', 'content' => (is_string($content) ? $content : $this->blocks($content))."\n\nReply with one JSON object of exactly this shape: ".$this->shapeHint($schema)],
+        ];
 
-        $this->usage?->record($this->provider, $model, (int) $response->json('usage.prompt_tokens', 0), (int) $response->json('usage.completion_tokens', 0));
-        $text = (string) $response->json('choices.0.message.content', '');
-        // Some local models wrap JSON in a code fence despite being asked not to.
-        $data = json_decode(preg_replace('/^```(?:json)?\s*|\s*```$/', '', trim($text)), true);
+        // Structured output is a promise some providers keep loosely: check the required keys
+        // are actually there, and give the model one chance to correct itself before failing.
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $response = $this->send([
+                'model' => $model,
+                'messages' => $messages,
+                'response_format' => ['type' => 'json_schema', 'json_schema' => ['name' => 'reply', 'schema' => $schema, 'strict' => true]],
+            ]);
+            $this->usage?->record($this->provider, $model, (int) $response->json('usage.prompt_tokens', 0), (int) $response->json('usage.completion_tokens', 0));
 
-        if (! is_array($data)) {
-            throw new GenerationFailed('The model’s answer came back garbled. Try again, or switch model.');
+            $text = (string) $response->json('choices.0.message.content', '');
+            // Some local models wrap JSON in a code fence despite being asked not to.
+            $data = json_decode(preg_replace('/^```(?:json)?\s*|\s*```$/', '', trim($text)), true);
+            $problem = is_array($data) ? $this->shapeProblem($data, $schema) : 'That was not a JSON object';
+            if (is_array($data) && ! $problem) {
+                return $data;
+            }
+
+            $messages[] = ['role' => 'assistant', 'content' => $text];
+            $messages[] = ['role' => 'user', 'content' => $problem.'. Reply again with one JSON object exactly in the asked shape, nothing else.'];
         }
 
-        return $data;
+        throw new GenerationFailed('The model’s answer didn’t match what was asked for. Try again, or switch model.');
+    }
+
+    /**
+     * A one-line, human-readable description of the schema, for prompts: `{"big_idea": string,
+     * "pillars": [{"name": string, "why": string}], …}`. Enough for a model to aim at.
+     */
+    private function shapeHint(array $schema): string
+    {
+        $describe = function (array $schema) use (&$describe): string {
+            if (($schema['type'] ?? 'object') === 'array') {
+                return '['.$describe($schema['items'] ?? ['type' => 'string']).']';
+            }
+            if (($schema['type'] ?? 'object') !== 'object') {
+                $type = $schema['type'] ?? 'string';
+                $enum = isset($schema['enum']) ? ' ('.implode(' | ', $schema['enum']).')' : '';
+
+                return $type.$enum;
+            }
+
+            return '{'.implode(', ', array_map(fn ($k, $v) => "\"{$k}\": ".$describe($v), array_keys($schema['properties'] ?? []), array_values($schema['properties'] ?? []))).'}';
+        };
+
+        return $describe($schema);
+    }
+
+    /**
+     * What's wrong with the answer's shape, in one sentence, or null when it fits: the
+     * required top-level keys, and the required keys of objects inside arrays of objects.
+     */
+    private function shapeProblem(mixed $data, array $schema): ?string
+    {
+        if (! is_array($data) || array_is_list($data) && ($schema['type'] ?? 'object') === 'object') {
+            return 'That was not a JSON object';
+        }
+        $missing = array_diff($schema['required'] ?? [], array_keys($data));
+        if ($missing) {
+            return 'It missed the required keys: '.implode(', ', $missing);
+        }
+        foreach (($schema['properties'] ?? []) as $key => $prop) {
+            if (($prop['type'] ?? null) !== 'array' || ! isset($data[$key]) || ! is_array($data[$key])) {
+                continue;
+            }
+            $itemRequired = $prop['items']['required'] ?? [];
+            foreach ($data[$key] as $n => $entry) {
+                if (! is_array($entry) || ($missing = array_diff($itemRequired, array_keys($entry)))) {
+                    return "In \"{$key}\", entry ".($n + 1).' should be an object with: '.implode(', ', $itemRequired ?: ['the asked fields']);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

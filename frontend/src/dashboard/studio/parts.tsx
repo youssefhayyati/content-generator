@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronDown, Clapperboard, Copy, Cpu, Image as ImageIcon, LoaderCircle, PenLine, Repeat, RotateCcw, Shuffle, Type } from 'lucide-react'
-import { api, type Generation, type ModelInfo } from '../../lib/api'
+import { Check, ChevronDown, Clapperboard, Copy, Cpu, Ear, Film, Image as ImageIcon, LoaderCircle, Mic, Music2, PenLine, Repeat, RotateCcw, Shuffle, Type } from 'lucide-react'
+import { api, type Asset, type Generation, type ModelInfo } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useApi } from '../data'
 import { MediaThumb } from '../media/Media'
+import { Player } from '../sound/Player'
 import { Btn, inputClass } from '../ui'
 
-export const KIND_ICON = { text: Type, image: ImageIcon, video: Clapperboard }
+export const KIND_ICON = { text: Type, image: ImageIcon, video: Clapperboard, voice: Mic, music: Music2, reel: Film, listen: Ear }
 
 /** "Local · Ollama" or "Cloud · Claude API". */
 export const reachLabel = (m: Pick<ModelInfo, 'local' | 'reach'>) => `${m.local ? 'Local' : 'Cloud'} · ${m.reach}`
@@ -53,6 +55,19 @@ export function ModelPicker({
     list.reduce<Record<string, ModelInfo[]>>((acc, m) => ((acc[reachLabel(m)] ??= []).push(m), acc), {}),
   )
 
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open || !ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    setPos(align === 'right' ? { top: r.bottom + 6, right: window.innerWidth - r.right } : { top: r.bottom + 6, left: r.left })
+  }, [open, align])
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('scroll', close, true)
+    return () => window.removeEventListener('scroll', close, true)
+  }, [open])
+
   return (
     <div ref={ref} className={cn('relative', className)}>
       <button
@@ -67,18 +82,19 @@ export function ModelPicker({
         {current && <span className="hidden shrink-0 rounded border border-line-2 px-1.5 py-px font-mono text-[9.5px] text-dim sm:inline">{reachLabel(current)}</span>}
         <ChevronDown className={cn('size-3.5 shrink-0 text-dim transition-transform', open && 'rotate-180')} />
       </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            role="listbox"
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.2, ease }}
-            data-lenis-prevent
+      {createPortal(
+        <AnimatePresence>
+          {open && pos && (
+            <motion.div
+              role="listbox"
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2, ease }}
+              data-lenis-prevent
+              style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right, zIndex: 130 }}
             className={cn(
-              'absolute top-full z-50 mt-1.5 max-h-[360px] w-[min(360px,90vw)] overflow-y-auto rounded-lg border border-line-2 bg-panel-3 p-1 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
-              align === 'right' ? 'right-0' : 'left-0',
+              'max-h-[360px] w-[min(360px,90vw)] overflow-y-auto rounded-lg border border-line-2 bg-panel-3 p-1 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
             )}
           >
             {groups.map(([group, items]) => (
@@ -112,9 +128,11 @@ export function ModelPicker({
               </div>
             ))}
             {!groups.length && <p className="px-3 py-6 text-center text-[12px] text-dim">Nothing set up for this yet. See Models.</p>}
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   )
 }
@@ -218,13 +236,18 @@ export function GenerationCard({
       <p className={cn('px-3.5 pt-1.5 text-[12.5px] leading-snug text-dim', compact && 'line-clamp-2')}>{g.prompt}</p>
 
       <div className="p-3.5 pt-3">
-        {working && g.kind !== 'text' && <div className="skeleton aspect-[4/3] w-full rounded-lg" />}
+        {working && g.kind !== 'text' && <div className={cn('skeleton rounded-lg', g.kind === 'voice' || g.kind === 'music' ? 'h-12 w-full' : g.kind === 'reel' ? 'mx-auto h-[300px] w-[169px]' : 'aspect-[4/3] w-full')} />}
         {g.kind === 'text' && g.output_text && <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-fg">{g.output_text}</p>}
         {g.outputs.length > 0 && (
           <div className={cn('grid gap-2', g.outputs.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
             {g.outputs.map((a) =>
-              a.kind === 'video' ? (
-                <video key={a.id} src={a.url} poster={a.poster_url ?? undefined} controls playsInline className="max-h-[440px] w-full rounded-lg bg-black object-contain" />
+              a.kind === 'audio' ? (
+                <div key={a.id}>
+                  <Player asset={a} compact={compact} />
+                  <SoundFacts asset={a} />
+                </div>
+              ) : a.kind === 'video' ? (
+                <video key={a.id} src={a.url} poster={a.poster_url ?? undefined} controls playsInline className={cn('w-full rounded-lg bg-black object-contain', g.kind === 'reel' ? 'mx-auto max-h-[520px] max-w-[300px]' : 'max-h-[440px]')} />
               ) : (
                 <img key={a.id} src={a.url} alt={g.prompt} draggable={false} className="max-h-[440px] w-full rounded-lg bg-white/[0.03] object-contain" />
               ),
@@ -248,9 +271,11 @@ export function GenerationCard({
                 <Btn size="sm" icon={RotateCcw} onClick={() => retry({})} loading={busy}>
                   Retry
                 </Btn>
-                <Btn size="sm" icon={Shuffle} onClick={() => setMode('model')}>
-                  Switch model
-                </Btn>
+                {g.kind !== 'reel' && (
+                  <Btn size="sm" icon={Shuffle} onClick={() => setMode('model')}>
+                    Switch model
+                  </Btn>
+                )}
                 <Btn size="sm" icon={PenLine} onClick={() => setMode('prompt')}>
                   Edit prompt
                 </Btn>
@@ -258,7 +283,7 @@ export function GenerationCard({
             )}
             {mode === 'model' && (
               <div className="mt-2.5 flex gap-2">
-                <ModelPicker models={models} kind={g.kind} value={model} onChange={setModel} className="flex-1" />
+                <ModelPicker models={models} kind={g.kind === 'reel' ? undefined : g.kind} value={model} onChange={setModel} className="flex-1" />
                 <Btn size="md" variant="primary" onClick={() => retry({ model })} loading={busy} disabled={model === g.model}>
                   Run
                 </Btn>
@@ -294,4 +319,19 @@ export function GenerationCard({
       </div>
     </motion.article>
   )
+}
+
+/** What a sound is, in a line: whose voice and what language, or the track's mood, key and tempo. */
+export function SoundFacts({ asset }: { asset: Asset }) {
+  const s = asset.sound
+  if (!s) return null
+  const facts =
+    s.type === 'voice'
+      ? [s.voice_name, s.lang?.toUpperCase(), s.timed ? 'every word timed' : null]
+      : s.type === 'music'
+        ? [s.label, s.key, s.bpm ? `${Math.round(s.bpm)} bpm` : null, 'original, licence-free']
+        : [s.transcript === 'done' ? 'transcribed' : null]
+  const shown = facts.filter(Boolean)
+  if (!shown.length) return null
+  return <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-dim">{shown.join(' · ')}</p>
 }

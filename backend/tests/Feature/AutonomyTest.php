@@ -52,11 +52,11 @@ class AutonomyTest extends TestCase
         $out = $this->spa()->actingAs($this->user)->getJson("/api/accounts/{$this->account->id}/autonomy")->assertOk()->json();
 
         $this->assertSame('approve_all', $out['mode']);
-        $this->assertCount(4, $out['matrix']);
+        $this->assertCount(5, $out['matrix']);
         foreach ($out['matrix'] as $row) {
             $this->assertSame('asks', $row['now']);
         }
-        $this->assertSame(['publish.approved_post', 'profile.apply_ai_change', 'comment.send_reply', 'repost.schedule'], array_column($out['matrix'], 'action'));
+        $this->assertSame(['publish.approved_post', 'profile.apply_ai_change', 'comment.send_reply', 'repost.schedule', 'flow.schedule_post'], array_column($out['matrix'], 'action'));
 
         // Not another studio's account.
         $this->spa()->actingAs(User::factory()->create())->getJson("/api/accounts/{$this->account->id}/autonomy")->assertForbidden();

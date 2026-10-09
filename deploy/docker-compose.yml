@@ -69,6 +69,14 @@ services:
       - app
     restart: unless-stopped
 
+  # FlowAI Sound: voices, listening and the composer. Private, like PHP-FPM: only the app talks
+  # to it. Models load on first use and unload when idle; the cap keeps a busy moment polite.
+  sound:
+    build:
+      context: ../sound
+    mem_limit: 1000m
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:

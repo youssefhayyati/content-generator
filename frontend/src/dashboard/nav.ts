@@ -1,4 +1,5 @@
 import {
+  CalendarClock,
   CalendarDays,
   Cpu,
   ChartColumn,
@@ -8,6 +9,7 @@ import {
   Megaphone,
   MessageSquareText,
   PenLine,
+  RadioTower,
   Repeat2,
   SearchCheck,
   Send,
@@ -39,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/dashboard', label: 'Overview', icon: LayoutGrid },
       { path: '/dashboard/inbox', label: 'Inbox', icon: Inbox, count: (o) => o.inbox, urgent: true },
+      { path: '/dashboard/live', label: 'Live', icon: RadioTower },
     ],
   },
   {
@@ -51,6 +54,10 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Automate',
+    items: [{ path: '/dashboard/flows', label: 'Flows', icon: Workflow, count: (o) => o.automation?.flows_on ?? 0 }],
+  },
+  {
     label: 'Engage',
     items: [{ path: '/dashboard/comments', label: 'Comments', icon: MessageSquareText }],
   },
@@ -59,7 +66,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays, count: (o) => o.counts.scheduled },
       { path: '/dashboard/library', label: 'Library', icon: FolderOpen, count: (o) => o.counts.total },
-      { path: '/dashboard/automations', label: 'Automations', icon: Workflow },
+      { path: '/dashboard/automations', label: 'Automations', icon: CalendarClock },
     ],
   },
   {

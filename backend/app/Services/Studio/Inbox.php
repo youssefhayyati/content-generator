@@ -3,8 +3,11 @@
 namespace App\Services\Studio;
 
 use App\Enums\PostStatus;
+use App\Models\Account;
 use App\Models\Campaign;
 use App\Models\Comment;
+use App\Models\FlowRun;
+use App\Models\InboxNote;
 use App\Models\ItemVariant;
 use App\Models\Post;
 use App\Models\ProfileChange;
@@ -26,12 +29,16 @@ class Inbox
     public function items(User $user): Collection
     {
         return collect()
+            ->concat($this->storms($user))
+            ->concat($this->flowApprovals($user))
+            ->concat($this->notes($user))
             ->concat($this->gates($user))
             ->concat($this->profileChanges($user))
             ->concat($this->posts($user))
             ->concat($this->comments($user))
             ->concat($this->reposts($user))
-            ->sortBy(fn (array $item) => $item['at'] ?? '9999')
+            // A frozen account comes before everything else; then oldest first.
+            ->sortBy(fn (array $item) => [$item['kind'] === 'storm' ? 0 : 1, $item['at'] ?? '9999'])
             ->values();
     }
 
@@ -41,7 +48,75 @@ class Inbox
             + $user->campaigns()->whereIn('stage', ['plan_review', 'content_review'])->count()
             + ProfileChange::whereIn('account_id', $user->accounts()->select('id'))->where('status', 'pending')->count()
             + $user->comments()->whereIn('status', ['human', 'drafted'])->count()
-            + $user->reposts()->where('status', 'captured')->where('permission', 'pending')->count();
+            + $user->reposts()->where('status', 'captured')->where('permission', 'pending')->count()
+            + $user->flowRuns()->where('status', 'approval')->count()
+            + $user->inboxNotes()->whereNull('dismissed_at')->count()
+            + $user->accounts()->whereNotNull('storm_at')->count();
+    }
+
+    /**
+     * Accounts Storm Guard froze: nothing approved before the storm publishes until a person
+     * gives the all clear. Always first in the list.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function storms(User $user): Collection
+    {
+        return $user->accounts()->whereNotNull('storm_at')->withCount(['posts as held' => fn ($q) => $q->where('status', PostStatus::Scheduled)])->get()
+            ->map(fn (Account $a) => [
+                'kind' => 'storm',
+                'key' => "storm-{$a->id}",
+                'account_id' => $a->id,
+                'title' => "Storm Guard froze {$a->label()}",
+                'detail' => trim(($a->storm_reason ?? '').' '.($a->held ? "{$a->held} scheduled ".Str::plural('post', $a->held).' held.' : 'Nothing scheduled was waiting.')),
+                'at' => $a->storm_at?->toIso8601ZuluString(),
+                'link' => '/dashboard/comments',
+                'tone' => 'fail',
+            ]);
+    }
+
+    /**
+     * Flows holding at an "Ask me first": the draft, ready to approve (or edit, or reject).
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function flowApprovals(User $user): Collection
+    {
+        return $user->flowRuns()->with('flow:id,name')->where('status', 'approval')->oldest('updated_at')->limit(20)->get()
+            ->map(fn (FlowRun $r) => [
+                'kind' => 'flow_approval',
+                'key' => "flow-run-{$r->id}",
+                'run_id' => $r->id,
+                'title' => "{$r->flow->name}: ".($r->approval()['ask'] ?? 'Go ahead?'),
+                'detail' => filled($r->approval()['draft'] ?? null) ? '“'.Str::limit((string) $r->approval()['draft'], 140).'”' : (string) $r->cause,
+                'flow' => $r->flow->name,
+                'ask' => $r->approval()['ask'] ?? 'Go ahead?',
+                'draft' => $r->approval()['draft'] ?? null,
+                'media' => $r->approval()['media'] ?? null,
+                'account' => $r->approval()['account'] ?? null,
+                'platform' => $r->approval()['platform'] ?? null,
+                'at' => $r->updated_at?->toIso8601ZuluString(),
+                'link' => "/dashboard/flows?id={$r->flow_id}&run={$r->id}",
+                'tone' => 'accent',
+            ]);
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function notes(User $user): Collection
+    {
+        return $user->inboxNotes()->whereNull('dismissed_at')->latest('id')->limit(20)->get()
+            ->map(fn (InboxNote $n) => [
+                'kind' => 'note',
+                'key' => "note-{$n->id}",
+                'note_id' => $n->id,
+                'title' => $n->title,
+                'detail' => (string) $n->detail,
+                'at' => $n->created_at?->toIso8601ZuluString(),
+                'link' => $n->link ?? '/dashboard/flows',
+                'tone' => $n->tone,
+            ]);
     }
 
     /**

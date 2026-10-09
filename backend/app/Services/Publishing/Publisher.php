@@ -11,6 +11,7 @@ use App\Models\Device;
 use App\Models\Post;
 use App\Models\PublishingRun;
 use App\Models\User;
+use App\Services\Flows\Flows;
 use App\Services\Media\AssetStore;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -78,6 +79,11 @@ class Publisher
         }
         if ($post->user->publishingPaused() || $device->isPaused()) {
             return null; // the stop button: nothing starts while it's pressed
+        }
+        // Storm Guard: a frozen account holds everything approved before the storm. What a
+        // person approves during it (a holding statement) was approved knowing, so it goes.
+        if ($account->isHeld() && $post->approved_at->lessThan($account->storm_at)) {
+            return null;
         }
 
         $run = $post->runs()->create([
@@ -294,6 +300,8 @@ class Publisher
         $post->update(['status' => PostStatus::Published, 'published_at' => now(), 'post_url' => $postUrl, 'error' => null]);
         $this->release($run);
         ActionLog::record($run->user, 'agent:publisher', 'publish.confirmed', $post, "Published “{$run->goal}”".($postUrl ? ": {$postUrl}" : ' (screenshot proof).'), 'auto');
+        // Flows listening for "a post goes live". A broken flow never breaks publishing.
+        rescue(fn () => app(Flows::class)->postPublished($post->fresh()));
     }
 
     /** Told to post, nothing proves it: Submitted, and the Inbox asks a person to look. */
@@ -330,6 +338,7 @@ class Publisher
     {
         $post->update(['status' => PostStatus::Failed, 'error' => $why]);
         ActionLog::record($post->user, 'agent:publisher', 'publish.failed', $post, 'Couldn’t publish: '.$why, 'queued');
+        rescue(fn () => app(Flows::class)->postFailed($post->fresh()));
     }
 
     private function release(PublishingRun $run): void

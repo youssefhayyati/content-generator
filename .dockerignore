@@ -6,3 +6,6 @@ backend/database/*.sqlite
 backend/storage/logs/*
 deploy/.env
 .git
+# Laravel's cached manifests from the dev install list dev-only providers (Pail, Collision);
+# production builds its own from the --no-dev vendor on first boot.
+backend/bootstrap/cache/*.php

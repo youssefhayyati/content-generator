@@ -23,7 +23,7 @@ class WritingController extends Controller
             'enabled' => $text->contains('available', true),
             'default' => $models->defaultText(),
             // One list, local and cloud, each saying how it's reached and whether it can run.
-            'models' => $text->map(fn (array $m) => collect($m)->only(['id', 'label', 'reach', 'local', 'available', 'reason', 'purpose', 'score']))->values(),
+            'models' => $text->map(fn (array $m) => collect($m)->only(['id', 'label', 'kind', 'reach', 'local', 'available', 'reason', 'purpose', 'score']))->values(),
         ]);
     }
 

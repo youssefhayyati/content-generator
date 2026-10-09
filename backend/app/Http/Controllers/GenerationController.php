@@ -19,7 +19,8 @@ use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * The generators: text (streamed as it's written), photos and videos (queued, then polled).
+ * The generators: text (streamed as it's written); photos, videos, voiceovers, music and reels
+ * (queued, then made in the background).
  * Anything that fails can be retried as it was, on another model, or with an edited prompt.
  */
 class GenerationController extends Controller
@@ -30,12 +31,14 @@ class GenerationController extends Controller
     {
         $filters = $request->validate([
             'kind' => ['nullable', Rule::in(Generation::KINDS)],
+            'kinds' => ['nullable', 'string', 'max:80'],
             'project_id' => ['nullable', 'integer'],
             'ids' => ['nullable', 'string'],
         ]);
 
         return GenerationResource::collection($request->user()->generations()
             ->when($filters['kind'] ?? null, fn ($q, $kind) => $q->where('kind', $kind))
+            ->when($filters['kinds'] ?? null, fn ($q, $kinds) => $q->whereIn('kind', array_values(array_intersect(explode(',', $kinds), Generation::KINDS))))
             ->when($filters['project_id'] ?? null, fn ($q, $id) => $q->where('project_id', $id))
             ->when($filters['ids'] ?? null, fn ($q, $ids) => $q->whereIn('id', array_map('intval', explode(',', $ids))))
             ->latest('id')
@@ -51,7 +54,7 @@ class GenerationController extends Controller
     }
 
     /**
-     * A photo or video: queued, then made by the provider in the background.
+     * A photo, video, voiceover, track or reel: queued, then made in the background.
      */
     public function store(Request $request, ModelRegistry $models): JsonResponse
     {
@@ -142,11 +145,11 @@ class GenerationController extends Controller
     private function validated(Request $request, ModelRegistry $models, bool $text = false): array
     {
         $kind = $text ? 'text' : $request->input('kind');
-        $known = collect($models->all())->where('kind', $kind)->pluck('id')->all();
+        $known = $kind === 'reel' ? ['studio/reel'] : collect($models->all())->where('kind', $kind)->pluck('id')->all();
         $user = $request->user();
 
         $data = $request->validate([
-            'kind' => $text ? [] : ['required', Rule::in(['image', 'video'])],
+            'kind' => $text ? [] : ['required', Rule::in(['image', 'video', 'voice', 'music', 'reel'])],
             'model' => ['nullable', Rule::in($known)],
             'prompt' => ['required', 'string', 'max:4000'],
             'params' => ['nullable', 'array'],
@@ -155,15 +158,55 @@ class GenerationController extends Controller
             'params.resolution' => ['nullable', Rule::in(['720p', '1080p'])],
             'params.rendering_speed' => ['nullable', Rule::in(['TURBO', 'DEFAULT', 'QUALITY'])],
             'params.negative_prompt' => ['nullable', 'string', 'max:500'],
+            // Voiceovers
+            'params.voice' => ['nullable', 'string', 'max:40'],
+            'params.speed' => ['nullable', 'numeric', 'min:0.5', 'max:1.6'],
+            // Music
+            'params.mood' => ['nullable', 'string', 'max:40'],
+            'params.seconds' => ['nullable', 'numeric', 'min:5', 'max:180'],
+            'params.energy' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'params.bpm' => ['nullable', 'numeric', 'min:50', 'max:170'],
+            'params.key' => ['nullable', Rule::in(['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'])],
+            'params.seed' => ['nullable', 'integer', 'min:1', 'max:2147483646'],
+            // Reels
+            'params.style' => ['nullable', Rule::in(['bold', 'editorial', 'pulse'])],
+            'params.accent' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'params.title' => ['nullable', 'string', 'max:80'],
+            'params.handle' => ['nullable', 'string', 'max:60', 'regex:/^@?[\w.\-]+$/u'],
+            'params.captions' => ['nullable', 'boolean'],
+            'params.music_volume' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'params.music_asset_id' => ['nullable', 'integer', Rule::exists('assets', 'id')->where('user_id', $user->id)->where('kind', 'audio')],
             'input_asset_ids' => ['nullable', 'array', 'max:4'],
             'input_asset_ids.*' => ['integer', Rule::exists('assets', 'id')->where('user_id', $user->id)],
             'project_id' => ['nullable', Rule::exists('projects', 'id')->where('user_id', $user->id)],
             'retry_of' => ['nullable', Rule::exists('generations', 'id')->where('user_id', $user->id)],
             'account_id' => ['nullable', Rule::exists('accounts', 'id')->where('user_id', $user->id)],
         ], [
-            'prompt.required' => 'Describe what you want.',
-            'model.in' => 'Pick a model that makes '.($kind === 'video' ? 'videos' : ($kind === 'image' ? 'images' : 'text')).'.',
+            'prompt.required' => match ($kind) {
+                'voice' => 'Write what the voice should say.',
+                'reel' => 'Give the reel a name.',
+                default => 'Describe what you want.',
+            },
+            'model.in' => 'Pick a model that makes '.(['video' => 'videos', 'image' => 'images', 'voice' => 'voiceovers', 'music' => 'music'][$kind] ?? 'text').'.',
+            'params.handle.regex' => 'Use the handle as it appears on the platform.',
         ]);
+
+        // A voiceover for an account speaks in the account's voice unless another was picked.
+        if (in_array($kind, ['voice', 'music', 'reel'], true) && ($data['account_id'] ?? null)) {
+            $sound = $user->accounts()->find($data['account_id'])?->soundSettings();
+            $data['params'] = [...match ($kind) {
+                'voice' => ['voice' => $sound['voice'], 'speed' => $sound['speed']],
+                'music' => ['mood' => $sound['mood']],
+                default => ['accent' => $sound['accent']],
+            }, ...$data['params'] ?? []];
+        }
+        if ($kind === 'reel') {
+            abort_unless(collect($data['input_asset_ids'] ?? [])->isNotEmpty() || isset($data['params']['music_asset_id']), 422, 'Pick the voice or the music the reel plays.');
+            $data['model'] = 'studio/reel';
+        }
+        if ($kind === 'voice' && mb_strlen($data['prompt']) > 2500) {
+            abort(422, 'Keep a voiceover under 2,500 characters (about two and a half minutes).');
+        }
 
         unset($data['account_id']);
         $data['model'] ??= $kind === 'text'

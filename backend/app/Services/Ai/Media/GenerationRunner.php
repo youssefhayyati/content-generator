@@ -32,10 +32,11 @@ class GenerationRunner
 
     public function start(Generation $generation): void
     {
-        $model = $this->models->find($generation->model);
+        // A reel isn't a model's work: it's rendered here, from what's already in the library.
+        $model = $generation->kind === 'reel' ? ['id' => 'studio/reel', 'provider' => 'studio', 'kind' => 'reel', 'label' => 'Reel renderer', 'available' => true] : $this->models->find($generation->model);
         try {
             if (! $model || $model['kind'] !== $generation->kind) {
-                throw new GenerationFailed('That model can’t make '.($generation->kind === 'video' ? 'videos' : 'images').'.');
+                throw new GenerationFailed('That model can’t make '.(['video' => 'videos', 'image' => 'images', 'voice' => 'voiceovers', 'music' => 'music'][$generation->kind] ?? 'that').'.');
             }
             if (! $model['available']) {
                 throw new GenerationFailed("{$model['label']} isn’t available: {$model['reason']}");
@@ -102,10 +103,17 @@ class GenerationRunner
         $ids = [];
         try {
             foreach ($outputs as $i => $out) {
-                $contents = isset($out['b64']) ? base64_decode($out['b64']) : Http::timeout(300)->get($out['url'])->throw()->body();
-                $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($contents) ?: $out['mime'];
+                $contents = match (true) {
+                    isset($out['b64']) => base64_decode($out['b64']),
+                    isset($out['path']) => (string) file_get_contents($out['path']),
+                    default => Http::timeout(300)->get($out['url'])->throw()->body(),
+                };
+                if (isset($out['path'])) {
+                    @unlink($out['path']);
+                }
+                $mime = $out['mime'] === 'audio/mpeg' ? 'audio/mpeg' : ((new \finfo(FILEINFO_MIME_TYPE))->buffer($contents) ?: $out['mime']);
                 $ids[] = $this->assets->fromContents($user, $contents, $mime, $this->name($generation, $i, $mime), 'generated', [
-                    'generation_id' => $generation->id, 'model' => $generation->model, 'prompt' => $generation->prompt,
+                    'generation_id' => $generation->id, 'model' => $generation->model, 'prompt' => $generation->prompt, ...$out['meta'] ?? [],
                 ])->id;
             }
         } catch (ConnectionException|Throwable $e) {
@@ -153,14 +161,27 @@ class GenerationRunner
         return match ($model['provider']) {
             'higgsfield' => app(HiggsfieldProvider::class),
             'gateway' => app(GatewayImageProvider::class),
-            default => throw new GenerationFailed('That provider doesn’t make images or video.'),
+            'sound' => app(SoundProvider::class),
+            'studio' => app(ReelProvider::class),
+            default => throw new GenerationFailed('That provider doesn’t make media.'),
         };
     }
 
     private function name(Generation $generation, int $i, string $mime): string
     {
-        $words = str($generation->prompt)->lower()->replaceMatches('/[^\pL\pN]+/u', '-')->trim('-')->limit(40, '');
+        $words = (string) str($generation->prompt)->lower()->replaceMatches('/[^\pL\pN]+/u', '-')->trim('-')->limit(40, '');
 
-        return "{$words}".($i ? '-'.($i + 1) : '').'.'.(str_starts_with($mime, 'video/') ? 'mp4' : 'png');
+        $ext = match (true) {
+            str_starts_with($mime, 'video/') => 'mp4',
+            str_starts_with($mime, 'audio/') => 'mp3',
+            default => 'png',
+        };
+
+        return ($words ?: $generation->kind)."{$this->suffix($i)}.{$ext}";
+    }
+
+    private function suffix(int $i): string
+    {
+        return $i ? '-'.($i + 1) : '';
     }
 }

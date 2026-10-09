@@ -20,9 +20,13 @@ use App\Http\Controllers\CampaignReviewController;
 use App\Http\Controllers\CampaignScheduleController;
 use App\Http\Controllers\CommentController;
 use App\Http\Controllers\DeviceController;
+use App\Http\Controllers\FlowController;
+use App\Http\Controllers\FlowRunController;
 use App\Http\Controllers\GenerationController;
 use App\Http\Controllers\InboxController;
+use App\Http\Controllers\InboxNoteController;
 use App\Http\Controllers\InvestigationController;
+use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
 use App\Http\Controllers\OverviewController;
 use App\Http\Controllers\PasswordController;
@@ -34,7 +38,9 @@ use App\Http\Controllers\QueueSlotController;
 use App\Http\Controllers\RecipeController;
 use App\Http\Controllers\RepostController;
 use App\Http\Controllers\SocialAccountController;
+use App\Http\Controllers\SoundController;
 use App\Http\Controllers\SpecController;
+use App\Http\Controllers\StormGuardController;
 use App\Http\Controllers\WritingController;
 use Illuminate\Support\Facades\Route;
 
@@ -67,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('user/social/{provider}', [SocialAccountController::class, 'destroy']);
 
     Route::get('overview', OverviewController::class);
+    Route::get('live', LiveController::class);
     Route::get('analytics', AnalyticsController::class);
 
     Route::post('posts/{post}/duplicate', [PostController::class, 'duplicate']);
@@ -178,6 +185,35 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('comments/{comment}/ignore', [CommentController::class, 'ignore']);
     Route::delete('comments/{comment}', [CommentController::class, 'destroy']);
     Route::post('comments/{comment}/triage', [CommentController::class, 'triage'])->middleware(['verified', 'throttle:ai']);
+
+    // Flows: automations drawn on a canvas, started from a template or described in words.
+    Route::get('flows', [FlowController::class, 'index']);
+    Route::get('flows/catalog', [FlowController::class, 'catalog']);
+    Route::post('flows', [FlowController::class, 'store']);
+    Route::get('flows/{flow}', [FlowController::class, 'show']);
+    Route::patch('flows/{flow}', [FlowController::class, 'update']);
+    Route::delete('flows/{flow}', [FlowController::class, 'destroy']);
+    Route::post('flows/{flow}/run', [FlowController::class, 'run'])->middleware('throttle:ai');
+    Route::post('flows/compose', [FlowController::class, 'compose'])->middleware(['verified', 'throttle:ai']);
+    Route::get('flow-runs/{run}', [FlowRunController::class, 'show']);
+    Route::post('flow-runs/{run}/decide', [FlowRunController::class, 'decide']);
+    Route::post('flow-runs/{run}/stop', [FlowRunController::class, 'stop']);
+    Route::post('inbox/notes/{note}/dismiss', [InboxNoteController::class, 'dismiss']);
+
+    // Sound: voices and moods, samples, dictation, scripts, transcripts, an account's sound.
+    Route::get('sound', [SoundController::class, 'index']);
+    Route::get('sound/voices/{voice}/sample', [SoundController::class, 'sample'])->where('voice', '[a-z]{2}_[a-z]+')->middleware('throttle:60,1');
+    Route::post('sound/dictate', [SoundController::class, 'dictate'])->middleware(['verified', 'throttle:intake']);
+    Route::post('sound/script', [SoundController::class, 'script'])->middleware(['verified', 'throttle:ai']);
+    Route::get('assets/{asset}/words', [SoundController::class, 'words']);
+    Route::post('assets/{asset}/transcribe', [SoundController::class, 'transcribe'])->middleware(['verified', 'throttle:intake']);
+    Route::post('assets/{asset}/posts', [SoundController::class, 'posts'])->middleware(['verified', 'throttle:ai']);
+    Route::put('accounts/{account}/sound', [SoundController::class, 'account']);
+
+    // Storm Guard: the brand-safety circuit breaker on each account's comments.
+    Route::get('storm-guard', [StormGuardController::class, 'index']);
+    Route::put('accounts/{account}/storm-guard', [StormGuardController::class, 'update']);
+    Route::post('accounts/{account}/storm-guard/clear', [StormGuardController::class, 'clear']);
 
     // The investigator: collect → compare → validate → report, on demand.
     Route::apiResource('investigations', InvestigationController::class)->only(['index', 'store', 'show', 'destroy']);

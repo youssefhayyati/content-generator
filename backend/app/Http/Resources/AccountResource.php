@@ -31,6 +31,10 @@ class AccountResource extends JsonResource
             'autonomy' => $this->autonomy,
             'min_gap_minutes' => $this->min_gap_minutes,
             'profile' => (object) ($this->profile ?? []),
+            'storm_guard' => $this->stormSettings(),
+            'sound' => $this->soundSettings(),
+            'storm_at' => $this->storm_at?->toIso8601ZuluString(),
+            'storm_reason' => $this->storm_reason,
             'posts_count' => $this->whenCounted('posts'),
             'created_at' => $this->created_at?->toIso8601ZuluString(),
         ];

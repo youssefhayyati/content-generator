@@ -85,6 +85,13 @@ class OverviewController extends Controller
             'week' => $week,
             'platforms' => $platforms,
             'next_slot' => $queue->nextFree($user)?->toIso8601ZuluString(),
+            // The automation layer at a glance: flows working, runs waiting on you, frozen accounts.
+            'automation' => [
+                'flows_on' => $user->flows()->where('enabled', true)->count(),
+                'runs_today' => $user->flowRuns()->where('created_at', '>=', now()->startOfDay())->count(),
+                'waiting_on_you' => $user->flowRuns()->where('status', 'approval')->count(),
+                'frozen' => $user->accounts()->whereNotNull('storm_at')->get(['id', 'handle', 'platform'])->map(fn ($a) => ['id' => $a->id, 'handle' => $a->handle, 'platform' => $a->platform]),
+            ],
         ]);
     }
 }

@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, Film, ImagePlus, Play, Sparkles, Trash2, Upload } from 'lucide-react'
+import { AudioLines, Check, Clapperboard, Ear, Film, ImagePlus, Play, Sparkles, Trash2, Upload } from 'lucide-react'
 import { api, ApiError, uploadFiles, type Asset, type Page } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
+import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
+import { Player } from '../sound/Player'
 import { useToast } from '../toast'
 import { Btn, EmptyState, Modal, Segmented, Skeleton } from '../ui'
 
 export const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm']
+export const AUDIO_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/webm', 'audio/ogg', 'audio/flac', 'audio/x-flac']
+const UPLOADABLE = [...MEDIA_TYPES, ...AUDIO_TYPES]
 
 export const fmtBytes = (n: number) =>
   n >= 1048576 ? `${(n / 1048576).toFixed(n >= 104857600 ? 0 : 1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
@@ -35,13 +39,13 @@ export function MediaThumb({ asset, className, children }: { asset: Asset; class
         <img src={asset.poster_url} alt={asset.name ?? ''} loading="lazy" className="size-full object-cover" />
       ) : (
         <span className="grid size-full place-items-center text-dim">
-          <Film className="size-5" strokeWidth={1.5} />
+          {asset.kind === 'audio' ? <AudioLines className="size-5" strokeWidth={1.5} /> : <Film className="size-5" strokeWidth={1.5} />}
         </span>
       )}
-      {asset.kind === 'video' && (
+      {(asset.kind === 'video' || asset.kind === 'audio') && (
         <span className="absolute bottom-1 left-1 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[9.5px] text-white backdrop-blur">
-          <Play className="size-2.5" fill="currentColor" />
-          {asset.duration ? fmtSeconds(asset.duration) : 'Video'}
+          {asset.kind === 'audio' ? <AudioLines className="size-2.5" /> : <Play className="size-2.5" fill="currentColor" />}
+          {asset.duration ? fmtSeconds(asset.duration) : asset.kind === 'audio' ? 'Sound' : 'Video'}
         </span>
       )}
       {asset.source === 'generated' && (
@@ -61,8 +65,8 @@ export function useMediaUpload(onDone?: (assets: Asset[]) => void) {
   const [progress, setProgress] = useState<number | null>(null)
 
   const upload = async (list: File[]) => {
-    const files = list.filter((f) => MEDIA_TYPES.includes(f.type))
-    if (!files.length) return toast('Use JPG, PNG, WebP or GIF images, or MP4, MOV or WebM videos.', 'error')
+    const files = list.filter((f) => UPLOADABLE.includes(f.type))
+    if (!files.length) return toast('Use JPG, PNG, WebP or GIF images; MP4, MOV or WebM videos; or MP3, M4A, WAV, OGG or FLAC audio.', 'error')
     setProgress(0)
     try {
       const assets = await uploadFiles<Asset[]>('/assets', files, setProgress)
@@ -108,8 +112,8 @@ export function Dropzone({ onFiles, progress, compact }: { onFiles: (files: File
           <Upload className="size-4" strokeWidth={1.75} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium">{uploading ? `Uploading… ${Math.round((progress ?? 0) * 100)}%` : 'Drop images or videos here'}</p>
-          <p className="text-[11.5px] text-dim">JPG, PNG, WebP, GIF · MP4, MOV, WebM · up to 200 MB each</p>
+          <p className="text-[13px] font-medium">{uploading ? `Uploading… ${Math.round((progress ?? 0) * 100)}%` : 'Drop images, videos or sound here'}</p>
+          <p className="text-[11.5px] text-dim">JPG, PNG, WebP, GIF · MP4, MOV, WebM · MP3, M4A, WAV · up to 200 MB each</p>
         </div>
         <Btn icon={ImagePlus} onClick={() => input.current?.click()} disabled={uploading}>
           Browse
@@ -120,7 +124,7 @@ export function Dropzone({ onFiles, progress, compact }: { onFiles: (files: File
         type="file"
         multiple
         hidden
-        accept={MEDIA_TYPES.join(',')}
+        accept={UPLOADABLE.join(',')}
         onChange={(e) => {
           const files = [...(e.target.files ?? [])]
           e.target.value = ''
@@ -139,11 +143,12 @@ export function Dropzone({ onFiles, progress, compact }: { onFiles: (files: File
   )
 }
 
-type Kind = 'all' | 'image' | 'video' | 'generated'
+type Kind = 'all' | 'image' | 'video' | 'audio' | 'generated'
 const KINDS: Array<{ value: Kind; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'image', label: 'Images' },
   { value: 'video', label: 'Videos' },
+  { value: 'audio', label: 'Sound' },
   { value: 'generated', label: 'AI' },
 ]
 
@@ -221,19 +226,28 @@ export function AssetModal({ asset, onClose }: { asset: Asset | null; onClose: (
     <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'Media'} className="max-w-2xl">
       {asset && (
         <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_200px]">
-          <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
-            {asset.kind === 'video' ? (
-              <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className="max-h-[60vh] w-full" />
-            ) : (
-              <img src={asset.url} alt={asset.name ?? ''} className="max-h-[60vh] w-full object-contain" />
-            )}
-          </div>
+          {asset.kind === 'audio' ? (
+            <div className="rounded-lg border border-line bg-panel-2 p-4">
+              <Player asset={asset} />
+              <SoundActions asset={asset} onClose={onClose} />
+            </div>
+          ) : (
+            <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
+              {asset.kind === 'video' ? (
+                <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className="max-h-[60vh] w-full" />
+              ) : (
+                <img src={asset.url} alt={asset.name ?? ''} className="max-h-[60vh] w-full object-contain" />
+              )}
+            </div>
+          )}
           <div className="flex flex-col">
             <dl className="space-y-2.5 text-[12.5px]">
               {(
                 [
-                  ['Shape', fmtShape(asset)],
-                  ...(asset.kind === 'video' ? [['Length', asset.duration ? fmtSeconds(asset.duration) : 'Unknown']] : []),
+                  ...(asset.kind === 'audio' ? [] : [['Shape', fmtShape(asset)]]),
+                  ...(asset.kind !== 'image' ? [['Length', asset.duration ? fmtSeconds(asset.duration) : 'Unknown']] : []),
+                  ...(asset.sound?.voice_name ? [['Voice', `${asset.sound.voice_name} · ${asset.sound.lang?.toUpperCase() ?? ''}`]] : []),
+                  ...(asset.sound?.label ? [['Music', `${asset.sound.label} · ${asset.sound.key ?? ''} · ${Math.round(asset.sound.bpm ?? 0)} bpm`]] : []),
                   ['Size', fmtBytes(asset.size)],
                   ['Type', asset.mime],
                   ['From', { upload: 'Uploaded', generated: 'Generated with AI', screenshot: 'Phone screenshot', intake: 'Campaign intake' }[asset.source]],
@@ -256,6 +270,27 @@ export function AssetModal({ asset, onClose }: { asset: Asset | null; onClose: (
   )
 }
 
+/** What to do with a sound: make a reel of it, or have it listened to (and then turned into posts). */
+function SoundActions({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  const { navigate } = useRouter()
+  const go = (to: string) => {
+    onClose()
+    navigate(to)
+  }
+  return (
+    <div className="mt-4 flex flex-wrap gap-1.5 border-t border-line pt-3">
+      <Btn size="sm" icon={Clapperboard} onClick={() => go(`/dashboard/studio?tab=reels&${asset.sound?.type === 'music' ? 'music' : 'audio'}=${asset.id}`)}>
+        Make a reel
+      </Btn>
+      {asset.sound?.type !== 'music' && (
+        <Btn size="sm" variant="subtle" icon={Ear} onClick={() => go(`/dashboard/studio?tab=sound&mode=listen&asset=${asset.id}`)}>
+          {asset.sound?.timed ? 'Transcript & posts' : 'Listen to it'}
+        </Btn>
+      )}
+    </div>
+  )
+}
+
 /**
  * Choose media for a post: from the library, or upload new. Selection order is the order
  * the media appears in the post.
@@ -266,17 +301,24 @@ export function MediaPicker({
   onPick,
   initial = [],
   max = 10,
+  kinds = ['image', 'video'],
+  title = 'Add media',
 }: {
   open: boolean
   onClose: () => void
   onPick: (assets: Asset[]) => void
   initial?: Asset[]
   max?: number
+  /** What may be picked: posts take pictures and video; reels also take sound. */
+  kinds?: Array<Asset['kind']>
+  title?: string
 }) {
-  const [kind, setKind] = useState<Kind>('all')
-  const { data } = useLibrary(kind)
+  const [kind, setKind] = useState<Kind>(kinds.length === 1 ? kinds[0] : 'all')
+  const { data: raw } = useLibrary(kind)
+  const data = raw ? { ...raw, data: raw.data.filter((a) => kinds.includes(a.kind)) } : raw
+  const options = KINDS.filter((k) => k.value === 'all' || k.value === 'generated' || kinds.includes(k.value as Asset['kind']))
   const [picked, setPicked] = useState<Asset[]>(initial)
-  const { upload, progress } = useMediaUpload((added) => setPicked((p) => [...p, ...added].slice(0, max)))
+  const { upload, progress } = useMediaUpload((added) => setPicked((p) => [...p, ...added.filter((a) => kinds.includes(a.kind))].slice(0, max)))
 
   // Each time it opens, start from what the post already has.
   useEffect(() => {
@@ -288,10 +330,10 @@ export function MediaPicker({
     setPicked((p) => (p.some((x) => x.id === a.id) ? p.filter((x) => x.id !== a.id) : p.length >= max ? p : [...p, a]))
 
   return (
-    <Modal open={open} onClose={onClose} title="Add media" className="max-w-3xl">
+    <Modal open={open} onClose={onClose} title={title} className="max-w-3xl">
       <div className="space-y-4">
         <Dropzone onFiles={upload} progress={progress} compact />
-        <Segmented id="picker-kind" label="Kind" options={KINDS} value={kind} onChange={setKind} />
+        {options.length > 2 && <Segmented id="picker-kind" label="Kind" options={options} value={kind} onChange={setKind} />}
         <div className="no-scrollbar grid max-h-[46vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-5" data-lenis-prevent>
           {data?.data.map((a) => {
             const n = picked.findIndex((x) => x.id === a.id)

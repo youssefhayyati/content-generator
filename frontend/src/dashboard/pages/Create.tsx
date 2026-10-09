@@ -289,7 +289,12 @@ export default function Create() {
                 <FieldError message={errors.body} />
               </div>
 
-              <MediaStrip media={media} onChange={changeMedia} max={10} />
+              <MediaStrip
+                media={media}
+                onChange={changeMedia}
+                max={10}
+                generate={format === 'text' ? undefined : { kind: format, hint: [title, body].filter(Boolean).join(' — ').slice(0, 400) || '' }}
+              />
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
                 <Segmented id="format" label="Format" options={FORMATS} value={format} onChange={setFormat} />

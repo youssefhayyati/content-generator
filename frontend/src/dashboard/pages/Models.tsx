@@ -13,7 +13,7 @@ import { Btn, Label, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../
 
 type Evals = { tasks: Record<string, string>; results: Record<string, Record<string, { score: number; detail: string | null; output: string | null; at: string }>> }
 
-const PROVIDER_NAME: Record<string, string> = { anthropic: 'Anthropic', gateway: 'Model gateway', ollama: 'Ollama', higgsfield: 'Higgsfield' }
+const PROVIDER_NAME: Record<string, string> = { anthropic: 'Anthropic', gateway: 'Model gateway', groq: 'Groq', openrouter: 'OpenRouter', ollama_cloud: 'Ollama Cloud', ollama: 'Ollama', higgsfield: 'Higgsfield' }
 
 /** /dashboard/models: the registry of local and cloud models, connectors, evals and recipes. */
 export default function Models() {
@@ -57,6 +57,9 @@ export default function Models() {
                     { value: 'text', label: 'Text' },
                     { value: 'image', label: 'Image' },
                     { value: 'video', label: 'Video' },
+                    { value: 'voice', label: 'Voice' },
+                    { value: 'music', label: 'Music' },
+                    { value: 'listen', label: 'Listen' },
                   ]}
                 />
               }
@@ -133,7 +136,7 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
 
 function ModelTable({ models }: { models: ModelInfo[] }) {
   return (
-    <div className="overflow-x-auto" data-lenis-prevent>
+    <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-left text-[12.5px]">
         <thead>
           <tr className="border-y border-line font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">
@@ -219,7 +222,7 @@ function EvalsPanel({ models }: { models: ModelInfo[] }) {
   const tasks = Object.entries(evals?.tasks ?? {})
   return (
     <Panel title="Evals" sub="Five tasks from the studio’s real work, scored by rule checks and, when Claude is set up, by Claude as a judge." bodyClassName="p-0">
-      <div className="overflow-x-auto" data-lenis-prevent>
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-left text-[12.5px]">
           <thead>
             <tr className="border-y border-line font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">

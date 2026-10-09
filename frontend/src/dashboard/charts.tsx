@@ -402,7 +402,7 @@ export function Heatmap({ grid, mode }: { grid: number[][]; mode: 'chart' | 'tab
 
   return (
     <div className="relative">
-      <div className="overflow-x-auto pb-1" data-lenis-prevent>
+      <div className="overflow-x-auto pb-1">
         <div className="grid min-w-[560px] grid-cols-[36px_repeat(24,minmax(0,1fr))] gap-[2px]">
           <span />
           {Array.from({ length: 24 }, (_, h) => (

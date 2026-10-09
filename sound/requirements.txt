@@ -1,0 +1,10 @@
+# FlowAI Sound: voice (Kokoro), listening (Whisper) and an original-music composer.
+fastapi==0.120.4
+uvicorn==0.38.0
+numpy==2.3.4
+scipy==1.16.3
+soundfile==0.13.1
+kokoro-onnx==0.4.9
+faster-whisper==1.2.1
+# faster-whisper calls av.open(…, metadata_errors=…), which PyAV 16+ dropped.
+av==15.1.0

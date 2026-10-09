@@ -3,11 +3,35 @@ import { motion, useReducedMotion, useScroll, useTransform, type MotionValue } f
 import { ArrowUp } from 'lucide-react'
 import { Logo } from './ui/Logo'
 
-const COLUMNS = [
-  { title: 'Product', links: ['Features', 'Automations', 'Integrations', 'Pricing'] },
-  { title: 'Resources', links: ['Documentation', 'Blog', 'Guides', 'API'] },
-  { title: 'Company', links: ['About', 'Contact', 'Careers'] },
-  { title: 'Legal', links: ['Privacy', 'Terms', 'Cookies'] },
+const REPO = 'https://github.com/youssefhayyati/content-generator'
+
+// Every link goes somewhere real; anything without a page yet is left out.
+const COLUMNS: Array<{ title: string; links: Array<[label: string, href: string]> }> = [
+  {
+    title: 'Product',
+    links: [
+      ['Features', '#features'],
+      ['Automations', '#automations'],
+      ['Platforms', '#platforms'],
+      ['Security', '#security'],
+    ],
+  },
+  {
+    title: 'Resources',
+    links: [
+      ['Documentation', REPO],
+      ['Guides', '#product'],
+      ['API', `${REPO}/tree/master/backend/app/Http/Controllers/AgentController.php`],
+    ],
+  },
+  {
+    title: 'Legal',
+    links: [
+      ['Privacy', '#resources'],
+      ['Terms', '#resources'],
+      ['Cookies', '#resources'],
+    ],
+  },
 ]
 
 export function Footer() {
@@ -33,9 +57,13 @@ export function Footer() {
               <div key={c.title}>
                 <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-dim">{c.title}</p>
                 <ul className="mt-4 space-y-2.5">
-                  {c.links.map((l) => (
+                  {c.links.map(([l, href]) => (
                     <li key={l}>
-                      <a href="#top" className="group relative text-[14px] text-muted transition-colors hover:text-fg">
+                      <a
+                        href={href}
+                        {...(href.startsWith('http') ? { target: '_blank', rel: 'noreferrer' } : {})}
+                        className="group relative text-[14px] text-muted transition-colors hover:text-fg"
+                      >
                         {l}
                         <span className="absolute -bottom-0.5 left-0 h-px w-full origin-right scale-x-0 bg-current transition-transform duration-500 ease-expo group-hover:origin-left group-hover:scale-x-100" />
                       </a>

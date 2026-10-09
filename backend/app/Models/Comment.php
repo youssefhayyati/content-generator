@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * A comment on one of the account's posts. The AI triages it (reply, ignore, or send to a
  * human); a human approves every reply before it's sent, unless a mode-B rule covers it.
  */
-#[Fillable(['user_id', 'account_id', 'author', 'body', 'post_ref', 'status', 'triage', 'draft', 'reply', 'sent_at'])]
+#[Fillable(['user_id', 'account_id', 'author', 'body', 'post_ref', 'status', 'triage', 'draft', 'reply', 'sent_at', 'sentiment'])]
 class Comment extends Model
 {
     /** @var array<string, mixed> */
@@ -26,6 +26,7 @@ class Comment extends Model
         return [
             'triage' => 'array',
             'sent_at' => 'datetime',
+            'sentiment' => 'integer',
         ];
     }
 

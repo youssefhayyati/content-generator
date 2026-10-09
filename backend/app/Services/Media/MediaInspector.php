@@ -32,6 +32,12 @@ class MediaInspector
         if (! $this->canReadVideo()) {
             return $none;
         }
+        if (str_starts_with($mime, 'audio/')) {
+            $probe = Process::timeout(30)->run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', $path]);
+            $seconds = trim($probe->output());
+
+            return [...$none, 'duration' => $probe->successful() && is_numeric($seconds) ? round((float) $seconds, 2) : null];
+        }
 
         $probe = Process::timeout(30)->run([
             'ffprobe', '-v', 'error', '-select_streams', 'v:0',

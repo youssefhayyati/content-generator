@@ -77,6 +77,8 @@ export type Overview = {
   week: Array<{ date: string; count: number }>
   platforms: Partial<Record<PlatformId, number>>
   next_slot: string | null
+  /** Flows working, runs waiting on you, accounts Storm Guard froze. */
+  automation: { flows_on: number; runs_today: number; waiting_on_you: number; frozen: Array<{ id: number; handle: string; platform: PlatformId }> }
 }
 
 export type QueueState = {

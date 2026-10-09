@@ -1,66 +1,53 @@
 # Decision note
 
-One page, honest. What we decided building the AI Publishing Studio, and why.
+## What we built
 
-## The split: the studio drives nothing itself
+The whole studio: campaign brief (interview or form) → a team of agents (writer → visual
+director → media → adapter → QA) with a human gate before production (6A) and before
+scheduling (6B) → per-platform versions with pre-export checks → scheduling with timezones,
+conflict warnings and phone booking → automated publishing from phones with run records that
+prove the outcome. Around it: a content studio (text/photo/video generators, model registry
+with local and cloud models), account memory and brand voice, autonomy settings, an X→IG
+repost flow, a comment inbox with triage, and an investigator pipeline. The phone-driving
+automation is a separate Python agent consuming a small, documented agent API
+(`/api/agent/*`); the studio never touches a device itself.
 
-The Laravel app never touches a phone directly. It owns the content, the approvals, the
-schedule, the bookings and the records; driving a phone is the automation service's job, behind
-a small Bearer-token API (`/api/agent/*`). That made the boundary testable: everything the
-Python dev needs is one job payload (app package + named targets, caption, media URLs, limits)
-and four endpoints. It also meant the whole loop — booking, steps, screenshots, proof, retries —
-had to be built and proven before any hardware existed, which is why the simulator came first.
+## The one design decision we'd defend
 
-## Proof, or it didn't happen
+**Verification by observation, never by dispatch.** Sending a command is not publishing a
+post — so no part of the system is allowed to call a post "published" because a tap
+returned 200. Every run ends in one of three outcomes, and `uncertain` is a first-class,
+honest answer that lands in the operator's inbox instead of being rounded up to success.
+Proof is earned: the recipe counts the posts on the profile *before*, publishes, counts
+again, opens the newest post and matches a distinctive word from the caption; a post URL
+is the best evidence, a verified screenshot the next. This single rule shaped everything
+under it — the run-record schema, the recovery flow (failed posts back off and retry;
+uncertain ones are never retried automatically, because re-posting what may already be
+live is how accounts get banned), the Inbox design, and the simulator, which had to be a
+truthful UI state machine rather than a stub that always says yes.
 
-Sending "publish" is not publishing. Every run ends by reading the screen: the caption visible
-on the account is proof; anything else ends the run **uncertain**, a first-class outcome, not a
-failure with better PR. Uncertain posts go to the Inbox with "try again" and "confirm live" —
-a person checks the account and either re-runs it or pastes the post URL, which becomes the
-run's evidence. The hand-in's "one run not successful" is this path, and the UI makes it a
-normal Tuesday rather than an error page.
+## What we'd do with another week
 
-## One job per phone, booked atomically
+1. **More recipes, with self-healing targets.** TikTok, LinkedIn, YouTube Shorts in the
+   named-target catalog, plus a fallback that re-resolves a stale target from the live
+   screen instead of failing the run (app updates shift ids; the catalog already carries
+   fallbacks, but calibration could be continuous).
+2. **The spend story end-to-end.** Per-account and per-campaign budgets across the gateway,
+   with the eval scores feeding automatic model choice per task (cheap local model for
+   drafts, frontier model where quality visibly matters).
+3. **Hardening the autonomy modes.** The mode-B rules engine works; what's missing is the
+   audit view a skeptical operator wants: "show me every action the rules took this week
+   and why each was allowed," replayable from the action log.
 
-Phones are booked with a conditional `UPDATE … WHERE booked_run_id IS NULL`, never
-read-then-write. Two posts due on the same phone simply can't double-book; the loser waits for
-the next minute. The same discipline releases: only the run that holds the phone can free it.
+## Honest failures along the way
 
-## Retries wait, then a person takes over
-
-Three attempts, 5/15/30-minute backoff (R3), then the post is marked failed and lands in the
-Inbox — we don't burn accounts to look autonomous. Runs that go quiet are swept after ten
-minutes and end honestly: uncertain if the steps show a successful Publish tap, failed
-otherwise. Every run lives under a step budget and a hard timeout (R7), enforced on both sides:
-the agent gets a 422 past the budget, the worker kills a simulator run past it.
-
-## The simulator is a feature, not a mock
-
-The demo — brief → gate 6A → production → gate 6B → schedule → phone posts → confirmed live —
-runs end-to-end on the built-in simulator with zero external dependencies. Its reliable/flaky/
-broken profiles exercise the three endings (confirmed, uncertain, failed-with-retries) on
-demand, which is also how the test suite rigs outcomes deterministically.
-
-## The champion features, and what they cost
-
-After the core we built all four champion areas, in spec order of difficulty. The honest
-shape of each:
-
-- **Mode B** is a real rules engine (`Autonomy::decide` with allow/deny and `max_per_day`
-  narrowers), but it's enforced at three points only — AI profile changes, comment replies,
-  repost scheduling. Publishing keeps its own switch and gate 6B is always a person; the action
-  matrix says so rather than pretending otherwise.
-- **Repost** makes the permission check a human-only step that records *why*, and attribution
-  is appended by the model class, never by the AI — so the credit line can't be "forgotten" by
-  a prompt.
-- **Comments** don't go to a real platform (no connector exists at this stage); "sent" means
-  recorded with a timestamp after human approval. The triage and the approval discipline around
-  it are the feature.
-- **Investigator** verifies the studio's own records against their evidence; its AI validation
-  falls back to showing a person everything when AI is off — erring loud, not quiet.
-
-## Costs
-
-A simulator run spends nothing, so run spend shows 0; AI spend from writing and media
-generation is metered separately (`ai_usages`) and shows in the studio. The usage numbers on
-the Publishing page — steps, wall-clock, spend — are straight averages over `publishing_runs`.
+- The first campaign plan job died on SQLite "database is locked" once the web process and
+  workers shared one file — fixed with WAL + busy timeout, and it taught us the deploy
+  target really wants Postgres (it has one).
+- Llama 3.2 3B/8B are OOM-killed on this box mid-generation; the demo runs on the 1B
+  model, which is why some captions are more earnest than poetic. Claude/Llama-70B keys
+  are one `.env` line away and the prompts are tuned for them.
+- adb text input is ASCII-only: captions with smart quotes and emoji lose characters on
+  real hardware (the type-into readback catches it early, but the fix — an IME-level
+  encoder — isn't in). Simulated phones don't have this limitation, which is exactly the
+  kind of difference that only shows up on stage.

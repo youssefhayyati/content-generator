@@ -7,6 +7,7 @@ import { api, ApiError, type Account, type Comment } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { fmtRelative, useApi, useInvalidate } from '../data'
+import { Mood, StormGuard } from '../storm/StormGuard'
 import { useToast } from '../toast'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Skeleton, Stagger } from '../ui'
 
@@ -37,7 +38,7 @@ export default function Comments() {
             The comment <Serif>inbox.</Serif>
           </>
         }
-        sub="The AI triages every comment — reply, ignore, or send to a human. A human approves every reply before it goes out, unless a mode-B rule covers it."
+        sub="The AI triages every comment — reply, ignore, or send to a human. A human approves every reply before it goes out, unless a mode-B rule covers it. Storm Guard watches the mood."
         actions={
           <Btn variant="primary" icon={Plus} onClick={() => setReporting(true)} disabled={(accounts ?? []).length === 0}>
             Report a comment
@@ -45,7 +46,9 @@ export default function Comments() {
         }
       />
 
-      <div className="mt-6 flex gap-1.5">
+      <StormGuard />
+
+      <div className="mt-8 flex gap-1.5">
         {(['waiting', 'all'] as const).map((t) => (
           <button
             key={t}
@@ -128,6 +131,7 @@ function CommentRow({ comment: c, i }: { comment: Comment; i: number }) {
               <span className="text-[13px] font-medium">@{c.author}</span>
               <span className="text-[11px] text-dim">on @{c.account?.handle}{c.post_ref ? ` · “${c.post_ref}”` : ''}</span>
               <span className={cn('rounded-full border px-2 py-px text-[10.5px]', status.cls)}>{status.label}</span>
+              <Mood sentiment={c.sentiment} />
             </div>
             <p className="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-snug text-muted">{c.body}</p>
             {c.triage && <p className="mt-1.5 text-[11.5px] text-dim">AI: {c.triage.decision} — {c.triage.reason}</p>}

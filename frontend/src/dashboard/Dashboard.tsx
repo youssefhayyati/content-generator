@@ -12,9 +12,11 @@ import Calendar from './pages/Calendar'
 import Campaigns from './pages/Campaigns'
 import Comments from './pages/Comments'
 import Create from './pages/Create'
+import Flows from './pages/Flows'
 import Inbox from './pages/Inbox'
 import Investigations from './pages/Investigations'
 import Library from './pages/Library'
+import LiveWall from './pages/Live'
 import Models from './pages/Models'
 import Overview from './pages/Overview'
 import Phones from './pages/Phones'
@@ -30,6 +32,7 @@ import { ToastProvider, useToast } from './toast'
 const PAGES: Record<string, ComponentType> = {
   '/dashboard': Overview,
   '/dashboard/inbox': Inbox,
+  '/dashboard/live': LiveWall,
   '/dashboard/accounts': Accounts,
   '/dashboard/studio': Studio,
   '/dashboard/campaigns': Campaigns,
@@ -37,6 +40,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/library': Library,
   '/dashboard/calendar': Calendar,
   '/dashboard/automations': Automations,
+  '/dashboard/flows': Flows,
   '/dashboard/analytics': Analytics,
   '/dashboard/models': Models,
   '/dashboard/phones': Phones,
@@ -82,8 +86,8 @@ function Pages() {
   }, [Page, navigate])
 
   if (!Page) return null
-  // The composer remounts per post, so switching from one edit to another starts clean.
-  const key = path === '/dashboard/create' ? path + search : path
+  // The composer remounts per post, and Flows per flow, so switching between them starts clean.
+  const key = path === '/dashboard/create' ? path + search : path === '/dashboard/flows' ? path + (new URLSearchParams(search).get('id') ?? '') : path
 
   return (
     <AnimatePresence mode="wait" initial={false}>

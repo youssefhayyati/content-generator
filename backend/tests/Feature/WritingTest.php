@@ -92,6 +92,8 @@ class WritingTest extends TestCase
             ->assertJsonPath('models.0.label', 'Claude Opus 5')
             ->assertJsonPath('models.0.reach', 'Claude API')
             ->assertJsonPath('models.0.available', false)
+            // The picker's filter needs the kind: drop it and the select is silently empty.
+            ->assertJsonPath('models.0.kind', 'text')
             ->assertJsonPath('models.0.reason', 'No Anthropic API key is set.');
 
         $this->fakeGenerator();

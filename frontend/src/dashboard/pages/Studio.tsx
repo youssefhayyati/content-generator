@@ -8,17 +8,21 @@ import { cn } from '../../lib/cn'
 import { useQueryParam, useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { MediaPicker, MediaThumb } from '../media/Media'
+import { ReelMaker } from '../sound/ReelMaker'
+import { SoundStudio } from '../sound/SoundStudio'
 import { CanvasView } from '../studio/Canvas'
 import { GenerationCard, ModelPicker, useGenerations } from '../studio/parts'
 import { messageFor, retryGeneration, runMedia, runText } from '../studio/run'
 import { useToast } from '../toast'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../ui'
 
-type Tab = 'text' | 'image' | 'video' | 'recipes' | 'projects'
+type Tab = 'text' | 'image' | 'video' | 'sound' | 'reels' | 'recipes' | 'projects'
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'text', label: 'Text' },
   { value: 'image', label: 'Photo' },
   { value: 'video', label: 'Video' },
+  { value: 'sound', label: 'Sound' },
+  { value: 'reels', label: 'Reels' },
   { value: 'recipes', label: 'Recipes' },
   { value: 'projects', label: 'Projects' },
 ]
@@ -49,7 +53,7 @@ function StudioHome() {
             Make <Serif>anything.</Serif>
           </>
         }
-        sub="Write, make photos and videos, or run a recipe. Open a project to lay it all out on a canvas."
+        sub="Write, make photos and videos, give your posts a voice and a soundtrack, cut reels, or run a recipe. Open a project to lay it all out on a canvas."
         actions={
           <Btn variant="primary" icon={Plus} onClick={() => setNaming(true)}>
             New project
@@ -57,7 +61,7 @@ function StudioHome() {
         }
       />
 
-      <Stagger i={0} className="mt-10">
+      <Stagger i={0} className="no-scrollbar -mx-4 mt-10 overflow-x-auto px-4 md:mx-0 md:px-0">
         <Segmented id="studio-tab" label="Generator" options={TABS} value={tab} onChange={pick} className="w-fit" />
       </Stagger>
 
@@ -68,6 +72,10 @@ function StudioHome() {
           <Projects onNew={() => setNaming(true)} />
         ) : tab === 'recipes' ? (
           <Recipes registry={registry} />
+        ) : tab === 'sound' ? (
+          <SoundStudio models={registry.models} />
+        ) : tab === 'reels' ? (
+          <ReelMaker models={registry.models} />
         ) : (
           <Generator key={tab} kind={tab} models={registry.models} defaultText={registry.default_text} />
         )}

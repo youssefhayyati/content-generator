@@ -6,6 +6,8 @@ use App\Jobs\AdaptItem;
 use App\Jobs\FinishProduction;
 use App\Jobs\ProduceCampaign;
 use App\Jobs\RunGeneration;
+use App\Jobs\SoundCampaignVideo;
+use App\Models\Account;
 use App\Models\ActionLog;
 use App\Models\Asset;
 use App\Models\Campaign;
@@ -15,9 +17,11 @@ use App\Models\Generation;
 use App\Models\ItemVariant;
 use App\Models\User;
 use App\Services\Ai\GenerationFailed;
+use App\Services\Ai\Media\GenerationRunner;
 use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Media\AssetStore;
 use App\Services\Publishing\PlatformSpecs;
+use App\Services\Sound\SoundClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -41,6 +45,7 @@ class Pipeline
         private readonly ModelRegistry $models,
         private readonly AssetStore $assets,
         private readonly VideoAssembler $assembler,
+        private readonly SoundClient $sound,
     ) {}
 
     /* ------------------------------------------------------------------ */
@@ -154,6 +159,15 @@ class Pipeline
 
             $image = $this->pick('image');
             $video = $this->pick('video');
+            if ($item->format === 'video' && ! $video && $this->sound->up()) {
+                // No video model, but the studio has a voice: the media team makes the video
+                // itself — narrated, scored and captioned — from the post's own words.
+                $item->update(['status' => 'producing', 'error' => null]);
+                SoundCampaignVideo::dispatch($item->id);
+                $started++;
+
+                continue;
+            }
             if (! $image || ($item->format === 'video' && ! $video)) {
                 $item->update(['status' => 'needs_media', 'error' => 'No '.(! $image ? 'image' : 'video').' model is set up. Upload media for this post, or set one up under Models.']);
                 $missing[] = $item->title;
@@ -285,7 +299,13 @@ class Pipeline
             $order = collect($shots)->pluck('asset_id');
             $clips = Asset::whereIn('id', $order)->get()->sortBy(fn ($a) => $order->search($a->id))->values();
             $film = $this->assembler->concat($item->campaign->user, $clips, Str::slug($item->title) ?: 'campaign-video');
-            $this->withItem($item, fn (CampaignItem $fresh) => $fresh->update(['asset_ids' => $film ? [$film->id] : $clips->pluck('id')->all(), 'status' => 'ready', 'error' => null]));
+            // A joined film gets its voice, music and captions before it's ready; without FlowAI
+            // Sound it's ready as it is.
+            $scoring = $film && $this->sound->up();
+            $this->withItem($item, fn (CampaignItem $fresh) => $fresh->update(['asset_ids' => $film ? [$film->id] : $clips->pluck('id')->all(), 'status' => $scoring ? 'producing' : 'ready', 'error' => null]));
+            if ($scoring) {
+                SoundCampaignVideo::dispatch($item->id, $film->id);
+            }
         } elseif ($states->contains('failed') && ! $states->contains(fn ($s) => in_array($s, ['still', 'moving'], true))) {
             $first = $states->search('failed');
             $this->withItem($item, fn (CampaignItem $fresh) => $fresh->update(['status' => 'failed', 'error' => 'Shot '.($first + 1).' failed: '.($shots[$first]['error'] ?? 'unknown').' Make it again.']));
@@ -460,6 +480,73 @@ class Pipeline
         } elseif (in_array($campaign->stage, ['content_review', 'scheduled'], true)) {
             AdaptItem::dispatch($item->id);
         }
+    }
+
+    /**
+     * The media team's sound pass on a video: the post's hook and message read in its account's
+     * voice, a track in the account's signature mood under it, captions on every word — over
+     * the film the shots made, or the post's reference photo, or a moving gradient. If any of
+     * it fails, the silent film stands; with no film, the item waits for a person.
+     */
+    public function soundVideo(CampaignItem $item, ?Asset $film = null): void
+    {
+        $campaign = $item->campaign;
+        $user = $campaign->user;
+        $account = Account::whereIn('id', $item->account_ids ?: $campaign->accounts()->pluck('id'))->first();
+        $sound = $account?->soundSettings() ?? Account::SOUND_DEFAULTS;
+        $script = Str::limit(trim(preg_replace('/\s+/', ' ', trim("{$item->hook} {$item->message}"))), 700, '');
+        if ($script === '') {
+            $script = Str::limit(Str::before((string) $item->caption, "\n\n"), 700, '');
+        }
+        $step = $campaign->steps()->create(['agent' => 'media', 'status' => 'running', 'started_at' => now(), 'model' => 'sound/kokoro']);
+
+        try {
+            $voice = $this->sounded($user, 'voice', 'sound/kokoro', $script, ['voice' => $sound['voice'], 'speed' => $sound['speed']]);
+            $music = $this->sounded($user, 'music', 'sound/composer', str_replace('-', ' ', ucfirst($sound['mood'])), ['mood' => $sound['mood'], 'seconds' => max(12, (float) $voice->duration + 3), 'energy' => 0.5]);
+            $picture = $film ?? Asset::find($this->reference($item)[0] ?? 0);
+            $reel = $this->sounded($user, 'reel', 'studio/reel', $item->title ?: 'Campaign video', array_filter([
+                'style' => 'bold', 'accent' => $sound['accent'], 'title' => $film ? null : $item->title, 'handle' => $account?->handle,
+                'music_asset_id' => $music->id, 'music_volume' => 0.28, 'captions' => true,
+            ], fn ($v) => $v !== null), array_values(array_filter([$voice->id, $picture?->id])));
+
+            $this->withItem($item, fn (CampaignItem $fresh) => $fresh->update(['asset_ids' => [$reel->id], 'status' => 'ready', 'error' => null]));
+            $step->update([
+                'status' => 'done',
+                'summary' => Str::limit(($film ? 'Scored the film' : 'Made the video').' for “'.$item->title.'”: '.($voice->meta['voice_name'] ?? 'a voice').' reads it, '.($music->meta['label'] ?? 'music').' plays under it, every word captioned.', 250),
+                'output' => ['voice_asset_id' => $voice->id, 'music_asset_id' => $music->id, 'reel_asset_id' => $reel->id],
+                'finished_at' => now(),
+            ]);
+        } catch (GenerationFailed $e) {
+            $step->update(['status' => 'failed', 'error' => $e->getMessage(), 'finished_at' => now()]);
+            $this->withItem($item, fn (CampaignItem $fresh) => $film
+                ? $fresh->update(['asset_ids' => [$film->id], 'status' => 'ready', 'error' => null])
+                : $fresh->update(['status' => 'needs_media', 'error' => 'Couldn’t make the video: '.$e->getMessage().' Upload one, or try again.']));
+        }
+
+        $item->refresh();
+        $this->itemReady($item);
+    }
+
+    /**
+     * Make sound (or a reel) through the studio's own generators, right here, and hand back
+     * what came out. Not tied to the item: the item takes only the finished video.
+     *
+     * @param  array<string, mixed>  $params
+     * @param  list<int>  $inputs
+     */
+    private function sounded(User $user, string $kind, string $model, string $prompt, array $params, array $inputs = []): Asset
+    {
+        $generation = $user->generations()->create([
+            'kind' => $kind, 'model' => $model, 'prompt' => Str::limit($prompt, 3900, ''), 'params' => $params,
+            'input_asset_ids' => $inputs ?: null, 'status' => 'queued',
+        ]);
+        app(GenerationRunner::class)->start($generation);
+        $generation->refresh();
+        if ($generation->status !== 'succeeded') {
+            throw new GenerationFailed($generation->error ?: 'That didn’t come out.');
+        }
+
+        return $generation->outputs()->first() ?? throw new GenerationFailed('Nothing came back.');
     }
 
     /* ------------------------------------------------------------------ */

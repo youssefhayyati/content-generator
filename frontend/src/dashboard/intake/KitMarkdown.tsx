@@ -102,7 +102,7 @@ export function KitMarkdown({ text }: { text: string }) {
           case 'table': {
             const [head, ...body] = b.rows
             return (
-              <div key={i} className="my-3 overflow-x-auto rounded-lg border border-line" data-lenis-prevent>
+              <div key={i} className="my-3 overflow-x-auto rounded-lg border border-line">
                 <table className="w-full min-w-[520px] border-collapse text-left text-[12.5px]">
                   <thead>
                     <tr className="bg-white/[0.03]">
