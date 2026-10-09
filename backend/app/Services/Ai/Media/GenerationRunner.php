@@ -162,6 +162,7 @@ class GenerationRunner
             'higgsfield' => app(HiggsfieldProvider::class),
             'gateway' => app(GatewayImageProvider::class),
             'sound' => app(SoundProvider::class),
+            'voicestudio' => app(VoiceStudioProvider::class),
             'studio' => app(ReelProvider::class),
             'google' => app(GoogleGenAiProvider::class),
             default => throw new GenerationFailed('That provider doesn’t make media.'),

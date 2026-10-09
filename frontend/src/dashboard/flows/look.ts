@@ -160,7 +160,8 @@ export function summaryOf(node: FlowNode, accounts: Account[] | null | undefined
     case 'ai.reply':
       return clip(c.guidance) || 'A short, warm reply'
     case 'ai.narrate':
-      return `${c.voice ? String(c.voice).split('_')[1]?.replace(/^./, (x) => x.toUpperCase()) : 'The account’s voice'} · ${clip(c.text, 24) || '{{draft}}'}`
+      // Kokoro ids read as lang_name (af_heart → Heart); VoiceStudio ids are opaque (vs:…).
+      return `${!c.voice ? 'The account’s voice' : String(c.voice).startsWith('vs:') ? 'VoiceStudio voice' : (String(c.voice).split('_')[1]?.replace(/^./, (x) => x.toUpperCase()) ?? String(c.voice))} · ${clip(c.text, 24) || '{{draft}}'}`
     case 'ai.compose':
       return `${c.mood === 'account' || !c.mood ? 'The account’s mood' : String(c.mood).replace('-', ' ')} · ${c.seconds} s`
     case 'action.reel':

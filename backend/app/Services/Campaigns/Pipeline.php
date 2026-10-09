@@ -22,6 +22,7 @@ use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Media\AssetStore;
 use App\Services\Publishing\PlatformSpecs;
 use App\Services\Sound\SoundClient;
+use App\Services\Sound\VoiceRouter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -499,10 +500,11 @@ class Pipeline
         if ($script === '') {
             $script = Str::limit(Str::before((string) $item->caption, "\n\n"), 700, '');
         }
-        $step = $campaign->steps()->create(['agent' => 'media', 'status' => 'running', 'started_at' => now(), 'model' => 'sound/kokoro']);
+        $voiceModel = VoiceRouter::modelFor($sound['voice']);
+        $step = $campaign->steps()->create(['agent' => 'media', 'status' => 'running', 'started_at' => now(), 'model' => $voiceModel]);
 
         try {
-            $voice = $this->sounded($user, 'voice', 'sound/kokoro', $script, ['voice' => $sound['voice'], 'speed' => $sound['speed']]);
+            $voice = $this->sounded($user, 'voice', $voiceModel, $script, ['voice' => $sound['voice'], 'speed' => $sound['speed']]);
             $music = $this->sounded($user, 'music', 'sound/composer', str_replace('-', ' ', ucfirst($sound['mood'])), ['mood' => $sound['mood'], 'seconds' => max(12, (float) $voice->duration + 3), 'energy' => 0.5]);
             $picture = $film ?? Asset::find($this->reference($item)[0] ?? 0);
             $reel = $this->sounded($user, 'reel', 'studio/reel', $item->title ?: 'Campaign video', array_filter([

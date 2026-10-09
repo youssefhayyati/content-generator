@@ -18,6 +18,7 @@ use App\Services\Ai\PostPrompt;
 use App\Services\Ai\UsageMeter;
 use App\Services\Campaigns\Voice;
 use App\Services\PostQueue;
+use App\Services\Sound\VoiceRouter;
 use App\Services\Studio\Autonomy;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -177,7 +178,7 @@ class Steps
         $account = $this->account($run, $c);
         $sound = $account?->soundSettings() ?? Account::SOUND_DEFAULTS;
         $voice = filled($c['voice'] ?? null) ? $c['voice'] : $sound['voice'];
-        $asset = $this->generate($run, 'voice', 'sound/kokoro', mb_substr($text, 0, 2500), ['voice' => $voice, 'speed' => $sound['speed']]);
+        $asset = $this->generate($run, 'voice', VoiceRouter::modelFor($voice), mb_substr($text, 0, 2500), ['voice' => $voice, 'speed' => $sound['speed']]);
         $name = $asset->meta['voice_name'] ?? $voice;
 
         return ['status' => 'ok', 'summary' => "{$name} read it: ".round((float) $asset->duration, 1).' seconds, every word timed.', 'set' => [

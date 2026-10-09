@@ -177,7 +177,7 @@ export function Writer({ body, onBody, format, platforms, onWriting }: Props) {
             }))}
           />
           {activeModel && !blocked && (
-            <ModelPicker models={models} kind="text" value={activeModel.id} onChange={setModel} align="right" className={cn('w-[210px]', writing && 'pointer-events-none opacity-60')} />
+            <ModelPicker models={models} kind="text" value={activeModel.id} onChange={setModel} align="right" size="sm" className={cn('w-[210px]', writing && 'pointer-events-none opacity-60')} />
           )}
         </div>
       </header>

@@ -90,6 +90,14 @@ the *Talking reel* recipe ties them together; a reel made in a run comes along w
 scheduled. The campaign media team uses it too: a video post with no video model becomes a
 narrated, scored, captioned reel, and a film joined from shots gets the same sound pass.
 
+**VoiceStudio** voices join in as an alternative to the local ones: point `VOICESTUDIO_URL` at a
+VoiceStudio server (plus `VOICESTUDIO_KEY` when it isn't on loopback) and its cloned and designed
+voices appear in every voice picker next to Kokoro's, with a `vs:` prefix on their ids. Anything
+that reads a script — the Sound tab, flows, reels, campaign videos — routes a `vs:` voice to
+VoiceStudio automatically; the local service stays the fallback and keeps the composer and the
+listener. VoiceStudio doesn't time words, so captions for its voices are aligned by the listener
+when a reel is rendered, the same way uploaded audio is treated.
+
 **Mission Control** (`/dashboard/live`) is the wall: a split-flap departures board for the next
 48 hours, the phones and what they're doing, flows at work, Storm Guard weather and the studio's
 latest work, polled every few seconds, with a fullscreen mode for a screen in the room.
@@ -122,6 +130,7 @@ Keys go in `backend/.env`, then `docker compose restart api`:
 | OpenRouter | `OPENROUTER_API_KEY` | free at openrouter.ai/keys; picker lists `:free` models |
 | Ollama | `OLLAMA_URL` | already wired (`http://ollama:11434` in compose) |
 | Higgsfield | `HIGGSFIELD_KEY_ID` / `HIGGSFIELD_KEY_SECRET` | image + video generation |
+| VoiceStudio | `VOICESTUDIO_URL` / `VOICESTUDIO_KEY` | cloned + designed voices; key only off-loopback |
 
 `AI_DEFAULT_TEXT` and `AI_AGENTS_MODEL` choose which registry model writes and plans
 (the demo points both at `ollama/llama3.2:1b`).

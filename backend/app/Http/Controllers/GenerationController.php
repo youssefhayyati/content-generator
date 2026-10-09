@@ -9,6 +9,7 @@ use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Ai\UsageMeter;
 use App\Services\Campaigns\Voice;
+use App\Services\Sound\VoiceRouter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -159,7 +160,7 @@ class GenerationController extends Controller
             'params.rendering_speed' => ['nullable', Rule::in(['TURBO', 'DEFAULT', 'QUALITY'])],
             'params.negative_prompt' => ['nullable', 'string', 'max:500'],
             // Voiceovers
-            'params.voice' => ['nullable', 'string', 'max:40'],
+            'params.voice' => ['nullable', 'string', 'max:64'],
             'params.speed' => ['nullable', 'numeric', 'min:0.5', 'max:1.6'],
             // Music
             'params.mood' => ['nullable', 'string', 'max:40'],
@@ -214,6 +215,10 @@ class GenerationController extends Controller
         $data['model'] ??= $kind === 'text'
             ? $models->defaultText()
             : (collect($models->all($kind))->firstWhere('available', true)['id'] ?? collect($models->all($kind))->first()['id'] ?? null);
+        // A VoiceStudio voice (vs:…) can only be read by VoiceStudio, whichever model was picked.
+        if ($kind === 'voice' && VoiceRouter::isVoiceStudio($data['params']['voice'] ?? null)) {
+            $data['model'] = VoiceRouter::MODEL;
+        }
         if (! $data['model']) {
             abort(422, 'No model can make that yet. Set one up under Models.');
         }

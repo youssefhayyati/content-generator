@@ -16,6 +16,10 @@ class HiggsfieldProvider implements MediaProvider
         $spec = config('ai.providers.higgsfield.models.'.$model['model']);
         $allParams = $generation->params ?? [];
         $params = collect($allParams)->only($spec['params'] ?? [])->filter(fn ($v) => $v !== null && $v !== '')->all();
+        // A shape the model doesn't offer is refused outright (a bare 400), so ask for one it does.
+        if (isset($params['aspect_ratio'])) {
+            $params['aspect_ratio'] = self::fitRatio((string) $params['aspect_ratio'], $spec['capabilities']['aspect_ratios'] ?? []);
+        }
         $body = array_merge($spec['extra'] ?? [], ['prompt' => $generation->prompt], $params);
         $images = $inputs->where('kind', 'image')->values();
 
@@ -44,6 +48,30 @@ class HiggsfieldProvider implements MediaProvider
         $request = $this->client->submit($route, $body, $this->idempotencyKey($generation, $route, $body));
 
         return ['external_id' => $request['request_id'], 'status_url' => $request['status_url']];
+    }
+
+    /**
+     * The shape to ask for: the one wanted if the model offers it, otherwise the closest it does
+     * offer, stepping toward square. Callers ask for the shape a platform wants, and platform
+     * limits cap how tall or wide a picture may be, so moving toward square stays inside them
+     * where the merely nearest shape might not: an Instagram feed post asks for 4:5, and a model
+     * without 4:5 should make 1:1 (allowed) rather than 3:4 (too tall for the feed).
+     *
+     * @param  list<string>  $offered
+     */
+    public static function fitRatio(string $wanted, array $offered): string
+    {
+        $value = fn (string $r): ?float => preg_match('/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/', $r, $m) && (float) $m[1] > 0 && (float) $m[2] > 0 ? (float) $m[1] / (float) $m[2] : null;
+        $w = $value($wanted);
+        if (! $offered || in_array($wanted, $offered, true) || $w === null) {
+            return $wanted;
+        }
+        $shapes = collect($offered)->filter(fn ($r) => $value((string) $r) !== null);
+        $towardSquare = $shapes->filter(fn ($r) => $value($r) >= min($w, 1.0) - 1e-9 && $value($r) <= max($w, 1.0) + 1e-9);
+
+        return ($towardSquare->isNotEmpty() ? $towardSquare : $shapes)
+            ->sortBy(fn ($r) => abs(log($value($r)) - log($w)))
+            ->first() ?? $wanted;
     }
 
     /**
@@ -76,7 +104,10 @@ class HiggsfieldProvider implements MediaProvider
             ]],
             'nsfw' => ['status' => 'failed', 'error' => 'Higgsfield flagged the result as unsafe and withheld it. Edit the prompt and try again.'],
             'canceled' => ['status' => 'failed', 'error' => 'The request was canceled.'],
-            default => ['status' => 'failed', 'error' => $status['error'] ?? 'Higgsfield couldn’t make this one.'],
+            // Higgsfield's own reason is often a bare "Generation failed", which reads like a blip
+            // worth retrying. Name the model, since a model the plan can't run fails every time.
+            default => ['status' => 'failed', 'error' => (config('ai.providers.higgsfield.models.'.str_replace('higgsfield/', '', (string) $generation->model).'.label') ?? 'This model')
+                .' failed on Higgsfield’s side'.(filled($status['error'] ?? null) ? " (“{$status['error']}”)" : '').'. Try again, or pick another model.'],
         };
     }
 }

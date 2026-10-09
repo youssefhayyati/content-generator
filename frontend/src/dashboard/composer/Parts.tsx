@@ -1,34 +1,104 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, Bot, Check, CircleAlert, ImagePlus, LoaderCircle, RotateCcw, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
 import { api, ApiError, type Account, type Asset, type Generation, type Registry, type SpecCheck } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { useApi, useDebounced } from '../data'
+import { CHAR_LIMIT, PLATFORM_ORDER, useApi, useDebounced } from '../data'
 import { MediaPicker, MediaThumb } from '../media/Media'
-import { Label, Panel } from '../ui'
+import { FieldError, Label, Panel } from '../ui'
 
 type Specs = Record<PlatformId, Record<string, { label: string }>>
 
-/** Post as one of your accounts (its platform, its phone), or pick platforms by hand. */
-export function AccountPicker({ accounts, value, onChange }: { accounts: Account[]; value: number | null; onChange: (a: Account | null) => void }) {
-  if (!accounts.length) return null
+/**
+ * Where the post goes, decided before it's written, since the writer, the counter and the
+ * preview all depend on it: one of your accounts (its platform, its phone), or platforms picked
+ * by hand. Picked platforms show their name and the characters left; the rest wait as icons,
+ * so the whole choice fits in a row or two.
+ */
+export function Destination({
+  accounts,
+  accountId,
+  onAccount,
+  platforms,
+  onToggle,
+  length,
+  error,
+}: {
+  accounts: Account[]
+  accountId: number | null
+  onAccount: (a: Account | null) => void
+  platforms: PlatformId[]
+  onToggle: (id: PlatformId) => void
+  /** The caption's length, for each picked platform's characters left. */
+  length: number
+  error?: string
+}) {
+  const account = accounts.find((a) => a.id === accountId) ?? null
   return (
-    <div className="border-t border-line px-5 py-4">
-      <Label>Post as</Label>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Chip on={value === null} onClick={() => onChange(null)}>
-          Any platforms
-        </Chip>
-        {accounts.map((a) => (
-          <Chip key={a.id} on={value === a.id} onClick={() => onChange(a)}>
-            <PlatformIcon id={a.platform} className="size-3.5" />@{a.handle}
-            {a.automation && <Bot className={cn('size-3', value === a.id ? 'text-ink/60' : 'text-accent-soft')} strokeWidth={2} aria-label="Publishes automatically" />}
-          </Chip>
-        ))}
+    <div className="border-b border-line px-5 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <Label>Post to</Label>
+        <span className="font-mono text-[10px] text-dim">
+          {account ? (account.automation ? 'Its phone publishes it' : PLATFORMS[account.platform].name) : `${platforms.length} selected`}
+        </span>
       </div>
+      {accounts.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <Chip on={!account} onClick={() => onAccount(null)}>
+            Pick platforms
+          </Chip>
+          {accounts.map((a) => (
+            <Chip key={a.id} on={a.id === accountId} onClick={() => onAccount(a)}>
+              <PlatformIcon id={a.platform} className="size-3.5" />@{a.handle}
+              {a.automation && <Bot className={cn('size-3', a.id === accountId ? 'text-ink/60' : 'text-accent-soft')} strokeWidth={2} aria-label="Publishes automatically" />}
+            </Chip>
+          ))}
+        </div>
+      )}
+      {!account && (
+        <div className={cn('flex flex-wrap items-center gap-1.5', accounts.length ? 'mt-2' : 'mt-3')}>
+          {PLATFORM_ORDER.map((id) => (
+            <PlatformToggle key={id} id={id} on={platforms.includes(id)} left={CHAR_LIMIT[id] - length} onClick={() => onToggle(id)} />
+          ))}
+        </div>
+      )}
+      <FieldError message={error} />
     </div>
+  )
+}
+
+/** A platform as an icon; picked, it opens to its name and the characters left. */
+function PlatformToggle({ id, on, left, onClick }: { id: PlatformId; on: boolean; left: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label={PLATFORMS[id].name}
+      title={on ? undefined : PLATFORMS[id].name}
+      onClick={onClick}
+      className={cn(
+        'flex h-8 items-center rounded-full border px-2 text-[12px] transition-[background-color,border-color,color] duration-300',
+        on ? 'border-fg bg-fg text-ink' : 'border-line-2 text-muted hover:border-white/30 hover:text-fg',
+      )}
+    >
+      <PlatformIcon id={id} className="size-3.5 shrink-0" />
+      <AnimatePresence initial={false}>
+        {on && (
+          <motion.span
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 'auto', opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.35, ease }}
+            className="flex items-center gap-2 overflow-hidden whitespace-nowrap"
+          >
+            <span className="pl-1.5">{PLATFORMS[id].name}</span>
+            {left <= 9999 && <span className={cn('pr-1 font-mono text-[10px]', left < 0 ? 'text-fail' : 'text-ink/50')}>{left < 0 ? `${-left} over` : left}</span>}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </button>
   )
 }
 
@@ -39,7 +109,7 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
       aria-pressed={on}
       onClick={onClick}
       className={cn(
-        'flex h-9 items-center gap-2 rounded-full border px-3.5 text-[12.5px] transition-[background-color,border-color,color] duration-300',
+        'flex h-8 items-center gap-2 rounded-full border px-3 text-[12px] transition-[background-color,border-color,color] duration-300',
         on ? 'border-fg bg-fg text-ink' : 'border-line-2 text-muted hover:border-white/30 hover:text-fg',
       )}
     >
@@ -136,6 +206,16 @@ function GenerateMedia({ kind, hint, onMade }: { kind: 'image' | 'video'; hint: 
     if (!dirty) setPrompt(hint)
   }, [hint, dirty])
 
+  // The prompt grows to show all of itself (up to five lines) instead of hiding its second line.
+  const field = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = field.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+    // `registry` too: the field only mounts once the models have loaded.
+  }, [prompt, registry])
+
   // Poll while the generation runs; the outputs join the strip when it lands.
   useEffect(() => {
     if (!busy || busy.status === 'succeeded' || busy.status === 'failed' || busy.status === 'canceled') return
@@ -181,12 +261,13 @@ function GenerateMedia({ kind, hint, onMade }: { kind: 'image' | 'video'; hint: 
     <div className="mt-3">
       <div
         className={cn(
-          'flex items-end gap-2 rounded-lg border border-line-2 bg-white/[0.02] py-1.5 pl-3 pr-1.5 transition-[border-color,box-shadow] duration-300',
+          'flex flex-wrap items-end gap-2 rounded-lg border border-line-2 bg-white/[0.02] py-1.5 pl-3 pr-1.5 transition-[border-color,box-shadow] duration-300 sm:flex-nowrap',
           'focus-within:border-accent-soft/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_18%,transparent)]',
         )}
       >
         <Sparkles className={cn('mb-2 size-3.5 shrink-0 text-accent-soft', busy && 'animate-pulse')} strokeWidth={1.75} />
         <textarea
+          ref={field}
           rows={1}
           value={prompt}
           maxLength={2000}
@@ -210,7 +291,7 @@ function GenerateMedia({ kind, hint, onMade }: { kind: 'image' | 'video'; hint: 
           onClick={busy ? undefined : run}
           disabled={!prompt.trim()}
           className={cn(
-            'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-[12.5px] font-medium transition-colors',
+            'flex h-8 shrink-0 basis-full items-center justify-center gap-1.5 rounded-md px-3 text-[12.5px] font-medium transition-colors sm:basis-auto',
             busy
               ? 'cursor-default text-dim'
               : 'bg-accent text-white hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40',

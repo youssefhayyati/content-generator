@@ -16,6 +16,8 @@ use App\Services\Sound\AudioTools;
 use App\Services\Sound\Listener;
 use App\Services\Sound\ReelRenderer;
 use App\Services\Sound\SoundClient;
+use App\Services\Sound\VoiceRouter;
+use App\Services\Sound\VoiceStudioClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -33,14 +35,20 @@ class SoundController extends Controller
     public function __construct(private readonly SoundClient $sound) {}
 
     /** Everything the Sound tab needs to draw itself. */
-    public function index(Request $request, Listener $listener): JsonResponse
+    public function index(Request $request, Listener $listener, VoiceStudioClient $vs): JsonResponse
     {
         $up = $this->sound->up();
+        $vsUp = $vs->up();
+        $voices = collect($up ? $this->sound->voices() : []);
+        if ($vsUp) {
+            // Up but not listing (a key its profiles refuse, say): the local voices still stand.
+            $voices = $voices->concat(rescue(fn () => $vs->voices(), [], report: false));
+        }
 
         return response()->json([
-            'available' => $up,
-            'reason' => $up ? null : ($this->sound->configured() ? 'FlowAI Sound isn’t answering. Start it with docker compose up -d sound.' : 'FlowAI Sound isn’t set up: set SOUND_URL.'),
-            'voices' => $up ? collect($this->sound->voices())->map(fn (array $v) => [...$v, 'sample_url' => "/api/sound/voices/{$v['id']}/sample"])->all() : [],
+            'available' => $up || $vsUp,
+            'reason' => ($up || $vsUp) ? null : ($this->sound->configured() ? 'FlowAI Sound isn’t answering. Start it with docker compose up -d sound.' : 'FlowAI Sound isn’t set up: set SOUND_URL.'),
+            'voices' => $voices->map(fn (array $v) => [...$v, 'sample_url' => "/api/sound/voices/{$v['id']}/sample"])->all(),
             'moods' => $up ? $this->sound->moods() : [],
             'styles' => [
                 ['id' => 'bold', 'label' => 'Bold', 'detail' => 'Full-bleed picture, big words that light up as they’re said.'],
@@ -52,16 +60,18 @@ class SoundController extends Controller
         ]);
     }
 
-    /** A voice reading its sample line, made once and kept. */
-    public function sample(string $voice, AudioTools $tools): BinaryFileResponse
+    /** A voice reading its sample line, made once and kept. VoiceStudio voices included. */
+    public function sample(string $voice, AudioTools $tools, VoiceStudioClient $vs): BinaryFileResponse
     {
-        $known = collect($this->sound->voices())->firstWhere('id', $voice);
+        $voice = urldecode($voice);
+        $studio = VoiceRouter::isVoiceStudio($voice);
+        $known = $studio ? $vs->voice(VoiceRouter::strip($voice)) : collect($this->sound->voices())->firstWhere('id', $voice);
         abort_unless($known, 404);
-        $path = "sound-samples/{$voice}.mp3";
+        $path = 'sound-samples/'.str_replace(':', '-', $voice).'.mp3';
         $disk = Storage::disk('local');
         if (! $disk->exists($path)) {
             try {
-                $said = $this->sound->speak($known['sample'], $voice, 1.0, timings: false);
+                $said = $studio ? $vs->speak($known['sample'], $voice) : $this->sound->speak($known['sample'], $voice, 1.0, timings: false);
             } catch (GenerationFailed $e) {
                 abort(503, $e->getMessage());
             }
@@ -199,12 +209,12 @@ class SoundController extends Controller
     }
 
     /** An account's sound: its voice, its music mood, its reel accent. */
-    public function account(Request $request, Account $account): JsonResponse
+    public function account(Request $request, Account $account, VoiceStudioClient $vs): JsonResponse
     {
         Gate::authorize('update', $account);
-        $voices = collect($this->sound->up() ? $this->sound->voices() : [])->pluck('id')->all();
+        $voices = collect($this->sound->up() ? $this->sound->voices() : [])->concat($vs->up() ? rescue(fn () => $vs->voices(), [], report: false) : [])->pluck('id')->all();
         $data = $request->validate([
-            'voice' => ['sometimes', 'string', $voices ? Rule::in($voices) : 'max:40'],
+            'voice' => ['sometimes', 'string', $voices ? Rule::in($voices) : 'max:64'],
             'speed' => ['sometimes', 'numeric', 'min:0.7', 'max:1.4'],
             'mood' => ['sometimes', 'string', 'max:40'],
             'accent' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],

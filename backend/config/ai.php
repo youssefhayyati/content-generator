@@ -93,6 +93,16 @@ return [
             'url' => env('SOUND_URL', 'http://sound:8000'),
         ],
 
+        // VoiceStudio: cloned and designed voices on a VoiceStudio server, an alternative to the
+        // local voices above. Speaks OpenAI-compatible speech at {url}/v1/audio/speech; the key
+        // is the bearer token its remote auth expects (loopback needs none).
+        'voicestudio' => [
+            'reach' => 'VoiceStudio',
+            'local' => false,
+            'url' => env('VOICESTUDIO_URL'),
+            'key' => env('VOICESTUDIO_KEY'),
+        ],
+
         'ollama' => [
             'reach' => 'Ollama',
             'url' => env('OLLAMA_URL'),

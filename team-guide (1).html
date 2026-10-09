@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hackathon Phone Guide</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1f; --muted: #5f6368; --line: #e3e3df;
+  --accent: #2f6fde; --accent-soft: #e8f0fd; --code-bg: #f1f1ee; --code-text: #1d1d1f;
+  --warn-bg: #fff6e0; --warn-line: #f0c45a; --ok: #1e8e3e; --radius: 10px;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141517; --panel: #1c1d20; --text: #e8e8e6; --muted: #a0a3a8; --line: #2e3034;
+    --accent: #7aa7ff; --accent-soft: #1f2a40; --code-bg: #232428; --code-text: #e8e8e6;
+    --warn-bg: #2f2814; --warn-line: #8a6d1f; --ok: #5bc27a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141517; --panel: #1c1d20; --text: #e8e8e6; --muted: #a0a3a8; --line: #2e3034;
+  --accent: #7aa7ff; --accent-soft: #1f2a40; --code-bg: #232428; --code-text: #e8e8e6;
+  --warn-bg: #2f2814; --warn-line: #8a6d1f; --ok: #5bc27a;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); }
+a { color: var(--accent); }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; }
+nav.toc { position: sticky; top: 0; align-self: start; padding: 32px 0; max-height: 100vh; overflow-y: auto; }
+nav.toc a { display: block; color: var(--muted); text-decoration: none; padding: 4px 0 4px 12px; border-left: 2px solid var(--line); font-size: 14px; }
+nav.toc a:hover { color: var(--text); border-left-color: var(--accent); }
+main { padding: 32px 0 80px; min-width: 0; }
+header h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; }
+header p.lead { color: var(--muted); font-size: 18px; margin: 0 0 24px; }
+h2 { font-size: 22px; margin: 48px 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+h3 { font-size: 17px; margin: 28px 0 8px; }
+p, li { max-width: 72ch; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin: 16px 0; }
+.keybox label { font-weight: 600; display: block; margin-bottom: 8px; }
+.keybox .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.keybox input { flex: 1 1 260px; min-width: 0; font: 14px var(--mono); padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.keybox small { color: var(--muted); display: block; margin-top: 8px; }
+button { font: 600 14px var(--sans); padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:hover { filter: brightness(1.05); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+code { font: 0.92em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+.code { position: relative; margin: 12px 0; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; overflow-x: auto; font: 13.5px/1.55 var(--mono); }
+.code .copy { position: absolute; top: 8px; right: 8px; font-size: 12px; padding: 4px 9px; opacity: .85; }
+.code .lang { position: absolute; top: -10px; left: 12px; font: 11px var(--mono); color: var(--muted); background: var(--bg); padding: 0 6px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px; display: block; overflow-x: auto; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.note { background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; margin: 14px 0; }
+.warn { background: var(--warn-bg); border-left: 3px solid var(--warn-line); border-radius: 6px; padding: 10px 14px; margin: 14px 0; }
+ol.steps > li { margin-bottom: 10px; }
+.theme { position: fixed; right: 16px; bottom: 16px; font-size: 12px; padding: 6px 10px; }
+details summary { cursor: pointer; color: var(--muted); }
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  nav.toc { display: none; }
+  header h1 { font-size: 26px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <a href="#start">Your key</a>
+  <a href="#connect">1. Connect</a>
+  <a href="#model">2. How it works</a>
+  <a href="#look">3. Look at the phone</a>
+  <a href="#drive">4. Drive it yourself</a>
+  <a href="#agent">5. The AI agent</a>
+  <a href="#recipes">6. Recipes</a>
+  <a href="#limits">7. Limits</a>
+  <a href="#errors">8. Errors</a>
+  <a href="#python">9. Python starter</a>
+  <a href="#reference">10. API reference</a>
+  <a href="#help">11. Help</a>
+</nav>
+
+<main>
+<header>
+  <h1>Hackathon phone guide</h1>
+  <p class="lead">Your team has one real Android phone for the event, controlled through an HTTP API. Every touch goes through a hardware board (ESP32) plugged into the phone, so it acts like a real finger. Drive the phone step by step, hand a goal to our AI phone agent, and replay a successful run as a <strong>recipe</strong> without the AI.</p>
+</header>
+
+<section id="start" class="card keybox">
+  <label for="key">Paste your team key to fill it into every example on this page</label>
+  <div class="row">
+    <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="hk_…">
+    <button id="show" type="button">Show</button>
+  </div>
+  <small>The key stays in this browser tab: it is not saved and not sent anywhere. To test it from a browser, open <a href="https://172.26.0.32/hack/v1/docs" target="_blank" rel="noopener">/hack/v1/docs</a>, click <strong>Authorize</strong>, paste the key, then run <code>GET /phone/status</code> with <strong>Try it out</strong>.</small>
+</section>
+
+<div class="card">
+<dl class="facts">
+  <dt>Team console</dt><dd><a href="https://172.26.0.32/team" target="_blank" rel="noopener">https://172.26.0.32/team</a>: sign in with your key to watch your phone live, use keys / swipes / typing, draw tap targets on the screen, run the agent, and manage recipes</dd>
+  <dt>API base URL</dt><dd><code>https://172.26.0.32/hack/v1</code></dd>
+  <dt>Interactive docs</dt><dd><a href="https://172.26.0.32/hack/v1/docs" target="_blank" rel="noopener">https://172.26.0.32/hack/v1/docs</a> (click <strong>Authorize</strong>, paste your key)</dd>
+  <dt>Team key &amp; phone name</dt><dd>Sent to your team separately. The phone name (e.g. <code>team-3-phone</code>) is what <code>device_id</code> shows in answers.</dd>
+  <dt>CA certificate</dt><dd><button id="dlca" type="button">Download hack-root-ca.crt</button></dd>
+</dl>
+</div>
+
+<div class="warn"><strong>Keep the key secret.</strong> Anyone holding it controls your phone and sees your runs. Don't commit it to git or post it in shared channels. If it leaks, ask the organisers to rotate it; the old key stops working at once.</div>
+
+<h2 id="connect">1. Connect (5 minutes)</h2>
+<p>The server uses its own certificate authority. Download <code>hack-root-ca.crt</code> (button above) into your working folder and point your tools at it.</p>
+<div class="code" data-lang="bash"><pre>export HACK=https://172.26.0.32/hack/v1
+export KEY=YOUR_TEAM_KEY
+export CA=$PWD/hack-root-ca.crt
+
+curl --cacert $CA -H "Authorization: Bearer $KEY" $HACK/phone/status</pre></div>
+<p>Expected answer:</p>
+<div class="code" data-lang="json"><pre>{"ok": true, "data": {"device_id": "team-3-phone", "online": true, "ble_linked": true, "busy": null,
+ "screen": {"w": 1080, "h": 2400}, "rotation": 0, "current_app": null}}</pre></div>
+<table>
+  <tr><th>Tool</th><th>Trust the CA with</th></tr>
+  <tr><td>curl (Linux / macOS)</td><td><code>--cacert hack-root-ca.crt</code></td></tr>
+  <tr><td>curl.exe (Windows)</td><td><code>--cacert hack-root-ca.crt --ssl-no-revoke</code> (our CA publishes no revocation list)</td></tr>
+  <tr><td>Python requests / httpx</td><td><code>verify="hack-root-ca.crt"</code></td></tr>
+  <tr><td>Node.js</td><td><code>NODE_EXTRA_CA_CERTS=hack-root-ca.crt node app.js</code></td></tr>
+  <tr><td>Browser (for /docs)</td><td>Import the file as a trusted root, or accept the warning once</td></tr>
+</table>
+<div class="note">Windows PowerShell: <code>curl</code> is an alias for <code>Invoke-WebRequest</code>. Type <strong><code>curl.exe</code></strong>, and use <code>$env:KEY="…"</code> instead of <code>export</code>.</div>
+
+<h2 id="model">2. How it works</h2>
+<ul>
+  <li><strong>One key = one phone.</strong> Every phone call is <code>/phone/…</code>; your key decides which phone. You only ever see your own phone, tasks, recipes and targets.</li>
+  <li><strong>Envelope.</strong> JSON answers are <code>{"ok": true, "data": …}</code> or <code>{"ok": false, "error": {"code": "…", "message": "…"}}</code>. Screenshots (image bytes) and live streams (server-sent events) are the exceptions.</li>
+  <li><strong>Two ways to tap.</strong> A screen point in pixels (<code>{"x": 540, "y": 1200}</code>), or a <strong>target</strong>: a named box you define once; the tap lands at its centre, so your scripts keep working if you re-calibrate. See <a href="#drive">section 4</a>.</li>
+  <li><strong>Manual mode (emergencies).</strong> The team console's <em>Manual</em> screen mode is a smooth scrcpy view of your phone; switch on <em>control</em> only if you are stuck. That input goes over adb instead of the board, it is logged, and it is blocked while your agent or recipe run holds the phone.</li>
+  <li><strong>Inputs are real.</strong> Each tap / type / key goes through the board and returns <code>{"transport": "ble", "ms": …}</code>. Sometimes the board doesn't confirm (<code>504 INPUT_UNCONFIRMED</code>): the action <em>may or may not</em> have happened, so look at the screen before retrying.</li>
+  <li><strong>One job at a time.</strong> While an agent task or recipe run is active, your own inputs get <code>409 DEVICE_BUSY</code>. Wait or cancel it.</li>
+</ul>
+
+<h2 id="look">3. Look at the phone</h2>
+<div class="code" data-lang="bash"><pre># screenshot (PNG; add ?format=jpeg&amp;max_width=540 for a small one). Max 1 per second.
+curl --cacert $CA -H "Authorization: Bearer $KEY" "$HACK/phone/screenshot" -o screen.png
+
+# screen size and density / rotation
+curl --cacert $CA -H "Authorization: Bearer $KEY" $HACK/phone/geometry
+curl --cacert $CA -H "Authorization: Bearer $KEY" $HACK/phone/rotation</pre></div>
+
+<h3>Live view (read-only)</h3>
+<p><code>GET /phone/live</code> is a server-sent-event stream of about 2 JPEG frames per second (<code>event: frame</code> with <code>jpeg_b64</code>). While your agent task runs it shows the agent's own view; otherwise it polls the phone. It doesn't count against your screenshot limit. Max 3 open streams per team.</p>
+<div class="code" data-lang="python"><pre># live.py: keeps latest.jpg updated with the phone screen (Ctrl+C to stop)
+import base64, json, requests
+
+H = {"Authorization": "Bearer YOUR_TEAM_KEY"}
+with requests.get("https://172.26.0.32/hack/v1/phone/live", headers=H, stream=True,
+                  verify="hack-root-ca.crt", timeout=(10, 60)) as r:
+    event = None
+    for line in r.iter_lines(decode_unicode=True):
+        if line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:") and event == "frame":
+            frame = json.loads(line[5:])
+            open("latest.jpg", "wb").write(base64.b64decode(frame["jpeg_b64"]))
+        elif line.startswith("data:") and event == "status":
+            print("phone:", line[5:])</pre></div>
+
+<h3>Activity</h3>
+<p><code>GET /activity</code> lists your latest calls and task changes, newest first; <code>GET /activity/stream</code> streams them live. It's the quickest way to see what really happened.</p>
+
+<h2 id="drive">4. Drive it yourself</h2>
+<h3>Keys, typing, swiping, apps</h3>
+<div class="code" data-lang="bash"><pre>A="Authorization: Bearer $KEY"; J="Content-Type: application/json"
+
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/key   -d '{"key":"home"}'
+#   keys: home back enter tab esc search volume_up volume_down
+
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/type  -d '{"text":"hello world"}'
+#   printable ASCII only; for a new line send the key "enter"
+
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/swipe -d '{"direction":"up","distance":"medium"}'
+#   direction: up down left right   distance: short medium long
+
+curl --cacert $CA -H "$A" $HACK/phone/apps                  # the apps you may open
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/app-start -d '{"package":"com.android.settings"}'
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/app-stop  -d '{"package":"com.android.settings"}'</pre></div>
+<p>Allowed apps: <code>com.facebook.katana</code>, <code>com.android.settings</code>, <code>com.google.android.apps.photos</code>, <code>com.google.android.GoogleCamera</code>.</p>
+
+<h3>Tapping a point</h3>
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/tap        -d '{"x":540,"y":1200}'
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/long-press -d '{"x":540,"y":1200,"ms":1200}'</pre></div>
+<p>Pixels of the screenshot (see <code>/phone/geometry</code>). A point outside the screen gets <code>422 TARGET_OUTSIDE_SCREEN</code>.</p>
+
+<h3>Tapping a named target (recommended for scripts)</h3>
+<ol class="steps">
+  <li>Take a screenshot and find the element in <strong>screenshot pixels</strong> (check <code>/phone/geometry</code>; typically 1080 × 2400). Any image viewer that shows pixel positions works.</li>
+  <li>Save it as a named box: top-left corner <code>x, y</code> plus width <code>w</code> and height <code>h</code>.
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" -H "$J" -X PUT $HACK/phone/targets/settings-search \
+     -d '{"x":60,"y":310,"w":960,"h":120,"app":"com.android.settings","description":"search bar"}'</pre></div></li>
+  <li>Check where it would tap. This does <strong>not</strong> tap:
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" -X POST $HACK/phone/targets/settings-search/test</pre></div></li>
+  <li>Tap it, or long-press it:
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/tap        -d '{"target":"settings-search"}'
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/phone/long-press -d '{"target":"settings-search","ms":1200}'</pre></div></li>
+</ol>
+<p>Target names: lowercase letters, digits, <code>.</code> <code>_</code> <code>-</code>, max 64 characters. <code>GET /phone/targets</code> lists yours; <code>DELETE /phone/targets/{name}</code> removes one. A box must be inside the screen and at least 8 px wide and high.</p>
+
+<h3>Upload media to the phone</h3>
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" -X POST $HACK/phone/media -F "file=@photo.jpg"
+# -> {"device_path": "...", "bytes": ..., "mime": "image/jpeg"}   it appears in the phone's gallery</pre></div>
+<p>JPEG, PNG, WebP or MP4, up to 50 MB. <code>GET /phone/media</code> lists your uploads.</p>
+
+<h2 id="agent">5. The AI agent</h2>
+<p>Give a goal in plain language. Our phone agent (a vision LLM) looks at the screen and acts through the same board.</p>
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/tasks \
+     -d '{"goal":"Open the Settings app and tell me the Android version of this phone.","mode":"flash"}'
+# -> {"ok":true,"data":{"id":"&lt;task id&gt;","status":"queued",...}}
+
+curl --cacert $CA -H "$A" $HACK/tasks/&lt;task id&gt;          # queued -> running -> idle / succeeded / failed
+curl --cacert $CA -H "$A" $HACK/tasks/&lt;task id&gt;/events   # every step, action and screenshot</pre></div>
+<ul>
+  <li><code>mode</code>: <code>flash</code> is fast; <code>pro</code> is slower and adds an independent check of the answer (<code>verified</code>, <code>verdict</code>).</li>
+  <li>Structured output: <code>"output_format": "json", "output_schema": {…}</code> puts the result in <code>result_data</code>.</li>
+  <li><code>status: idle</code> means the agent finished and waits a few minutes for a follow-up: <code>POST /tasks/{id}/messages {"text": "now also …"}</code>. <code>POST /tasks/{id}/cancel</code> ends it.</li>
+  <li>If the agent asks for permission, the task becomes <code>awaiting_approval</code>: <code>GET /approvals?status=pending</code>, then <code>POST /approvals/{id} {"approved": true}</code>.</li>
+  <li><code>GET /tasks/{id}/stream</code> streams the events live; <code>GET /tasks/{id}/screenshots/{n}</code> returns step screenshots.</li>
+  <li>For scale: the Android-version goal above takes about 5 steps and 1½ minutes.</li>
+</ul>
+
+<h3>Run record: your proof</h3>
+<div class="code" data-lang="bash"><pre>curl --cacert $CA -H "$A" $HACK/tasks/&lt;task id&gt;/run-record</pre></div>
+<p>Steps (each with its transport), evidence, model calls and tokens, wall-clock time, and an <code>outcome</code>:</p>
+<ul>
+  <li><code>confirmed</code>: succeeded <strong>with</strong> independent evidence (a pro verdict, or a replay whose success check passed);</li>
+  <li><code>uncertain</code>: finished but not proven;</li>
+  <li><code>failed</code>: failed or cancelled.</li>
+</ul>
+
+<h2 id="recipes">6. Recipes: redo it without the AI</h2>
+<p>A successful agent run can be compiled into a <strong>recipe</strong>: the same steps, replayed directly on the phone with <strong>0 LLM tokens</strong>. If the screen has changed, the agent repairs just that step (<code>allow_heal</code>) and saves a new version.</p>
+<div class="code" data-lang="bash"><pre># 1. compile a finished task (status "compiling", then "draft" after ~30 s; poll GET /recipes/&lt;id&gt;)
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/tasks/&lt;task id&gt;/recipe -d '{"name":"android version"}'
+
+# 2. activate the version
+curl --cacert $CA -H "$A" -H "$J" -X PATCH $HACK/recipes/&lt;recipe id&gt; -d '{"activate_version":1}'
+
+# 3. replay: returns a task with run_mode "replay"; poll it like any task and check "tokens": 0
+curl --cacert $CA -H "$A" -H "$J" -X POST $HACK/recipes/&lt;recipe id&gt;/run -d '{}'</pre></div>
+<p><code>GET /recipes</code> lists yours. <code>GET /recipes/{id}/versions/{v}</code> shows the steps. You can edit them with <code>PATCH /recipes/{id} {"body": …}</code>, which saves a new version.</p>
+
+<h2 id="limits">7. Limits</h2>
+<table>
+  <tr><th>What</th><th>Limit</th></tr>
+  <tr><td>Inputs (tap, long-press, swipe, type, key, app-start / stop)</td><td>60 per minute</td></tr>
+  <tr><td>Screenshots</td><td>1 per second (the live view doesn't count)</td></tr>
+  <tr><td>Agent calls (new tasks, recipe runs, compiles, follow-ups)</td><td>10 per minute</td></tr>
+  <tr><td>Agent tasks / recipe runs</td><td>1 at a time on your phone</td></tr>
+  <tr><td>Per agent task</td><td>40 steps, 15 minutes</td></tr>
+  <tr><td>Agent tokens for the event</td><td>2,000,000 per team</td></tr>
+  <tr><td>Live streams</td><td>3 open at once</td></tr>
+</table>
+<p><code>GET /me</code> shows your team and its limits; <code>GET /usage</code> shows what you've used and when each limit resets.</p>
+
+<h2 id="errors">8. Errors and what to do</h2>
+<table>
+  <tr><th>HTTP / code</th><th>Meaning</th><th>Do this</th></tr>
+  <tr><td>401 <code>UNAUTHORIZED</code></td><td>Missing or wrong key</td><td>Check the <code>Authorization: Bearer</code> header</td></tr>
+  <tr><td>400 <code>VALIDATION</code></td><td>Bad request body</td><td><code>error.details</code> says which field</td></tr>
+  <tr><td>409 <code>DEVICE_BUSY</code></td><td>An agent task / recipe run (or another of your calls) holds the phone</td><td>Wait, or cancel the task in <code>details.task_id</code></td></tr>
+  <tr><td>409 <code>SCREEN_SECURE</code></td><td>The app blocks screenshots (e.g. a password screen)</td><td>Navigate away</td></tr>
+  <tr><td>422 <code>TARGET_OUTSIDE_SCREEN</code></td><td>The target box isn't on the screen</td><td>Recalibrate the target</td></tr>
+  <tr><td>429 <code>RATE_LIMITED</code></td><td>Too fast</td><td>Wait <code>details.retry_after_s</code></td></tr>
+  <tr><td>429 <code>TOKEN_CAP</code></td><td>Agent token budget used up</td><td>Use recipes / manual control; ask the organisers</td></tr>
+  <tr><td>502 <code>DEVICE_ERROR</code> / <code>INPUT_POLICY</code></td><td>The phone or board failed the action</td><td>Screenshot, retry once; tell the organisers if it repeats</td></tr>
+  <tr><td>503 <code>DEVICE_OFFLINE</code></td><td>Phone or board offline</td><td>Tell the organisers: they can swap in a spare (your key and phone name stay the same)</td></tr>
+  <tr><td>503 <code>PAUSED</code></td><td>Organisers paused all phones</td><td>Wait; reads still work</td></tr>
+  <tr><td>503 <code>DISK_FULL</code></td><td>Server storage almost full</td><td>Retry later; manual control still works</td></tr>
+  <tr><td>504 <code>INPUT_UNCONFIRMED</code></td><td>The board didn't confirm</td><td><strong>Screenshot first</strong>: the input may have happened</td></tr>
+</table>
+
+<h2 id="python">9. Python starter</h2>
+<div class="code" data-lang="python"><pre># pip install requests
+import requests
+
+BASE = "https://172.26.0.32/hack/v1"
+S = requests.Session()
+S.headers["Authorization"] = "Bearer YOUR_TEAM_KEY"
+S.verify = "hack-root-ca.crt"
+
+def api(method, path, **kw):
+    r = S.request(method, BASE + path, timeout=60, **kw)
+    if r.headers.get("content-type", "").startswith("application/json"):
+        body = r.json()
+        if not body.get("ok"):
+            raise RuntimeError(f"{r.status_code} {body['error']['code']}: {body['error']['message']}")
+        return body["data"]
+    r.raise_for_status()
+    return r.content            # screenshots
+
+print(api("GET", "/phone/status"))
+api("POST", "/phone/key", json={"key": "home"})
+open("screen.png", "wb").write(api("GET", "/phone/screenshot"))
+task = api("POST", "/tasks", json={"goal": "Open Settings and tell me the Android version."})
+print("task", task["id"], task["status"])</pre></div>
+
+<h2 id="reference">10. API reference</h2>
+<p>All paths are under <code>https://172.26.0.32/hack/v1</code>. The full, clickable reference is at <a href="https://172.26.0.32/hack/v1/docs" target="_blank" rel="noopener">/hack/v1/docs</a>.</p>
+<table>
+  <tr><th>Method</th><th>Path</th><th>What</th></tr>
+  <tr><td>GET</td><td><code>/phone/status</code></td><td>online, board linked, busy, screen, rotation, current app</td></tr>
+  <tr><td>GET</td><td><code>/phone/geometry</code> · <code>/phone/rotation</code></td><td>screen size / density; rotation</td></tr>
+  <tr><td>GET</td><td><code>/phone/screenshot?format=png|jpeg&amp;max_width=</code></td><td>image bytes</td></tr>
+  <tr><td>GET</td><td><code>/phone/live</code></td><td>live view (SSE, read-only)</td></tr>
+  <tr><td>POST</td><td><code>/phone/tap</code> · <code>/phone/long-press</code></td><td><code>{target}</code> or <code>{x, y}</code> · plus <code>ms</code> for long-press</td></tr>
+  <tr><td>POST</td><td><code>/phone/swipe</code></td><td><code>{direction, distance}</code></td></tr>
+  <tr><td>POST</td><td><code>/phone/type</code> · <code>/phone/key</code></td><td><code>{text}</code> · <code>{key}</code></td></tr>
+  <tr><td>GET / POST</td><td><code>/phone/apps</code> · <code>/phone/app-start</code> · <code>/phone/app-stop</code></td><td>list / <code>{package}</code></td></tr>
+  <tr><td>POST / GET</td><td><code>/phone/media</code></td><td>upload (multipart <code>file</code>) / list</td></tr>
+  <tr><td>GET / PUT / DELETE</td><td><code>/phone/targets[/{name}]</code></td><td>your named tap targets</td></tr>
+  <tr><td>POST</td><td><code>/phone/targets/{name}/test</code></td><td>where a tap would land (no tap)</td></tr>
+  <tr><td>POST / GET</td><td><code>/tasks</code> · <code>/tasks/{id}</code></td><td>create / list / get agent tasks</td></tr>
+  <tr><td>GET</td><td><code>/tasks/{id}/events</code> · <code>/stream</code> · <code>/screenshots/{n}</code> · <code>/run-record</code></td><td>steps, live events, screenshots, proof</td></tr>
+  <tr><td>POST</td><td><code>/tasks/{id}/messages</code> · <code>/tasks/{id}/cancel</code></td><td>follow-up / stop</td></tr>
+  <tr><td>GET / POST</td><td><code>/approvals</code> · <code>/approvals/{id}</code></td><td>pending approvals / answer one</td></tr>
+  <tr><td>POST</td><td><code>/tasks/{id}/recipe</code></td><td>compile a recipe</td></tr>
+  <tr><td>GET / PATCH / DELETE</td><td><code>/recipes[/{id}]</code> · <code>/recipes/{id}/versions[/{v}]</code></td><td>your recipes</td></tr>
+  <tr><td>POST</td><td><code>/recipes/{id}/run</code></td><td>replay (<code>{params?, allow_heal}</code>)</td></tr>
+  <tr><td>GET</td><td><code>/me</code> · <code>/usage</code> · <code>/activity</code> · <code>/activity/stream</code></td><td>team, usage, what happened</td></tr>
+</table>
+
+<h2 id="help">11. Help</h2>
+<p>Phone offline, board not responding, or something on the server looks wrong: tell the organisers and include the <code>error.code</code> and the task id if there is one.</p>
+</main>
+</div>
+
+<button class="theme" id="theme" type="button" aria-label="Toggle colour theme">Theme</button>
+
+<script>
+(function () {
+  var CA = "-----BEGIN CERTIFICATE-----\n" +
+    "MIIBpTCCAUqgAwIBAgIRANFhtdhxp9KNBmKPGzO875UwCgYIKoZIzj0EAwIwMDEu\n" +
+    "MCwGA1UEAxMlQ2FkZHkgTG9jYWwgQXV0aG9yaXR5IC0gMjAyNiBFQ0MgUm9vdDAe\n" +
+    "Fw0yNjEwMDgxMTIxNTZaFw0zNjA4MTYxMTIxNTZaMDAxLjAsBgNVBAMTJUNhZGR5\n" +
+    "IExvY2FsIEF1dGhvcml0eSAtIDIwMjYgRUNDIFJvb3QwWTATBgcqhkjOPQIBBggq\n" +
+    "hkjOPQMBBwNCAAS6eWfXWxUqnWT7XMS94obFuR2UuU9XsPUjYSDcul0RlkVbbh6w\n" +
+    "Nhip2puSVw6gi/+Nc8MietVEIEM7AcKm/2wto0UwQzAOBgNVHQ8BAf8EBAMCAQYw\n" +
+    "EgYDVR0TAQH/BAgwBgEB/wIBATAdBgNVHQ4EFgQUiAxk22n/hN76jZ7a8fIyy7yS\n" +
+    "rc4wCgYIKoZIzj0EAwIDSQAwRgIhAK9sI8EXHLvpM+tyr5/vIXwGVkjQs9Vg8R/f\n" +
+    "hYFKrfi4AiEAvlH1IC0yOT787bn80iG/JPLY49M2aXZu+WAenOfpu9c=\n" +
+    "-----END CERTIFICATE-----\n";
+  var PLACEHOLDER = "YOUR_TEAM_KEY";
+
+  // code blocks: remember the original text, add a label and a copy button
+  var blocks = Array.prototype.slice.call(document.querySelectorAll(".code"));
+  blocks.forEach(function (b) {
+    var pre = b.querySelector("pre");
+    b.dataset.src = pre.textContent;
+    if (b.dataset.lang) { var l = document.createElement("span"); l.className = "lang"; l.textContent = b.dataset.lang; b.appendChild(l); }
+    var btn = document.createElement("button");
+    btn.className = "copy"; btn.type = "button"; btn.textContent = "Copy";
+    btn.addEventListener("click", function () {
+      var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1200); };
+      if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(pre.textContent).then(done, fallback); } else { fallback(); }
+      function fallback() { var t = document.createElement("textarea"); t.value = pre.textContent; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); done(); } catch (e) {} t.remove(); }
+    });
+    b.appendChild(btn);
+  });
+
+  var input = document.getElementById("key");
+  function render() {
+    var key = input.value.trim() || PLACEHOLDER;
+    blocks.forEach(function (b) { b.querySelector("pre").textContent = b.dataset.src.split(PLACEHOLDER).join(key); });
+  }
+  input.addEventListener("input", render);
+  document.getElementById("show").addEventListener("click", function (e) {
+    var hidden = input.type === "password"; input.type = hidden ? "text" : "password"; e.target.textContent = hidden ? "Hide" : "Show";
+  });
+
+  document.getElementById("dlca").addEventListener("click", function () {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([CA], { type: "application/x-x509-ca-cert" }));
+    a.download = "hack-root-ca.crt"; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  });
+
+  document.getElementById("theme").addEventListener("click", function () {
+    var root = document.documentElement, cur = root.getAttribute("data-theme");
+    var dark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", dark ? "light" : "dark");
+  });
+})();
+</script>
+</body>
+</html>

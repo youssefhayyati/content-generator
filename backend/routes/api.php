@@ -25,6 +25,7 @@ use App\Http\Controllers\FlowRunController;
 use App\Http\Controllers\GenerationController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\InboxNoteController;
+use App\Http\Controllers\InspirationController;
 use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
@@ -66,10 +67,10 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('inspirations/discover', [\App\Http\Controllers\InspirationController::class, 'discover'])->middleware('throttle:30,1');
-    Route::get('inspirations', [\App\Http\Controllers\InspirationController::class, 'index']);
-    Route::post('inspirations', [\App\Http\Controllers\InspirationController::class, 'store']);
-    Route::delete('inspirations/{id}', [\App\Http\Controllers\InspirationController::class, 'destroy']);
+    Route::get('inspirations/discover', [InspirationController::class, 'discover'])->middleware('throttle:30,1');
+    Route::get('inspirations', [InspirationController::class, 'index']);
+    Route::post('inspirations', [InspirationController::class, 'store']);
+    Route::delete('inspirations/{id}', [InspirationController::class, 'destroy']);
     Route::get('user', [ProfileController::class, 'show']);
     Route::patch('user', [ProfileController::class, 'update']);
     Route::delete('user', [ProfileController::class, 'destroy']);
@@ -206,7 +207,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Sound: voices and moods, samples, dictation, scripts, transcripts, an account's sound.
     Route::get('sound', [SoundController::class, 'index']);
-    Route::get('sound/voices/{voice}/sample', [SoundController::class, 'sample'])->where('voice', '[a-z]{2}_[a-z]+')->middleware('throttle:60,1');
+    Route::get('sound/voices/{voice}/sample', [SoundController::class, 'sample'])->where('voice', '[^/]+')->middleware('throttle:60,1');
     Route::post('sound/dictate', [SoundController::class, 'dictate'])->middleware(['verified', 'throttle:intake']);
     Route::post('sound/script', [SoundController::class, 'script'])->middleware(['verified', 'throttle:ai']);
     Route::get('assets/{asset}/words', [SoundController::class, 'words']);

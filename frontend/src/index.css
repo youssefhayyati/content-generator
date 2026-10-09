@@ -353,3 +353,29 @@ html[data-palette='mono'] {
   from { transform: translateY(-100%); }
   to { transform: translateY(300%); }
 }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-accent) / 0.16) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-accent) / 0.16);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--color-accent) / 0.28);
+  background-clip: padding-box;
+}

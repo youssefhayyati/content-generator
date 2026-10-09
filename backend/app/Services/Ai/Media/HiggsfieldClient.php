@@ -119,7 +119,8 @@ class HiggsfieldClient
             $r->successful() => $r,
             in_array($r->status(), [401, 403], true) => throw new GenerationFailed('Higgsfield rejected the key.'),
             $r->status() === 402 => throw new GenerationFailed('Higgsfield says the plan is out of credit.'),
-            $r->status() === 422 => throw new GenerationFailed('Higgsfield didn’t accept those settings: '.$this->reason($r).'.'),
+            // A 400 is a refusal of the request's contents too (an unsupported shape, say): say why.
+            in_array($r->status(), [400, 422], true) => throw new GenerationFailed('Higgsfield didn’t accept those settings: '.$this->reason($r).'.'),
             $r->status() === 429 => throw new GenerationFailed('Higgsfield is rate limiting. Give it a minute.'),
             default => throw new GenerationFailed("Higgsfield couldn’t take the request ({$r->status()})."),
         };

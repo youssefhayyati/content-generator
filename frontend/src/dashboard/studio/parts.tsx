@@ -26,6 +26,7 @@ export function ModelPicker({
   kind,
   className,
   align = 'left',
+  size = 'md',
 }: {
   models: ModelInfo[]
   value: string | null
@@ -33,15 +34,20 @@ export function ModelPicker({
   kind?: ModelInfo['kind']
   className?: string
   align?: 'left' | 'right'
+  /** `sm` sits in a toolbar beside other h-7 controls. */
+  size?: 'md' | 'sm'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  // The list is portaled to <body>, so it isn't inside `ref`: check it on its own.
+  const listRef = useRef<HTMLDivElement>(null)
+  const inList = (target: EventTarget | null) => !!listRef.current?.contains(target as Node)
   const list = models.filter((m) => !kind || m.kind === kind)
   const current = list.find((m) => m.id === value)
 
   useEffect(() => {
     if (!open) return
-    const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
+    const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && !inList(e.target) && setOpen(false)
     const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
     window.addEventListener('pointerdown', down)
     window.addEventListener('keydown', key)
@@ -61,9 +67,11 @@ export function ModelPicker({
     const r = ref.current.getBoundingClientRect()
     setPos(align === 'right' ? { top: r.bottom + 6, right: window.innerWidth - r.right } : { top: r.bottom + 6, left: r.left })
   }, [open, align])
+  // A page scroll would leave the fixed list behind its button, so it closes. Scrolling the list
+  // itself (wheel, touch or its scrollbar) is just browsing the options.
   useEffect(() => {
     if (!open) return
-    const close = () => setOpen(false)
+    const close = (e: Event) => !inList(e.target) && setOpen(false)
     window.addEventListener('scroll', close, true)
     return () => window.removeEventListener('scroll', close, true)
   }, [open])
@@ -75,17 +83,27 @@ export function ModelPicker({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex h-9 w-full items-center gap-2 rounded-md border border-line-2 bg-white/[0.02] px-3 text-left text-[12.5px] transition-colors hover:border-white/20"
+        title={current ? `${current.label} · ${reachLabel(current)}` : undefined}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-md border bg-white/[0.02] text-left transition-colors',
+          size === 'sm' ? 'h-7 border-line px-2 text-[11.5px] hover:border-line-2' : 'h-9 border-line-2 px-3 text-[12.5px] hover:border-white/20',
+        )}
       >
         <Cpu className="size-3.5 shrink-0 text-dim" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate">{current?.label ?? (list.length ? 'Pick a model' : 'No models yet')}</span>
-        {current && <span className="hidden shrink-0 rounded border border-line-2 px-1.5 py-px font-mono text-[9.5px] text-dim sm:inline">{reachLabel(current)}</span>}
+        {/* The chosen model's name comes first. The reach badge shares a one-line row that wraps
+            onto a hidden second line, so it shows only when it fits whole beside the name and
+            never squeezes the name to make room. */}
+        <span className="flex h-[18px] min-w-0 flex-1 flex-wrap items-center gap-x-2 overflow-hidden">
+          <span className="min-w-0 max-w-full truncate leading-[18px]">{current?.label ?? (list.length ? 'Pick a model' : 'No models yet')}</span>
+          {current && <span className="shrink-0 rounded border border-line-2 px-1.5 py-px font-mono text-[9.5px] leading-[14px] text-dim">{reachLabel(current)}</span>}
+        </span>
         <ChevronDown className={cn('size-3.5 shrink-0 text-dim transition-transform', open && 'rotate-180')} />
       </button>
       {createPortal(
         <AnimatePresence>
           {open && pos && (
             <motion.div
+              ref={listRef}
               role="listbox"
               initial={{ opacity: 0, y: -6, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}

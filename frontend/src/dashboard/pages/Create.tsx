@@ -19,12 +19,12 @@ import {
   useApi,
   useInvalidate,
 } from '../data'
-import { AccountPicker, ChecksPanel, MediaStrip } from '../composer/Parts'
+import { ChecksPanel, Destination, MediaStrip } from '../composer/Parts'
 import { PostPreview } from '../PostPreview'
 import { useOverview, useUser } from '../Shell'
 import { useToast } from '../toast'
 import { Writer } from '../Writer'
-import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Panel, Segmented, Skeleton, StateBadge, Stagger } from '../ui'
+import { Btn, FieldError, inputClass, Modal, PageHeader, Panel, Segmented, Skeleton, StateBadge, Stagger } from '../ui'
 
 type When = 'draft' | 'queue' | 'pick' | 'published'
 
@@ -40,6 +40,15 @@ const ACTION: Record<When, { label: string; icon: typeof Send }> = {
   pick: { label: 'Schedule', icon: CalendarClock },
   published: { label: 'Mark as published', icon: Check },
 }
+
+const WHEN: Array<{ value: When; label: string; icon: typeof Send }> = [
+  { value: 'draft', label: 'Draft', icon: FileText },
+  { value: 'queue', label: 'Queue', icon: ListPlus },
+  { value: 'pick', label: 'Schedule', icon: CalendarClock },
+  { value: 'published', label: 'Posted', icon: Check },
+]
+
+const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 
 const count = (s: string) => [...s].length
 
@@ -118,7 +127,8 @@ export default function Create() {
   }, [postId, toast, navigate])
 
   const active = preview && platforms.includes(preview) ? preview : platforms[0]
-  const strictest = platforms.length ? Math.min(...platforms.map((p) => CHAR_LIMIT[p])) : null
+  // The counter measures against the tightest limit among the picked platforms, and says which.
+  const tightest = platforms.length ? platforms.reduce((a, b) => (CHAR_LIMIT[b] < CHAR_LIMIT[a] ? b : a)) : null
   const length = count(body)
 
   const togglePlatform = (id: PlatformId) => {
@@ -234,6 +244,7 @@ export default function Create() {
   }, [])
 
   const Action = ACTION[when]
+  const problem = errors.scheduled_at ?? errors.queue ?? errors.checks ?? errors.platforms ?? errors.body
 
   return (
     <div>
@@ -272,10 +283,21 @@ export default function Create() {
           <Skeleton className="h-[460px] rounded-xl" />
         </div>
       ) : (
-        <div className="mt-10 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-          <Stagger i={0} className="space-y-4">
+        <div className="mt-10 flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+          {/* On a phone this column dissolves into the page (contents), so the bar inside it can be
+              ordered after the preview; beside the preview it is a real column. */}
+          <Stagger i={0} className="contents min-w-0 lg:block lg:space-y-4">
             <Writer body={body} onBody={changeBody} format={format} platforms={platforms} onWriting={setWriting} />
             <section className="rounded-xl border border-line bg-panel">
+              <Destination
+                accounts={accounts ?? []}
+                accountId={accountId}
+                onAccount={pickAccount}
+                platforms={platforms}
+                onToggle={togglePlatform}
+                length={length}
+                error={errors.platforms}
+              />
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -289,65 +311,117 @@ export default function Create() {
                 <FieldError message={errors.body} />
               </div>
 
+              {/* What kind of post, and how much room is left, right where the words are. */}
+              <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4 pt-1">
+                <Segmented id="format" label="Format" options={FORMATS} value={format} onChange={setFormat} />
+                {tightest && <Counter length={length} limit={CHAR_LIMIT[tightest]} platform={PLATFORMS[tightest].name} />}
+              </div>
+
               <MediaStrip
                 media={media}
                 onChange={changeMedia}
                 max={10}
                 generate={format === 'text' ? undefined : { kind: format, hint: [title, body].filter(Boolean).join(' — ').slice(0, 400) || '' }}
               />
-
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
-                <Segmented id="format" label="Format" options={FORMATS} value={format} onChange={setFormat} />
-                {strictest && <Counter length={length} limit={strictest} />}
-              </div>
-
-              <AccountPicker accounts={accounts ?? []} value={accountId} onChange={pickAccount} />
-
-              <div className={cn('border-t border-line px-5 py-4', account && 'hidden')}>
-                <div className="flex items-center justify-between">
-                  <Label>Publish to</Label>
-                  <span className="font-mono text-[10px] text-dim">{platforms.length} selected</span>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {PLATFORM_ORDER.map((id) => {
-                    const on = platforms.includes(id)
-                    const left = CHAR_LIMIT[id] - length
-                    return (
-                      <motion.button
-                        key={id}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => togglePlatform(id)}
-                        whileTap={{ scale: 0.95 }}
-                        className={cn(
-                          'flex h-9 items-center gap-2 rounded-full border pl-3 pr-3.5 text-[12.5px] transition-[background-color,border-color,color] duration-300',
-                          on ? 'border-fg bg-fg text-ink' : 'border-line-2 text-muted hover:border-white/30 hover:text-fg',
-                        )}
-                      >
-                        <PlatformIcon id={id} className="size-3.5" />
-                        {PLATFORMS[id].name}
-                        <AnimatePresence initial={false}>
-                          {on && (
-                            <motion.span
-                              initial={{ width: 0, opacity: 0 }}
-                              animate={{ width: 'auto', opacity: 1 }}
-                              exit={{ width: 0, opacity: 0 }}
-                              transition={{ duration: 0.35, ease }}
-                              className={cn('overflow-hidden whitespace-nowrap font-mono text-[10px]', left < 0 ? 'text-fail' : 'text-ink/50')}
-                            >
-                              {left < 0 ? `${-left} over` : left > 9999 ? '' : left}
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
-                      </motion.button>
-                    )
-                  })}
-                </div>
-                <FieldError message={errors.platforms} />
-              </div>
             </section>
+            {/* When it goes and the button that sends it ride along at the bottom of the screen, so
+                saving is never a scroll away. Beside the preview it closes the editor column, right
+                under the writing with no gap; on a phone it goes last, so it rides past the preview. */}
+            <div className="sticky bottom-3 z-30 order-last md:bottom-4 lg:order-none">
+              {/* One row: when, then the button. A second, full-width line only when there's
+                  something to say or set (the next slot, a date and time, a problem); on a phone
+                  it sits between the two. */}
+              <div className="flex flex-col gap-2.5 rounded-xl border border-line-2 bg-panel-2/95 p-2.5 shadow-[0_24px_70px_-20px_rgb(0_0_0_/_0.95)] backdrop-blur-xl md:flex-row md:flex-wrap md:items-center md:gap-x-4 md:gap-y-2 md:bg-panel-2/85 md:p-2">
+                <Segmented
+                  id="when"
+                  label="When to publish"
+                  options={WHEN.map((w) => ({
+                    value: w.value,
+                    label: (
+                      <>
+                        <w.icon className="hidden size-3.5 sm:block" strokeWidth={1.75} />
+                        {w.label}
+                      </>
+                    ),
+                  }))}
+                  value={when}
+                  onChange={(w) => {
+                    setWhen(w)
+                    setErrors(({ scheduled_at: _, queue: __, ...rest }) => rest)
+                  }}
+                  className="w-full shrink-0 md:order-1 md:w-auto [&>button]:flex-1 [&>button]:justify-center md:[&>button]:flex-none"
+                />
+                {(when === 'pick' || when === 'queue' || problem) && (
+                <div className="min-w-0 text-[12px] leading-snug text-dim md:order-3 md:basis-full md:px-0.5 md:pb-0.5">
+                  {when === 'pick' ? (
+                    <div className="flex items-center gap-2">
+                      {/* Sized by their wrappers: inputClass is w-full, and cn doesn't merge classes. */}
+                      <div className="min-w-0 flex-1 md:w-40 md:flex-none">
+                        <input type="date" value={date} onChange={(e) => setPicked((p) => ({ ...p, date: e.target.value }))} aria-label="Date" className={inputClass} />
+                      </div>
+                      <div className="w-[136px] shrink-0">
+                        <input type="time" value={time} onChange={(e) => setPicked((p) => ({ ...p, time: e.target.value }))} aria-label="Time" className={inputClass} />
+                      </div>
+                    </div>
+                  ) : when === 'queue' ? (
+                    overview?.next_slot ? (
+                      <>
+                        Goes out in the next free slot, <span className="text-fg">{fmtDateTime(overview.next_slot)}</span>.
+                      </>
+                    ) : (
+                      <>
+                        No posting times yet.{' '}
+                        <a
+                          href="/dashboard/automations"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            navigate('/dashboard/automations')
+                          }}
+                          className="text-accent-soft underline-offset-2 hover:underline"
+                        >
+                          Set them up
+                        </a>
+                      </>
+                    )
+                  ) : null}
+                  {/* The field a problem belongs to may be scrolled away; say it here too. */}
+                  {problem && (
+                    <p role="alert" className={cn('text-fail', when !== 'draft' && when !== 'published' && 'mt-1')}>
+                      {problem}
+                    </p>
+                  )}
+                </div>
+                )}
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving || writing}
+                  className="group relative isolate flex h-10 w-full shrink-0 items-center justify-center gap-2 overflow-hidden rounded-lg bg-fg px-5 text-[13px] font-medium text-ink transition-[color,box-shadow] duration-500 hover:text-white hover:shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_20%,transparent)] disabled:cursor-wait disabled:opacity-70 md:order-2 md:ml-auto md:w-auto"
+                >
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 -z-10 translate-y-[101%] rounded-t-[50%] bg-accent transition-[translate,border-radius] duration-700 ease-expo group-hover:translate-y-0 group-hover:rounded-t-none"
+                  />
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    <motion.span
+                      key={saving ? 'saving' : when}
+                      className="flex items-center gap-2"
+                      initial={{ y: 18, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={{ y: -18, opacity: 0 }}
+                      transition={{ duration: 0.35, ease }}
+                    >
+                      <Action.icon className="size-4" strokeWidth={1.75} />
+                      {saving ? 'Saving…' : Action.label}
+                      <kbd className="ml-1 hidden font-mono text-[10px] opacity-50 md:inline">{MOD_KEY} ↵</kbd>
+                    </motion.span>
+                  </AnimatePresence>
+                </button>
+              </div>
+            </div>
           </Stagger>
 
+          {/* Without the When panel, the preview fits beside the editor and stays in view. */}
           <div className="space-y-4 lg:sticky lg:top-20">
             <Stagger i={1}>
               <Panel
@@ -406,89 +480,6 @@ export default function Create() {
                 error={errors.checks}
               />
             </Stagger>
-
-            <Stagger i={3}>
-              <Panel title="When" bodyClassName="p-3 pt-3">
-                <div role="radiogroup" aria-label="When to publish" className="space-y-1.5">
-                  <Option on={when === 'draft'} onSelect={() => setWhen('draft')} icon={FileText} title="Save as draft" body="Keep it for later." />
-                  <Option
-                    on={when === 'queue'}
-                    onSelect={() => setWhen('queue')}
-                    icon={ListPlus}
-                    title="Add to queue"
-                    body={
-                      overview?.next_slot ? (
-                        <>
-                          Next free slot: <span className="text-fg">{fmtDateTime(overview.next_slot)}</span>
-                        </>
-                      ) : (
-                        <>
-                          No posting times yet.{' '}
-                          <a
-                            href="/dashboard/automations"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              navigate('/dashboard/automations')
-                            }}
-                            className="text-accent-soft underline-offset-2 hover:underline"
-                          >
-                            Set them up
-                          </a>
-                        </>
-                      )
-                    }
-                  />
-                  <Option on={when === 'pick'} onSelect={() => setWhen('pick')} icon={CalendarClock} title="Pick a time" body="Choose the exact day and time.">
-                    <div className="grid grid-cols-[1fr_110px] gap-2 pt-3">
-                      <input
-                        type="date"
-                        value={date}
-                        onChange={(e) => setPicked((p) => ({ ...p, date: e.target.value }))}
-                        aria-label="Date"
-                        className={inputClass}
-                      />
-                      <input
-                        type="time"
-                        value={time}
-                        onChange={(e) => setPicked((p) => ({ ...p, time: e.target.value }))}
-                        aria-label="Time"
-                        className={inputClass}
-                      />
-                    </div>
-                  </Option>
-                  <Option on={when === 'published'} onSelect={() => setWhen('published')} icon={Check} title="Already posted" body="Mark it as published." />
-                </div>
-                <div className="px-1">
-                  <FieldError message={errors.scheduled_at ?? errors.queue} />
-                </div>
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={saving || writing}
-                  className="group relative isolate mt-3 flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-fg text-[13px] font-medium text-ink transition-[color,box-shadow] duration-500 hover:text-white hover:shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_20%,transparent)] disabled:cursor-wait disabled:opacity-70"
-                >
-                  <span
-                    aria-hidden
-                    className="absolute inset-0 -z-10 translate-y-[101%] rounded-t-[50%] bg-accent transition-[translate,border-radius] duration-700 ease-expo group-hover:translate-y-0 group-hover:rounded-t-none"
-                  />
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    <motion.span
-                      key={saving ? 'saving' : when}
-                      className="flex items-center gap-2"
-                      initial={{ y: 18, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      exit={{ y: -18, opacity: 0 }}
-                      transition={{ duration: 0.35, ease }}
-                    >
-                      <Action.icon className="size-4" strokeWidth={1.75} />
-                      {saving ? 'Saving…' : Action.label}
-                    </motion.span>
-                  </AnimatePresence>
-                </button>
-                <p className="mt-2.5 text-center font-mono text-[10px] text-dim">⌘ + Enter</p>
-              </Panel>
-            </Stagger>
           </div>
         </div>
       )}
@@ -530,15 +521,19 @@ function AutoGrow({ value, onChange, readOnly }: { value: string; onChange: (v: 
   )
 }
 
-/** Characters used against the strictest selected network, as a ring that fills and turns red. */
-function Counter({ length, limit }: { length: number; limit: number }) {
+/**
+ * Characters used against the tightest limit among the picked platforms, as a ring that fills
+ * and turns red. Names the platform, so a 280 limit explains itself.
+ */
+function Counter({ length, limit, platform }: { length: number; limit: number; platform: string }) {
   const ratio = Math.min(1, length / limit)
   const over = length > limit
   const color = over ? 'var(--color-fail)' : ratio > 0.9 ? 'var(--color-warn)' : 'var(--color-accent-soft)'
   return (
-    <span className="flex items-center gap-2.5 font-mono text-[11px] tabular-nums text-dim">
+    <span className="flex items-center gap-2.5 font-mono text-[11px] tabular-nums text-dim" title={`Characters, against ${platform}’s limit`}>
       <span className={over ? 'text-fail' : ratio > 0.9 ? 'text-warn' : ''}>
         {length.toLocaleString()} / {limit.toLocaleString()}
+        <span className="text-dim"> · {platform}</span>
       </span>
       <svg viewBox="0 0 20 20" className="size-5 -rotate-90" aria-hidden>
         <circle cx="10" cy="10" r="8" fill="none" stroke="rgb(255 255 255 / 0.1)" strokeWidth={2} />
@@ -558,59 +553,3 @@ function Counter({ length, limit }: { length: number; limit: number }) {
   )
 }
 
-function Option({
-  on,
-  onSelect,
-  icon: Icon,
-  title,
-  body,
-  children,
-}: {
-  on: boolean
-  onSelect: () => void
-  icon: typeof Send
-  title: string
-  body: ReactNode
-  children?: ReactNode
-}) {
-  return (
-    <div
-      role="radio"
-      aria-checked={on}
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onSelect())}
-      className={cn(
-        'cursor-pointer rounded-lg border px-3 py-2.5 outline-none transition-colors duration-300 focus-visible:border-accent-soft/60',
-        on ? 'border-accent/50 bg-accent/[0.08]' : 'border-line hover:border-line-2',
-      )}
-    >
-      <div className="flex items-center gap-3">
-        <span className={cn('grid size-7 shrink-0 place-items-center rounded-md transition-colors', on ? 'bg-accent text-on-accent' : 'bg-white/[0.05] text-muted')}>
-          <Icon className="size-3.5" strokeWidth={1.75} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-medium">{title}</span>
-          <span className="block truncate text-[11.5px] text-dim">{body}</span>
-        </span>
-        <span className={cn('grid size-4 shrink-0 place-items-center rounded-full border transition-colors', on ? 'border-accent bg-accent' : 'border-line-2')}>
-          {on && <motion.span layoutId="when-dot" className="size-1.5 rounded-full bg-white" />}
-        </span>
-      </div>
-      <AnimatePresence initial={false}>
-        {on && children && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.35, ease }}
-            className="overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}

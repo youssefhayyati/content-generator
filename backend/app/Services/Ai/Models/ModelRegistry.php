@@ -11,6 +11,7 @@ use App\Services\Ai\OpenAiCompatibleGenerator;
 use App\Services\Ai\TextGenerator;
 use App\Services\Ai\UsageMeter;
 use App\Services\Sound\SoundClient;
+use App\Services\Sound\VoiceStudioClient;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -24,7 +25,7 @@ use Throwable;
  */
 class ModelRegistry
 {
-    public const PROVIDERS = ['anthropic', 'gateway', 'groq', 'openrouter', 'ollama_cloud', 'ollama', 'higgsfield', 'google', 'sound'];
+    public const PROVIDERS = ['anthropic', 'gateway', 'groq', 'openrouter', 'ollama_cloud', 'ollama', 'higgsfield', 'google', 'sound', 'voicestudio'];
 
     public function __construct(private readonly TextGenerator $claude, private readonly UsageMeter $usage) {}
 
@@ -33,7 +34,7 @@ class ModelRegistry
      */
     public function all(?string $kind = null): array
     {
-        $models = [...$this->anthropic(), ...$this->openAi('gateway'), ...$this->openAi('groq'), ...$this->openAi('openrouter'), ...$this->openAi('ollama_cloud'), ...$this->ollama(), ...$this->higgsfield(), ...$this->google(), ...$this->sound()];
+        $models = [...$this->anthropic(), ...$this->openAi('gateway'), ...$this->openAi('groq'), ...$this->openAi('openrouter'), ...$this->openAi('ollama_cloud'), ...$this->ollama(), ...$this->higgsfield(), ...$this->google(), ...$this->sound(), ...$this->voicestudio()];
         $scores = ModelEval::query()
             ->selectRaw('model, avg(score) as score')
             ->whereIn('id', ModelEval::query()->selectRaw('max(id)')->groupBy('model', 'task'))
@@ -117,6 +118,7 @@ class ModelRegistry
                 'ollama' => $this->testOllama(),
                 'higgsfield' => app(HiggsfieldClient::class)->test(),
                 'sound' => $this->testSound(),
+                'voicestudio' => $this->testVoiceStudio(),
                 'google' => $this->testGoogle(),
                 default => $this->testOpenAi(rtrim((string) config("ai.providers.{$provider}.url"), '/').'/models', config("ai.providers.{$provider}.key"), $provider),
             };
@@ -158,6 +160,7 @@ class ModelRegistry
                     'ollama' => 'Set OLLAMA_URL to an Ollama server, e.g. http://ollama:11434.',
                     'higgsfield' => 'Set HIGGSFIELD_KEY_ID and HIGGSFIELD_KEY_SECRET, and HIGGSFIELD_PLAN to the models your plan includes.',
                     'sound' => 'Run the sound service (docker compose up -d sound) and set SOUND_URL, e.g. http://sound:8000.',
+                    'voicestudio' => 'Set VOICESTUDIO_URL to your VoiceStudio server, and VOICESTUDIO_KEY when it’s not on loopback.',
                     'google' => 'Set GEMINI_API_KEY for Gemini image generation and Veo video generation.',
                 ][$p],
                 'test' => $test ? ['ok' => $test->ok, 'message' => $test->message, 'latency_ms' => $test->latency_ms, 'at' => $test->created_at?->toIso8601ZuluString()] : null,
@@ -174,6 +177,7 @@ class ModelRegistry
             'ollama' => filled(config('ai.providers.ollama.url')),
             'higgsfield' => filled(config('ai.providers.higgsfield.key_id')) && filled(config('ai.providers.higgsfield.key_secret')),
             'sound' => app(SoundClient::class)->configured(),
+            'voicestudio' => app(VoiceStudioClient::class)->configured(),
             'google' => filled(config('ai.providers.google.key')),
             default => false,
         };
@@ -316,6 +320,42 @@ class ModelRegistry
             $this->entry('sound', 'composer', 'FlowAI Composer', 'music', 'Original, licence-free music for every post', $up, $reason),
             $this->entry('sound', 'whisper', 'Whisper', 'listen', 'Transcripts, dictation and word timing for captions', $up, $reason),
         ];
+    }
+
+    /**
+     * VoiceStudio: cloned and designed voices on a VoiceStudio server, next to the local ones.
+     * Available whenever the server answers.
+     */
+    private function voicestudio(): array
+    {
+        $client = app(VoiceStudioClient::class);
+        if (! $client->configured()) {
+            return [];
+        }
+        $up = $client->up();
+
+        return [
+            $this->entry('voicestudio', 'voices', 'VoiceStudio voices', 'voice', 'Your cloned and designed voices, from your VoiceStudio server', $up, 'VoiceStudio isn’t answering. Check VOICESTUDIO_URL and that the server is up.'),
+        ];
+    }
+
+    private function testVoiceStudio(): string
+    {
+        $client = app(VoiceStudioClient::class);
+        if (! $client->configured()) {
+            throw new GenerationFailed('No VOICESTUDIO_URL is set.');
+        }
+        Cache::forget('voicestudio.up');
+        Cache::forget('voicestudio.voices');
+        $r = Http::timeout(6)->acceptJson()
+            ->when(filled(config('ai.providers.voicestudio.key')), fn ($h) => $h->withToken((string) config('ai.providers.voicestudio.key')))
+            ->get($client->url().'/health');
+        if (! $r->successful()) {
+            throw new GenerationFailed("VoiceStudio answered {$r->status()}.");
+        }
+        $voices = count($client->voices());
+
+        return "Connected. {$voices} voice ".($voices === 1 ? 'profile' : 'profiles').' ready.';
     }
 
     private function testSound(): string

@@ -8,6 +8,7 @@ use App\Models\Generation;
 use App\Models\ModelEval;
 use App\Models\User;
 use App\Services\Ai\GenerationFailed;
+use App\Services\Ai\Media\HiggsfieldProvider;
 use App\Services\Ai\TextGenerator;
 use Generator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -214,6 +215,52 @@ class StudioGenerationTest extends TestCase
             && $r->hasHeader('Authorization', 'Key kid:ksecret')
             && preg_match("/^flowai-generation-{$id}-\d+-[0-9a-f]{16}$/", $r->header('Idempotency-Key')[0] ?? '') === 1
             && $r['aspect_ratio'] === '4:5' && ! isset($r['resolution']));
+    }
+
+    public function test_a_shape_the_model_lacks_becomes_the_nearest_it_has_toward_square(): void
+    {
+        $soul = config('ai.providers.higgsfield.models.soul-v2.capabilities.aspect_ratios');
+        $this->assertSame('1:1', HiggsfieldProvider::fitRatio('4:5', $soul), 'An Instagram feed post: square, not the too-tall 3:4.');
+        $this->assertSame('9:16', HiggsfieldProvider::fitRatio('9:16', $soul));
+        $this->assertSame('16:9', HiggsfieldProvider::fitRatio('1.91:1', $soul));
+        $this->assertSame('4:5', HiggsfieldProvider::fitRatio('4:5', []), 'A model with no list gets the shape as asked.');
+
+        // A campaign's 4:5 reaches Soul 2 as 1:1, and a refusal says why instead of a bare 400.
+        $this->fakeClaude();
+        $this->higgsfieldTested();
+        config(['ai.providers.higgsfield.plan' => ['soul-v2']]);
+        Http::fake([
+            'api.higgsfield.ai/higgsfield-ai/soul/v2/standard' => Http::sequence()
+                ->push(['request_id' => 's-1', 'status_url' => 'https://api.higgsfield.ai/requests/s-1/status'])
+                ->push(['detail' => 'aspect_ratio must be one of 1:1, 3:4'], 400),
+            'api.higgsfield.ai/requests/s-1/status' => Http::response(['status' => 'completed', 'images' => [['url' => 'https://cdn.example/sq.png']]]),
+            'cdn.example/sq.png' => Http::response(base64_decode(self::PNG), 200, ['Content-Type' => 'image/png']),
+        ]);
+
+        $id = $this->actingAs(User::factory()->create())->spa()->postJson('/api/generations', [
+            'kind' => 'image', 'model' => 'higgsfield/soul-v2', 'prompt' => 'Teal e-bike by the shop', 'params' => ['aspect_ratio' => '4:5'],
+        ])->assertCreated()->json('id');
+        $this->assertSame('succeeded', Generation::find($id)->status, (string) Generation::find($id)->error);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/soul/v2/standard') && $r['aspect_ratio'] === '1:1');
+
+        $this->spa()->postJson('/api/generations', ['kind' => 'image', 'model' => 'higgsfield/soul-v2', 'prompt' => 'Riders at dusk'])->assertCreated();
+        $this->assertSame('Higgsfield didn’t accept those settings: aspect_ratio must be one of 1:1, 3:4.', Generation::latest('id')->first()->error);
+    }
+
+    public function test_a_failure_on_higgsfields_side_names_the_model_instead_of_reading_like_a_blip(): void
+    {
+        $this->fakeClaude();
+        $this->higgsfieldTested();
+        Http::fake([
+            'api.higgsfield.ai/ideogram/v4.0' => Http::response(['request_id' => 'f-1', 'status_url' => 'https://api.higgsfield.ai/requests/f-1/status']),
+            'api.higgsfield.ai/requests/f-1/status' => Http::response(['status' => 'failed', 'error' => 'Generation failed']),
+        ]);
+
+        $id = $this->actingAs(User::factory()->create())->spa()->postJson('/api/generations', [
+            'kind' => 'image', 'model' => 'higgsfield/ideogram-4', 'prompt' => 'Green grass. Perfect pass.',
+        ])->assertCreated()->json('id');
+
+        $this->assertSame('Ideogram 4.0 failed on Higgsfield’s side (“Generation failed”). Try again, or pick another model.', Generation::find($id)->error);
     }
 
     public function test_video_starts_from_an_uploaded_image_and_failures_can_be_retried_differently(): void
