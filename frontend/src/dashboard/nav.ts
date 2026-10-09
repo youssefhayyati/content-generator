@@ -3,6 +3,7 @@ import {
   CalendarDays,
   Cpu,
   ChartColumn,
+  Flame,
   FolderOpen,
   Inbox,
   LayoutGrid,
@@ -64,6 +65,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Plan',
     items: [
+      { path: '/dashboard/inspire', label: 'Inspire', icon: Flame },
       { path: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays, count: (o) => o.counts.scheduled },
       { path: '/dashboard/library', label: 'Gallery', icon: FolderOpen, count: (o) => o.counts.total },
       { path: '/dashboard/automations', label: 'Automations', icon: CalendarClock },

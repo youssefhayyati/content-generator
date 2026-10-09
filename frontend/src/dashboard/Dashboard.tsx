@@ -14,6 +14,7 @@ import Comments from './pages/Comments'
 import Create from './pages/Create'
 import Flows from './pages/Flows'
 import Inbox from './pages/Inbox'
+import Inspire from './pages/Inspire'
 import Investigations from './pages/Investigations'
 import Library from './pages/Library'
 import LiveWall from './pages/Live'
@@ -38,6 +39,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
   '/dashboard/library': Library,
+  '/dashboard/inspire': Inspire,
   '/dashboard/calendar': Calendar,
   '/dashboard/automations': Automations,
   '/dashboard/flows': Flows,

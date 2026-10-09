@@ -42,6 +42,7 @@ use App\Http\Controllers\SocialAccountController;
 use App\Http\Controllers\SoundController;
 use App\Http\Controllers\SpecController;
 use App\Http\Controllers\StormGuardController;
+use App\Http\Controllers\TrendController;
 use App\Http\Controllers\WritingController;
 use Illuminate\Support\Facades\Route;
 
@@ -67,6 +68,10 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    // Inspire. Every search bills the Apify account, so the rate limit is tight.
+    Route::get('trends', [TrendController::class, 'index'])->middleware('throttle:20,1');
+    Route::post('trends/derive-prompt', [TrendController::class, 'derivePrompt'])->middleware('throttle:20,1');
+
     Route::get('inspirations/discover', [InspirationController::class, 'discover'])->middleware('throttle:30,1');
     Route::get('inspirations', [InspirationController::class, 'index']);
     Route::post('inspirations', [InspirationController::class, 'store']);
