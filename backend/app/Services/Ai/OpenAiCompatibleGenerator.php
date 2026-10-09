@@ -33,6 +33,7 @@ class OpenAiCompatibleGenerator implements TextGenerator
             'stream' => true,
             'stream_options' => ['include_usage' => true],
             'messages' => [['role' => 'system', 'content' => $system], ['role' => 'user', 'content' => $prompt]],
+            ...$this->reasoning($effort),
         ], stream: true);
 
         $body = $response->toPsrResponse()->getBody();
@@ -64,6 +65,14 @@ class OpenAiCompatibleGenerator implements TextGenerator
         }
     }
 
+    /**
+     * The schema goes in two places on purpose. `response_format` is the real constraint on
+     * gateways that implement it, but plenty don't — Ollama Cloud accepts the parameter and
+     * ignores it outright, answering with keys of the model's own invention and none of the ones
+     * asked for, which silently empties every caller that reads named fields. Spelling the shape
+     * out in the prompt costs a few tokens and makes those gateways conform, so the contract
+     * holds either way rather than depending on which endpoint is configured.
+     */
     public function json(string $model, string $system, string|array $content, array $schema, ?string $effort = null): array
     {
         $messages = [
@@ -79,6 +88,7 @@ class OpenAiCompatibleGenerator implements TextGenerator
                 'model' => $model,
                 'messages' => $messages,
                 'response_format' => ['type' => 'json_schema', 'json_schema' => ['name' => 'reply', 'schema' => $schema, 'strict' => true]],
+                ...$this->reasoning($effort),
             ]);
             $this->usage?->record($this->provider, $model, (int) $response->json('usage.prompt_tokens', 0), (int) $response->json('usage.completion_tokens', 0));
 
@@ -146,6 +156,28 @@ class OpenAiCompatibleGenerator implements TextGenerator
         }
 
         return null;
+    }
+
+    /**
+     * How hard a reasoning model should think, as `reasoning_effort`. Omitted entirely when the
+     * caller has no preference, which leaves the model on its default.
+     *
+     * "low" is the useful setting for a conversational agent: measurably faster, and on GLM it
+     * returns no reasoning at all while the answer stays clean in `content`. Note that "none" is
+     * deliberately never sent — it does not stop a reasoning model thinking, it stops the thinking
+     * being separated out, so the monologue lands inside `content` (complete with a stray
+     * `</think>`) and ends up in a caption. Capped at "high" because xhigh/max aren't accepted here.
+     *
+     * @return array<string, string>
+     */
+    private function reasoning(?string $effort): array
+    {
+        return match ($effort) {
+            'low' => ['reasoning_effort' => 'low'],
+            'medium' => ['reasoning_effort' => 'medium'],
+            'high', 'xhigh', 'max' => ['reasoning_effort' => 'high'],
+            default => [],
+        };
     }
 
     /**

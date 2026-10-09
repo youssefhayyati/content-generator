@@ -22,6 +22,7 @@ import {
 import { useOverview } from '../Shell'
 import { useToast } from '../toast'
 import { MediaLibrary } from '../media/Media'
+import { Inspiration } from '../media/Inspiration'
 import { Btn, EmptyState, Menu, Modal, PageHeader, Platforms, Segmented, Skeleton, StateBadge, Stagger, inputClass } from '../ui'
 
 const TABS: Array<{ value: PostStatus | ''; label: string }> = [
@@ -41,7 +42,10 @@ export default function Library() {
   const invalidate = useInvalidate()
   const toast = useToast()
 
-  const [view, setView] = useState<'posts' | 'media'>(() => (new URLSearchParams(search).get('view') === 'media' ? 'media' : 'posts'))
+  const [view, setView] = useState<'posts' | 'media' | 'inspiration'>(() => {
+    const params = new URLSearchParams(search)
+    return params.get('view') === 'media' ? 'media' : params.get('view') === 'posts' || params.has('status') ? 'posts' : 'inspiration'
+  })
   const [status, setStatus] = useState<PostStatus | ''>(() => (new URLSearchParams(search).get('status') as PostStatus) ?? '')
   const [platform, setPlatform] = useState<PlatformId | ''>('')
   const [q, setQ] = useState('')
@@ -95,7 +99,7 @@ export default function Library() {
   return (
     <div>
       <PageHeader
-        eyebrow="Library"
+        eyebrow="Gallery"
         title={
           <>
             Everything you’ve <Serif>made.</Serif>
@@ -108,13 +112,14 @@ export default function Library() {
               id="library-view"
               label="Show"
               options={[
+                { value: 'inspiration', label: 'Inspiration' },
                 { value: 'posts', label: 'Posts' },
-                { value: 'media', label: 'Media' },
+                { value: 'media', label: 'Assets' },
               ]}
               value={view}
               onChange={(v) => {
                 setView(v)
-                navigate(`/dashboard/library${v === 'media' ? '?view=media' : ''}`, { replace: true })
+                navigate('/dashboard/library?view=' + v, { replace: true })
               }}
             />
             <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
@@ -124,7 +129,7 @@ export default function Library() {
         }
       />
 
-      {view === 'media' ? (
+      {view === 'inspiration' ? <Stagger i={0} className="mt-8"><Inspiration /></Stagger> : view === 'media' ? (
         <Stagger i={0} className="mt-10">
           <MediaLibrary />
         </Stagger>

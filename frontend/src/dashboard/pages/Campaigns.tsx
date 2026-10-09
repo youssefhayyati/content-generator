@@ -1,17 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowUpRight, Images, LoaderCircle, Sparkles } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Copy, Download, Images, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
 import { useLenis } from 'lenis/react'
 import { Serif } from '../../components/ui/Reveal'
-import { api, type AiOptions, type Campaign, type CampaignSummary } from '../../lib/api'
+import { api, type Account, type AiOptions, type Campaign, type CampaignSummary } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useQueryParam, useRouter } from '../../lib/router'
-import { fmtRelative, useApi } from '../data'
-import { Interview } from '../intake/Interview'
+import { BriefTab } from '../campaign/BriefTab'
+import { PlanTab } from '../campaign/PlanTab'
+import { ProductionTab } from '../campaign/ProductionTab'
+import { ReviewTab } from '../campaign/ReviewTab'
+import { ScheduleTab } from '../campaign/ScheduleTab'
+import { STAGE_LABEL, STEPS, Stepper, stageStep, tabFor, useCampaign, type Tab } from '../campaign/shared'
+import { fmtRelative, useApi, useInvalidate } from '../data'
+import { briefText, copyText, downloadPackage } from '../intake/files'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
-import { Label, PageHeader, Skeleton, Stagger } from '../ui'
+import { Btn, Label, Modal, PageHeader, Skeleton, Stagger } from '../ui'
 
 const GREETING = 'Hi! I’m your campaign strategist. I’ll ask short questions so we can create content that really feels like you. How much time do you have?'
 
@@ -20,7 +26,7 @@ const DEPTHS = [
   { id: 'full', name: 'Full', count: '20', time: '8 min', body: 'Your story, your customers, your voice. The most personal content.' },
 ] as const
 
-/** /dashboard/campaigns: start an intake or pick one up. With ?id=, that campaign's interview. */
+/** /dashboard/campaigns: start an intake or pick one up. With ?id=, that campaign's studio. */
 export default function Campaigns() {
   const id = useQueryParam('id')
   return id ? <Open key={id} id={id} /> : <Start />
@@ -46,14 +52,126 @@ function Open({ id }: { id: string }) {
     return (
       <div>
         <Skeleton className="h-24 w-2/3" />
-        <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-          <Skeleton className="h-[520px] rounded-xl" />
-          <Skeleton className="h-[520px] rounded-xl" />
+        <div className="mt-8 space-y-4">
+          <Skeleton className="h-16 rounded-xl" />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+            <Skeleton className="h-[520px] rounded-xl" />
+            <Skeleton className="h-[520px] rounded-xl" />
+          </div>
         </div>
       </div>
     )
   }
-  return <Interview initial={campaign} />
+  return <Studio initial={campaign} />
+}
+
+const isTab = (v: string | null): v is Tab => !!v && STEPS.some((s) => s.tab === v)
+
+/**
+ * One campaign, end to end: brief → plan (gate 6A) → production → review (gate 6B) → schedule.
+ *
+ * The step you're on follows the work rather than being chosen for you: when the stage you're
+ * watching finishes, you move on with it. Stepping back to re-read the brief or the plan leaves
+ * you there, because the stage that moved isn't the one you're looking at any more.
+ */
+function Studio({ initial }: { initial: Campaign }) {
+  const { navigate } = useRouter()
+  const toast = useToast()
+  const invalidate = useInvalidate()
+  const param = useQueryParam('tab')
+  const { campaign, setCampaign, items, setItems, reload, busy } = useCampaign(initial.id, initial)
+  const { data: accounts } = useApi<Account[]>('/accounts')
+  const [tab, setTab] = useState<Tab>(isTab(param) ? param : tabFor(initial.stage))
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const stage = useRef(initial.stage)
+
+  const go = (next: Tab) => {
+    setTab(next)
+    navigate(`/dashboard/campaigns?id=${campaign.id}&tab=${next}`, { replace: true })
+  }
+
+  // The work moving on carries you with it, as long as you were watching the step that just ended.
+  useEffect(() => {
+    const was = stage.current
+    if (was === campaign.stage) return
+    stage.current = campaign.stage
+    if (stageStep(campaign.stage) > stageStep(was) && tab === STEPS[stageStep(was)].tab) go(tabFor(campaign.stage))
+  })
+
+  const copy = async (text: string, what: string) => {
+    const ok = await copyText(text)
+    toast(ok ? `${what} copied.` : 'Couldn’t copy. Select the text instead.', ok ? 'success' : 'error')
+  }
+
+  const remove = async () => {
+    try {
+      await api(`/campaigns/${campaign.id}`, { method: 'DELETE' })
+      invalidate()
+      toast('Campaign deleted.')
+      navigate('/dashboard/campaigns')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t delete the campaign.', 'error')
+    }
+  }
+
+  const shared = { campaign, items, accounts: accounts ?? [], reload }
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow={STAGE_LABEL[campaign.stage]}
+        title={
+          campaign.title ? (
+            <span className="block max-w-[22ch] truncate">{campaign.title}</span>
+          ) : (
+            <>
+              New <Serif>campaign.</Serif>
+            </>
+          )
+        }
+        actions={
+          <>
+            <Btn variant="subtle" icon={ArrowLeft} onClick={() => navigate('/dashboard/campaigns')} aria-label="All campaigns">
+              <span className="hidden xl:inline">All campaigns</span>
+            </Btn>
+            <Btn icon={Copy} onClick={() => copy(briefText(campaign), 'Brief')}>
+              Copy brief
+            </Btn>
+            <Btn icon={Download} onClick={() => downloadPackage(campaign).catch(() => toast('Couldn’t put the package together. Try again.', 'error'))}>
+              Download
+            </Btn>
+            <Btn variant="danger" icon={Trash2} onClick={() => setConfirmDelete(true)} aria-label="Delete campaign" />
+          </>
+        }
+      />
+
+      <div className="mt-6">
+        <Stepper stage={campaign.stage} tab={tab} onTab={go} />
+      </div>
+
+      <div className="mt-4">
+        {tab === 'brief' && <BriefTab campaign={campaign} accounts={accounts ?? []} onChange={setCampaign} onPlanned={() => go('plan')} />}
+        {tab === 'plan' && <PlanTab {...shared} onCampaign={setCampaign} onItems={setItems} />}
+        {tab === 'production' && <ProductionTab {...shared} busy={busy} onReview={() => go('review')} />}
+        {tab === 'review' && <ReviewTab {...shared} onItems={setItems} onSchedule={() => go('schedule')} />}
+        {tab === 'schedule' && <ScheduleTab {...shared} onCampaign={setCampaign} />}
+      </div>
+
+      <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this campaign?">
+        <p className="text-[13px] leading-snug text-muted">
+          The brief, the plan, the content and everything made for it go with it. This can’t be undone.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Btn variant="subtle" onClick={() => setConfirmDelete(false)}>
+            Keep it
+          </Btn>
+          <Btn variant="danger" icon={Trash2} onClick={remove}>
+            Delete campaign
+          </Btn>
+        </div>
+      </Modal>
+    </div>
+  )
 }
 
 function Start() {
@@ -164,7 +282,8 @@ function Start() {
 }
 
 function CampaignCard({ campaign: c, i, onOpen }: { campaign: CampaignSummary; i: number; onOpen: () => void }) {
-  const status = c.has_kit ? 'Kit ready' : c.complete ? 'Brief ready' : 'Interview'
+  // Past the brief, where it is in the pipeline says more than whether a kit exists.
+  const status = c.stage !== 'brief' ? STAGE_LABEL[c.stage] : c.has_kit ? 'Kit ready' : c.complete ? 'Brief ready' : 'Interview'
   return (
     <motion.button
       type="button"

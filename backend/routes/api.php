@@ -66,6 +66,10 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('inspirations/discover', [\App\Http\Controllers\InspirationController::class, 'discover'])->middleware('throttle:30,1');
+    Route::get('inspirations', [\App\Http\Controllers\InspirationController::class, 'index']);
+    Route::post('inspirations', [\App\Http\Controllers\InspirationController::class, 'store']);
+    Route::delete('inspirations/{id}', [\App\Http\Controllers\InspirationController::class, 'destroy']);
     Route::get('user', [ProfileController::class, 'show']);
     Route::patch('user', [ProfileController::class, 'update']);
     Route::delete('user', [ProfileController::class, 'destroy']);

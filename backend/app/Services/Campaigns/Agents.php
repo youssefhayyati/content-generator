@@ -293,7 +293,7 @@ class Agents
             return [];
         }
 
-        [$generator, $name] = $this->models->text(config('ai.agents.model'));
+        [$generator, $name] = $this->models->text($this->agentModel());
         $result = $this->usage->within($account->user, $account, 'profile', fn () => $generator->json(
             $name,
             'You maintain an account’s editorial profile. Propose up to three specific changes to its fields that would bring future content closer to what the operator approves. Only propose a change you have clear evidence for; return none if there is no clear pattern. Write each field as it should read in full.',
@@ -335,7 +335,7 @@ class Agents
      */
     private function step(Campaign $campaign, string $agent, callable $work): mixed
     {
-        $step = $campaign->steps()->create(['agent' => $agent, 'status' => 'running', 'started_at' => now(), 'model' => config('ai.agents.model')]);
+        $step = $campaign->steps()->create(['agent' => $agent, 'status' => 'running', 'started_at' => now(), 'model' => $this->agentModel()]);
 
         try {
             [$result, $summary] = $this->usage->within($campaign->user, $step, "agent:{$agent}", fn () => $work($step));
@@ -357,8 +357,14 @@ class Agents
 
     private function ask(string $system, string $prompt, array $schema, string $effort): array
     {
-        [$generator, $name] = $this->models->text(config('ai.agents.model'));
+        [$generator, $name] = $this->models->text($this->agentModel());
 
         return $generator->json($name, $system, $prompt, $schema, $effort);
+    }
+
+    /** The configured agent model, or the best one that can actually run right now. */
+    private function agentModel(): string
+    {
+        return $this->models->textModelOr((string) config('ai.agents.model'));
     }
 }

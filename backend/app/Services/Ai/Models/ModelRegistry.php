@@ -24,7 +24,7 @@ use Throwable;
  */
 class ModelRegistry
 {
-    public const PROVIDERS = ['anthropic', 'gateway', 'groq', 'openrouter', 'ollama_cloud', 'ollama', 'higgsfield', 'sound'];
+    public const PROVIDERS = ['anthropic', 'gateway', 'groq', 'openrouter', 'ollama_cloud', 'ollama', 'higgsfield', 'google', 'sound'];
 
     public function __construct(private readonly TextGenerator $claude, private readonly UsageMeter $usage) {}
 
@@ -33,7 +33,7 @@ class ModelRegistry
      */
     public function all(?string $kind = null): array
     {
-        $models = [...$this->anthropic(), ...$this->openAi('gateway'), ...$this->openAi('groq'), ...$this->openAi('openrouter'), ...$this->openAi('ollama_cloud'), ...$this->ollama(), ...$this->higgsfield(), ...$this->sound()];
+        $models = [...$this->anthropic(), ...$this->openAi('gateway'), ...$this->openAi('groq'), ...$this->openAi('openrouter'), ...$this->openAi('ollama_cloud'), ...$this->ollama(), ...$this->higgsfield(), ...$this->google(), ...$this->sound()];
         $scores = ModelEval::query()
             ->selectRaw('model, avg(score) as score')
             ->whereIn('id', ModelEval::query()->selectRaw('max(id)')->groupBy('model', 'task'))
@@ -56,12 +56,29 @@ class ModelRegistry
 
     public function defaultText(): string
     {
-        $default = config('ai.default_text');
-        $models = $this->all('text');
+        return $this->textModelOr((string) config('ai.default_text'));
+    }
 
-        return collect($models)->first(fn ($m) => $m['id'] === $default && $m['available'])['id']
-            ?? collect($models)->firstWhere('available', true)['id']
-            ?? $default;
+    /**
+     * The preferred text model if it can run, otherwise whichever one can, or null when nothing
+     * can — which is the honest answer to "is AI writing switched on", because a key for one
+     * provider doesn't help a feature pointed at another.
+     */
+    public function availableText(string $preferred): ?string
+    {
+        $available = collect($this->all('text'))->where('available', true)->pluck('id');
+
+        return $available->contains($preferred) ? $preferred : $available->first();
+    }
+
+    /**
+     * The preferred text model if it can run, otherwise whichever one can. Configuring a model
+     * that isn't reachable should cost a fallback, not a dead feature — and the caller records
+     * the id this returns, so the run says which model actually wrote it.
+     */
+    public function textModelOr(string $preferred): string
+    {
+        return $this->availableText($preferred) ?? $preferred;
     }
 
     /**
@@ -100,6 +117,7 @@ class ModelRegistry
                 'ollama' => $this->testOllama(),
                 'higgsfield' => app(HiggsfieldClient::class)->test(),
                 'sound' => $this->testSound(),
+                'google' => $this->testGoogle(),
                 default => $this->testOpenAi(rtrim((string) config("ai.providers.{$provider}.url"), '/').'/models', config("ai.providers.{$provider}.key"), $provider),
             };
             $ok = true;
@@ -140,6 +158,7 @@ class ModelRegistry
                     'ollama' => 'Set OLLAMA_URL to an Ollama server, e.g. http://ollama:11434.',
                     'higgsfield' => 'Set HIGGSFIELD_KEY_ID and HIGGSFIELD_KEY_SECRET, and HIGGSFIELD_PLAN to the models your plan includes.',
                     'sound' => 'Run the sound service (docker compose up -d sound) and set SOUND_URL, e.g. http://sound:8000.',
+                    'google' => 'Set GEMINI_API_KEY for Gemini image generation and Veo video generation.',
                 ][$p],
                 'test' => $test ? ['ok' => $test->ok, 'message' => $test->message, 'latency_ms' => $test->latency_ms, 'at' => $test->created_at?->toIso8601ZuluString()] : null,
             ];
@@ -155,13 +174,14 @@ class ModelRegistry
             'ollama' => filled(config('ai.providers.ollama.url')),
             'higgsfield' => filled(config('ai.providers.higgsfield.key_id')) && filled(config('ai.providers.higgsfield.key_secret')),
             'sound' => app(SoundClient::class)->configured(),
+            'google' => filled(config('ai.providers.google.key')),
             default => false,
         };
     }
 
     /* ------------------------------------------------------------------ */
 
-    private function entry(string $provider, string $model, string $label, string $kind, ?string $purpose, bool $available, ?string $reason, ?bool $local = null): array
+    private function entry(string $provider, string $model, string $label, string $kind, ?string $purpose, bool $available, ?string $reason, ?bool $local = null, array $capabilities = []): array
     {
         return [
             'id' => "{$provider}/{$model}",
@@ -174,6 +194,7 @@ class ModelRegistry
             'available' => $available,
             'reason' => $available ? null : $reason,
             'purpose' => $purpose,
+            'capabilities' => (object) $capabilities,
         ];
     }
 
@@ -273,7 +294,7 @@ class ModelRegistry
                 default => null,
             };
 
-            return $this->entry('higgsfield', $id, $m['label'], $m['kind'], $m['purpose'] ?? null, $reason === null, $reason);
+            return $this->entry('higgsfield', $id, $m['label'], $m['kind'], $m['purpose'] ?? null, $reason === null, $reason, capabilities: $m['capabilities'] ?? []);
         })->values()->all();
     }
 
@@ -310,6 +331,17 @@ class ModelRegistry
         }
 
         return 'Connected. '.$r->json('voices').' voices, '.count($r->json('moods', [])).' music moods, Whisper '.$r->json('whisper').'.';
+    }
+
+    private function google(): array
+    {
+        $configured = $this->configured('google');
+
+        return collect(config('ai.providers.google.models', []))->map(fn (array $m, string $id) => $this->entry(
+            'google', $id, $m['label'], $m['kind'], $m['purpose'] ?? null,
+            $configured, $configured ? null : 'No Gemini API key is set.',
+            capabilities: $m['capabilities'] ?? [],
+        ))->values()->all();
     }
 
     private function testAnthropic(): string
@@ -351,5 +383,22 @@ class ModelRegistry
         }
 
         return 'Connected. '.count($r->json('models', [])).' models installed.';
+    }
+
+    private function testGoogle(): string
+    {
+        if (! $this->configured('google')) {
+            throw new GenerationFailed('No Gemini API key is set.');
+        }
+        $r = Http::timeout(10)->withHeaders(['x-goog-api-key' => config('ai.providers.google.key')])
+            ->acceptJson()->get(rtrim(config('ai.providers.google.url'), '/').'/models');
+        if (in_array($r->status(), [401, 403], true)) {
+            throw new GenerationFailed('Google rejected the Gemini API key.');
+        }
+        if (! $r->successful()) {
+            throw new GenerationFailed("Google answered {$r->status()}.");
+        }
+
+        return 'Connected. Gemini and Veo are ready.';
     }
 }

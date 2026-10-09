@@ -23,7 +23,9 @@ class WritingController extends Controller
             'enabled' => $text->contains('available', true),
             'default' => $models->defaultText(),
             // One list, local and cloud, each saying how it's reached and whether it can run.
-            'models' => $text->map(fn (array $m) => collect($m)->only(['id', 'label', 'kind', 'reach', 'local', 'available', 'reason', 'purpose', 'score']))->values(),
+            // `kind` is always "text" here, but the picker filters on it, so leaving it out
+            // empties the list rather than narrowing it.
+            'models' => $text->map(fn (array $m) => collect($m)->only(['id', 'kind', 'label', 'reach', 'local', 'available', 'reason', 'purpose', 'score']))->values(),
         ]);
     }
 

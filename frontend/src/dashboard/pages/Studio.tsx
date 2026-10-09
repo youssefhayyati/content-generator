@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUpRight, FolderKanban, ImagePlus, PenLine, Plus, Send, Sparkles, Wand2 } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, Check, FileText, FolderKanban, ImagePlus, PenLine, Plus, Sparkles, Wand2, X } from 'lucide-react'
+import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import { api, type Asset, type Generation, type ModelInfo, type Project, type Registry } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useQueryParam, useRouter } from '../../lib/router'
-import { fmtRelative, useApi, useInvalidate } from '../data'
+import { fmtRelative, PLATFORM_ORDER, useApi, useInvalidate } from '../data'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { ReelMaker } from '../sound/ReelMaker'
 import { SoundStudio } from '../sound/SoundStudio'
@@ -14,12 +15,13 @@ import { CanvasView } from '../studio/Canvas'
 import { GenerationCard, ModelPicker, useGenerations } from '../studio/parts'
 import { messageFor, retryGeneration, runMedia, runText } from '../studio/run'
 import { useToast } from '../toast'
+import { useUser } from '../Shell'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../ui'
 
 type Tab = 'text' | 'image' | 'video' | 'sound' | 'reels' | 'recipes' | 'projects'
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'text', label: 'Text' },
-  { value: 'image', label: 'Photo' },
+  { value: 'image', label: 'Images' },
   { value: 'video', label: 'Video' },
   { value: 'sound', label: 'Sound' },
   { value: 'reels', label: 'Reels' },
@@ -47,13 +49,13 @@ function StudioHome() {
   return (
     <div>
       <PageHeader
-        eyebrow="Studio"
+        eyebrow="Creative Lab"
         title={
           <>
             Make <Serif>anything.</Serif>
           </>
         }
-        sub="Write, make photos and videos, give your posts a voice and a soundtrack, cut reels, or run a recipe. Open a project to lay it all out on a canvas."
+        sub="Create social images and video, give your posts a voice and a soundtrack, cut Reels, or run a recipe. Bring in references, choose a model, and keep every result in your Gallery."
         actions={
           <Btn variant="primary" icon={Plus} onClick={() => setNaming(true)}>
             New project
@@ -90,29 +92,70 @@ function StudioHome() {
 /* One generator: text, photo or video                                  */
 /* ------------------------------------------------------------------ */
 
-const RATIOS = ['1:1', '4:5', '9:16', '16:9'].map((v) => ({ value: v, label: v }))
+const FALLBACK_RATIOS = ['1:1', '4:5', '9:16', '16:9']
+const SOCIAL_FORMATS = [
+  { value: 'reel', label: 'Instagram Reel', ratio: '9:16', duration: 8 },
+  { value: 'tiktok', label: 'TikTok', ratio: '9:16', duration: 8 },
+  { value: 'short', label: 'YouTube Short', ratio: '9:16', duration: 8 },
+  { value: 'feed', label: 'Feed post', ratio: '4:5', duration: 5 },
+]
+const CREATIVE_STARTS = {
+  image: [
+    ['Product launch', 'Premium product campaign image, editorial lighting, clear hero composition'],
+    ['UGC look', 'Authentic creator-style phone photo, natural light, relatable setting'],
+    ['Ad creative', 'High-converting paid social creative with generous clean space for copy'],
+  ],
+  video: [
+    ['Hook first', 'Start with a scroll-stopping visual hook in the first second, then reveal the product'],
+    ['Product demo', 'Show a clear satisfying product demonstration with close-up details'],
+    ['Lifestyle story', 'Warm aspirational lifestyle moment with a natural camera move'],
+  ],
+} as const
 
 function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'video'; models: ModelInfo[]; defaultText: string }) {
+  const incomingPrompt = useQueryParam('prompt')
   const toast = useToast()
-  const { navigate } = useRouter()
   const usable = models.filter((m) => m.kind === kind)
   const [model, setModel] = useState<string | null>(kind === 'text' ? defaultText : (usable.find((m) => m.available)?.id ?? usable[0]?.id ?? null))
-  const [prompt, setPrompt] = useState('')
-  const [ratio, setRatio] = useState('4:5')
-  const [duration, setDuration] = useState(5)
-  const [start, setStart] = useState<Asset | null>(null)
+  const [prompt, setPrompt] = useState(incomingPrompt ?? '')
+  const [ratio, setRatio] = useState(kind === 'video' ? '9:16' : '4:5')
+  const [duration, setDuration] = useState(kind === 'video' ? 8 : 5)
+  const [resolution, setResolution] = useState<string | null>(null)
+  const [audio, setAudio] = useState(true)
+  const [seed, setSeed] = useState('')
+  const [avoid, setAvoid] = useState('')
+  const [brief, setBrief] = useState('')
+  const [format, setFormat] = useState(kind === 'video' ? 'reel' : 'feed')
+  const [variations, setVariations] = useState(1)
+  const [references, setReferences] = useState<Asset[]>([])
   const [picking, setPicking] = useState(false)
   const [streaming, setStreaming] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [publishGeneration, setPublishGeneration] = useState<Generation | null>(null)
   const { data: feed, loading } = useGenerations({ kind })
   const invalidate = useInvalidate()
   const current = usable.find((m) => m.id === model)
-  const needsImage = kind === 'video'
+  const caps = current?.capabilities ?? {}
+  const ratios = (caps.aspect_ratios?.length ? caps.aspect_ratios : FALLBACK_RATIOS).map((value) => ({ value, label: value }))
+  const durations = caps.durations?.length ? caps.durations : [5, 8, 10]
+  const resolutions = caps.resolutions ?? []
+  const maxInputs = caps.max_inputs ?? (kind === 'video' ? 1 : 0)
+  const needsImage = !!caps.requires_image
+  const maxOutputs = Math.min(caps.max_outputs ?? 1, 4)
+
+  const chooseFormat = (value: string) => {
+    setFormat(value)
+    const picked = SOCIAL_FORMATS.find((item) => item.value === value)
+    if (picked) {
+      setRatio(picked.ratio)
+      setDuration(picked.duration)
+    }
+  }
 
   const go = async () => {
     if (!prompt.trim()) return setError('Describe what you want.')
-    if (needsImage && !start) return setError('Pick the image the video starts from.')
+    if (needsImage && !references[0]) return setError('Pick the image the video starts from.')
     setBusy(true)
     setError(null)
     try {
@@ -120,12 +163,21 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
         setStreaming('')
         await runText({ prompt, model }, setStreaming)
       } else {
+        const creativePrompt = [brief, prompt.trim(), avoid.trim() ? `Avoid: ${avoid.trim()}.` : ''].filter(Boolean).join('. ')
         await runMedia({
           kind,
           model,
-          prompt,
-          params: kind === 'image' ? { aspect_ratio: ratio } : { duration },
-          input_asset_ids: start ? [start.id] : undefined,
+          prompt: creativePrompt,
+          params: {
+            ...(caps.aspect_ratios?.length ? { aspect_ratio: ratio } : {}),
+            ...(kind === 'video' ? { duration } : {}),
+            ...(resolution ? { resolution } : {}),
+            ...(caps.audio && !caps.audio_always_on ? { audio } : {}),
+            ...(seed ? { seed: Number(seed) } : {}),
+            ...(kind === 'image' && variations > 1 ? { batch_size: variations } : {}),
+            ...(avoid.trim() ? { negative_prompt: avoid.trim() } : {}),
+          },
+          input_asset_ids: references.length ? references.map((asset) => asset.id) : undefined,
         })
       }
       setPrompt('')
@@ -157,18 +209,45 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
             {current && !current.available && <p className="mt-1.5 text-[11.5px] text-warn">{current.reason}</p>}
           </div>
 
-          {needsImage && (
+          {kind !== 'text' && (
+            <div className="rounded-lg border border-line bg-white/[0.015] p-3">
+              <Label>Social brief</Label>
+              <Segmented id="social-format" label="Social format" options={SOCIAL_FORMATS.map(({ value, label }) => ({ value, label: label.replace('Instagram ', '').replace('YouTube ', '') }))} value={format} onChange={chooseFormat} className="mt-2 w-full" />
+              <div className="mt-2 grid grid-cols-3 gap-1.5">
+                {CREATIVE_STARTS[kind].map(([label, direction]) => (
+                  <button key={label} type="button" onClick={() => setBrief(direction)} className={cn('rounded-md border px-2 py-2 text-left text-[10.5px] transition-colors', brief === direction ? 'border-accent/50 bg-accent/[0.08] text-fg' : 'border-line text-dim hover:border-line-2 hover:text-muted')}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {brief && <button type="button" onClick={() => setBrief('')} className="mt-2 text-[11px] text-dim hover:text-fg">Clear creative direction</button>}
+            </div>
+          )}
+
+          {maxInputs > 0 && (
             <div>
-              <Label>Starts from</Label>
+              <Label>{kind === 'video' ? (needsImage ? 'Starts from' : 'Start frame or reference') : 'Reference images'}</Label>
               <button
                 type="button"
                 onClick={() => setPicking(true)}
                 className="mt-2 flex w-full items-center gap-3 rounded-md border border-dashed border-line-2 p-2 text-left text-[12.5px] text-muted transition-colors hover:border-accent-soft/60 hover:text-fg"
               >
-                {start ? <MediaThumb asset={start} className="size-12" /> : <ImagePlus className="m-3 size-5" strokeWidth={1.5} />}
-                {start ? (start.name ?? 'Image') : 'Pick an image from the library'}
+                {references[0] ? <MediaThumb asset={references[0]} className="size-12" /> : <ImagePlus className="m-3 size-5" strokeWidth={1.5} />}
+                {references.length ? `${references.length} image${references.length > 1 ? 's' : ''} selected${caps.end_frame && references[1] ? ' · includes end frame' : ''}` : needsImage ? 'Pick the starting image' : 'Optional: add references from the Gallery'}
               </button>
-              <MediaPicker open={picking} onClose={() => setPicking(false)} onPick={(a) => setStart(a.find((x) => x.kind === 'image') ?? null)} max={1} initial={start ? [start] : []} />
+              <MediaPicker open={picking} onClose={() => setPicking(false)} onPick={(assets) => setReferences(assets.filter((asset) => asset.kind === 'image').slice(0, maxInputs))} max={maxInputs} initial={references} />
+              {caps.end_frame && <p className="mt-1.5 text-[11px] text-dim">Choose two images to set a start and end frame.</p>}
+              {references.length > 0 && (
+                <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                  {references.map((asset, index) => (
+                    <span key={asset.id} className="group relative shrink-0">
+                      <MediaThumb asset={asset} className="size-14" />
+                      <span className="absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 py-0.5 font-mono text-[8px] text-white">{caps.end_frame && index === 1 ? 'END' : index === 0 && kind === 'video' ? 'START' : `REF ${index + 1}`}</span>
+                      <button type="button" aria-label="Remove reference" onClick={() => setReferences((items) => items.filter((item) => item.id !== asset.id))} className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full border border-line bg-panel text-dim opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg"><X className="size-2.5" /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -193,16 +272,46 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
             />
           </label>
 
-          {kind === 'image' && (
+          {kind !== 'text' && caps.aspect_ratios?.length !== 0 && (
             <div>
-              <Label>Shape</Label>
-              <Segmented id="ratio" label="Aspect ratio" options={RATIOS} value={ratio} onChange={setRatio} className="mt-2 w-fit" />
+              <Label>{kind === 'video' ? 'Format' : 'Shape'}</Label>
+              <Segmented id="ratio" label="Aspect ratio" options={ratios} value={ratios.some((item) => item.value === ratio) ? ratio : ratios[0].value} onChange={setRatio} className="mt-2 w-fit" />
             </div>
           )}
           {kind === 'video' && (
             <div>
               <Label>Length</Label>
-              <Segmented id="duration" label="Duration" options={[5, 10].map((v) => ({ value: v, label: `${v} s` }))} value={duration} onChange={setDuration} className="mt-2 w-fit" />
+              <Segmented id="duration" label="Duration" options={durations.map((v) => ({ value: v, label: `${v} s` }))} value={durations.includes(duration) ? duration : durations[0]} onChange={setDuration} className="mt-2 w-fit" />
+            </div>
+          )}
+          {resolutions.length > 0 && (
+            <div>
+              <Label>Resolution</Label>
+              <Segmented id="resolution" label="Resolution" options={resolutions.map((value) => ({ value, label: value.toUpperCase() }))} value={resolution && resolutions.includes(resolution) ? resolution : (caps.default_resolution ?? resolutions[0])} onChange={setResolution} className="mt-2 w-fit" />
+            </div>
+          )}
+          {caps.audio && !caps.audio_always_on && (
+            <label className="flex items-center justify-between rounded-md border border-line px-3 py-2.5 text-[12.5px]">
+              <span>Generate sound</span>
+              <input type="checkbox" checked={audio} onChange={(event) => setAudio(event.target.checked)} />
+            </label>
+          )}
+          {caps.seed && (
+            <label className="block">
+              <Label>Seed <span className="normal-case text-dim">optional</span></Label>
+              <input value={seed} onChange={(event) => setSeed(event.target.value.replace(/\D/g, '').slice(0, 7))} placeholder="Random" inputMode="numeric" className={cn(inputClass, 'mt-2')} />
+            </label>
+          )}
+          {kind !== 'text' && (
+            <label className="block">
+              <Label>What to avoid <span className="normal-case text-dim">optional</span></Label>
+              <input value={avoid} onChange={(event) => setAvoid(event.target.value)} placeholder="Blurry text, distorted logo, cluttered background…" className={cn(inputClass, 'mt-2')} />
+            </label>
+          )}
+          {kind === 'image' && maxOutputs > 1 && (
+            <div>
+              <Label>Variations</Label>
+              <Segmented id="variations" label="Variations" options={Array.from({ length: maxOutputs }, (_, index) => ({ value: index + 1, label: `${index + 1}` }))} value={variations} onChange={setVariations} className="mt-2 w-fit" />
             </div>
           )}
 
@@ -238,10 +347,10 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
                   <Btn
                     size="sm"
                     variant="subtle"
-                    icon={Send}
-                    onClick={() => navigate(g.kind === 'text' ? `/dashboard/create?body=${encodeURIComponent(g.output_text ?? '')}` : `/dashboard/create?assets=${g.outputs.map((a) => a.id).join(',')}`)}
+                    icon={CalendarClock}
+                    onClick={() => setPublishGeneration(g)}
                   >
-                    Use in a post
+                    Create & schedule
                   </Btn>
                 )
               }
@@ -249,7 +358,103 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
           ))
         )}
       </div>
+      <PublishFromLab generation={publishGeneration} onClose={() => setPublishGeneration(null)} />
     </div>
+  )
+}
+
+/** A compact hand-off from a finished creative asset to the studio's multi-platform scheduler. */
+function PublishFromLab({ generation, onClose }: { generation: Generation | null; onClose: () => void }) {
+  const user = useUser()
+  const { navigate } = useRouter()
+  const toast = useToast()
+  const invalidate = useInvalidate()
+  const nextMorning = () => {
+    const date = new Date()
+    date.setDate(date.getDate() + 1)
+    return { date: date.toISOString().slice(0, 10), time: '09:00' }
+  }
+  const initial = nextMorning()
+  const [caption, setCaption] = useState('')
+  const [platforms, setPlatforms] = useState<PlatformId[]>(user.preferences.platforms.length ? user.preferences.platforms : ['instagram', 'tiktok'])
+  const [date, setDate] = useState(initial.date)
+  const [time, setTime] = useState(initial.time)
+  const [mode, setMode] = useState<'draft' | 'schedule'>('schedule')
+  const [saving, setSaving] = useState(false)
+
+  // New output, new suggested caption. Keep an operator's edits while the modal stays open.
+  const sourceCaption = generation?.kind === 'text' ? generation.output_text ?? '' : generation ? `Made in Creative Lab — ${generation.prompt}` : ''
+  const effectiveCaption = caption || sourceCaption
+  const toggle = (id: PlatformId) => setPlatforms((items) => (items.includes(id) ? items.filter((item) => item !== id) : PLATFORM_ORDER.filter((item) => item === id || items.includes(item))))
+  const save = async () => {
+    if (!generation || !effectiveCaption.trim() || !platforms.length) return
+    const scheduledAt = new Date(`${date}T${time}`).toISOString()
+    if (mode === 'schedule' && Number.isNaN(Date.parse(scheduledAt))) return toast('Choose a valid date and time.', 'error')
+    setSaving(true)
+    try {
+      await api('/posts', {
+        method: 'POST',
+        body: {
+          body: effectiveCaption.trim(),
+          format: generation.kind === 'text' ? 'text' : generation.kind,
+          platforms,
+          status: mode === 'schedule' ? 'scheduled' : 'draft',
+          scheduled_at: mode === 'schedule' ? scheduledAt : null,
+          asset_ids: generation.outputs.map((asset) => asset.id),
+        },
+      })
+      invalidate()
+      toast(mode === 'schedule' ? 'Post scheduled across the selected platforms.' : 'Post saved as a draft.')
+      onClose()
+      navigate(mode === 'schedule' ? '/dashboard/calendar' : '/dashboard/library')
+    } catch (error) {
+      toast(messageFor(error), 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={!!generation} onClose={onClose} title="Create a multi-platform post" className="max-w-2xl">
+      {generation && (
+        <div className="space-y-5">
+          <div className="flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/[0.06] p-3">
+            {generation.outputs[0] ? <MediaThumb asset={generation.outputs[0]} className="size-12" /> : <Sparkles className="m-3 size-5 text-accent-soft" />}
+            <div className="min-w-0"><p className="text-[12.5px] font-medium">{generation.outputs.length ? `${generation.outputs.length} creative asset${generation.outputs.length > 1 ? 's' : ''} attached` : 'Text output attached'}</p><p className="truncate text-[11px] text-dim">{generation.model_label}</p></div>
+          </div>
+          <label className="block"><Label>Caption</Label><textarea value={effectiveCaption} onChange={(event) => setCaption(event.target.value)} rows={4} className={cn(inputClass, 'mt-2 h-auto resize-none py-2.5')} /></label>
+          <div>
+            <Label>Publish to</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {PLATFORM_ORDER.map((id) => {
+                const active = platforms.includes(id)
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => toggle(id)}
+                    aria-pressed={active}
+                    className={cn(
+                      'flex h-9 items-center gap-2 rounded-full border px-3 text-[12px] transition-colors',
+                      active ? 'border-fg bg-fg text-ink' : 'border-line-2 text-muted hover:text-fg',
+                    )}
+                  >
+                    <PlatformIcon id={id} className="size-3.5" />
+                    {PLATFORMS[id].name}
+                    {active && <Check className="size-3" />}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <div className="rounded-lg border border-line p-3">
+            <div className="flex items-center justify-between gap-3"><Label>Publishing plan</Label><Segmented id="lab-post-mode" label="Publishing plan" options={[{ value: 'draft', label: 'Save draft' }, { value: 'schedule', label: 'Schedule' }]} value={mode} onChange={setMode} /></div>
+            {mode === 'schedule' && <div className="mt-3 grid grid-cols-2 gap-2"><label><Label>Date</Label><input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(event) => setDate(event.target.value)} className={cn(inputClass, 'mt-1.5')} /></label><label><Label>Time</Label><input type="time" value={time} onChange={(event) => setTime(event.target.value)} className={cn(inputClass, 'mt-1.5')} /></label></div>}
+          </div>
+          <div className="flex justify-end gap-2"><Btn variant="subtle" onClick={onClose}>Cancel</Btn><Btn variant="primary" icon={mode === 'schedule' ? CalendarClock : FileText} onClick={save} loading={saving} disabled={!effectiveCaption.trim() || !platforms.length}>{mode === 'schedule' ? 'Schedule post' : 'Save draft'}</Btn></div>
+        </div>
+      )}
+    </Modal>
   )
 }
 

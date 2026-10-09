@@ -354,7 +354,8 @@ class Pipeline
     {
         $made = collect();
         foreach ($campaign->accounts() as $account) {
-            $mine = $items->filter(fn (CampaignItem $i) => in_array($account->id, $i->account_ids ?? [], true));
+            // A post with no accounts of its own — planned before any were picked — goes to all of them.
+            $mine = $items->filter(fn (CampaignItem $i) => empty($i->account_ids) || in_array($account->id, $i->account_ids, true));
             if ($mine->isEmpty()) {
                 continue;
             }

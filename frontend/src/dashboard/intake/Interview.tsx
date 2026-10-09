@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, ArrowUp, Copy, Download, FastForward, ImagePlus, RotateCcw, Sparkles, Square, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUp, Copy, Download, FastForward, ImagePlus, RotateCcw, Sparkles, Square, Trash2 } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
 import { api, apiStream, ApiError, type Campaign } from '../../lib/api'
 import { ease } from '../../lib/motion'
@@ -30,8 +30,24 @@ type Outgoing = { text: string; photos?: string[] }
 /**
  * One campaign's intake: the brief on the left, the interview on the right. Every step goes to
  * the API, which saves it before asking Claude, so a reload or a failed turn loses nothing.
+ *
+ * `onNext` is the hand-off once the interview is done: the strategist gives the brief to the
+ * writer and takes you to the plan, instead of leaving a finished brief sitting there with
+ * nothing to click.
  */
-export function Interview({ initial, embedded = false, onChange }: { initial: Campaign; embedded?: boolean; onChange?: (c: Campaign) => void }) {
+export function Interview({
+  initial,
+  embedded = false,
+  onChange,
+  onNext,
+  nextBusy = false,
+}: {
+  initial: Campaign
+  embedded?: boolean
+  onChange?: (c: Campaign) => void
+  onNext?: () => void
+  nextBusy?: boolean
+}) {
   const user = useUser()
   const toast = useToast()
   const invalidate = useInvalidate()
@@ -309,7 +325,12 @@ export function Interview({ initial, embedded = false, onChange }: { initial: Ca
               <Chips>
                 {campaign.ai_available && !campaign.kit && (
                   <Btn variant="primary" size="sm" icon={Sparkles} onClick={createKit}>
-                    Create my content kit
+                    Write my content kit
+                  </Btn>
+                )}
+                {onNext && (
+                  <Btn variant={campaign.kit ? 'primary' : 'ghost'} size="sm" icon={ArrowRight} onClick={onNext} loading={nextBusy}>
+                    Make the content
                   </Btn>
                 )}
                 {campaign.ai_available && campaign.brief.some((g) => g.fields.some((f) => f.suggested)) && (

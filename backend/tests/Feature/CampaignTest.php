@@ -65,6 +65,10 @@ class CampaignTest extends TestCase
         };
 
         $this->app->instance(TextGenerator::class, $fake);
+        // The interview and the kit run on whatever ai.intake.model names, resolved through the
+        // registry. Pin it at the fake's provider so these tests assert the configured model is
+        // honoured, instead of depending on which model the catalog happens to list first.
+        config(['ai.intake.model' => 'anthropic/claude-opus-5-5']);
 
         return $fake;
     }
@@ -219,7 +223,8 @@ class CampaignTest extends TestCase
 
         $last = $response->json('messages.'.(count($response->json('messages')) - 1).'.text');
         $this->assertStringContainsString('I suggested some answers for you', $last);
-        $this->assertStringContainsString('Want me to create your content kit now?', $last);
+        // The interview hands over rather than just stopping: the kit, then making the content.
+        $this->assertStringContainsString('Want me to write your content kit, then start making the content?', $last);
 
         $this->spa()->postJson("/api/campaigns/{$campaign->id}/turn", ['text' => 'More'])
             ->assertJsonValidationErrors(['text' => 'This interview is finished.']);

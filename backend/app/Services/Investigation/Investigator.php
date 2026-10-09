@@ -7,7 +7,7 @@ use App\Models\Device;
 use App\Models\Investigation;
 use App\Models\Post;
 use App\Models\PublishingRun;
-use App\Services\Ai\TextGenerator;
+use App\Services\Ai\Models\ModelRegistry;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
@@ -19,7 +19,15 @@ use Illuminate\Support\Str;
  */
 class Investigator
 {
-    public function __construct(private readonly TextGenerator $ai) {}
+    public function __construct(private readonly ModelRegistry $models) {}
+
+    /**
+     * Whether any text model can weigh the findings.
+     */
+    private function aiAvailable(): bool
+    {
+        return $this->models->availableText((string) config('ai.default_text')) !== null;
+    }
 
     public function run(Investigation $inv): void
     {
@@ -35,7 +43,7 @@ class Investigator
             $t = microtime(true);
             $findings = $this->validate($inv, $findings);
             $inv->update(['findings' => $findings]);
-            $inv->stageDone('validate', $this->ai->enabled() ? 'The AI weighed each finding' : 'No AI: the compare verdicts stand', $t);
+            $inv->stageDone('validate', $this->aiAvailable() ? 'The AI weighed each finding' : 'No AI: the compare verdicts stand', $t);
 
             $t = microtime(true);
             $issues = collect($findings)->where('verdict', 'issue')->count();
@@ -135,12 +143,13 @@ class Investigator
      */
     private function validate(Investigation $inv, array $findings): array
     {
-        if (! $findings || ! $this->ai->enabled() || ! $inv->user->hasVerifiedEmail()) {
+        if (! $findings || ! $this->aiAvailable() || ! $inv->user->hasVerifiedEmail()) {
             return array_map(fn ($f) => $f + ['verdict' => 'issue', 'note' => null], $findings);
         }
 
-        $reply = $this->ai->json(
-            (string) config('ai.default_text'),
+        [$ai, $model] = $this->models->text($this->models->defaultText());
+        $reply = $ai->json(
+            $model,
             'You are the studio’s investigator. You are given findings from comparing publishing records with their evidence. '
                 .'Judge each: is it a real problem that needs a person (issue), or explainable and fine (explained)? '
                 .'Be strict about proof of publishing — a post marked live without evidence is always an issue. One short note each.',

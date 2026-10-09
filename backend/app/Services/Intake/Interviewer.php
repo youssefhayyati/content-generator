@@ -6,33 +6,52 @@ use App\Models\Campaign;
 use App\Models\CampaignPhoto;
 use App\Models\User;
 use App\Services\Ai\GenerationFailed;
+use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Ai\TextGenerator;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
- * Runs a campaign intake. Claude asks the questions when it can; otherwise the standard
- * question list does, one brief field at a time.
+ * Runs a campaign intake. A model asks the questions when one can be reached; otherwise the
+ * standard question list does, one brief field at a time.
  *
- * Anything the person says is saved before Claude is asked for the next question, so if that
+ * Anything the person says is saved before the model is asked for the next question, so if that
  * fails (GenerationFailed propagates), nothing is lost and `proceed()` picks it up again.
  */
 final class Interviewer
 {
     public const GREETING = 'Hi! I’m your campaign strategist. I’ll ask short questions so we can create content that really feels like you. How much time do you have?';
 
-    /** Claude reads this many photos per request. */
+    /** The interviewer reads this many photos per request. */
     private const PHOTOS_PER_REQUEST = 4;
 
-    public function __construct(private readonly TextGenerator $ai) {}
+    public function __construct(private readonly ModelRegistry $models) {}
 
     /**
-     * There's an API key, and the account is confirmed (every AI request needs both).
+     * Some text model can run, and the account is confirmed (every AI request needs both).
      */
     public function aiAvailable(User $user): bool
     {
-        return $this->ai->enabled() && $user->hasVerifiedEmail();
+        return $this->model() !== null && $user->hasVerifiedEmail();
+    }
+
+    /**
+     * Which model will take the next turn: the configured one, or any other that can run.
+     */
+    private function model(): ?string
+    {
+        return $this->models->availableText((string) config('ai.intake.model'));
+    }
+
+    /**
+     * @return array{0: TextGenerator, 1: string}
+     *
+     * @throws GenerationFailed when no model can run.
+     */
+    private function generator(): array
+    {
+        return $this->models->text($this->model() ?? (string) config('ai.intake.model'));
     }
 
     /**
@@ -84,7 +103,7 @@ final class Interviewer
         }
 
         match (true) {
-            $campaign->mode === 'ai' => $this->askClaude($campaign, $finishNow),
+            $campaign->mode === 'ai' => $this->askModel($campaign, $finishNow),
             $finishNow => $this->finish($campaign),
             default => $this->askScripted($campaign),
         };
@@ -93,7 +112,7 @@ final class Interviewer
     }
 
     /**
-     * "Answer more questions": drop Claude's guesses and carry on as a full interview.
+     * "Answer more questions": drop the model's guesses and carry on as a full interview.
      */
     public function deepen(Campaign $campaign): void
     {
@@ -108,7 +127,7 @@ final class Interviewer
     }
 
     /**
-     * Keep the photos, have Claude describe them for the image prompts, then carry on.
+     * Keep the photos, have the model describe them for the image prompts, then carry on.
      *
      * @param  list<UploadedFile>  $files
      */
@@ -139,17 +158,18 @@ final class Interviewer
 
     /* ------------------------------------------------------------------ */
 
-    private function askClaude(Campaign $campaign, bool $finishNow): void
+    private function askModel(Campaign $campaign, bool $finishNow): void
     {
-        $reply = $this->ai->json(
-            config('ai.intake.model'),
+        [$ai, $model] = $this->generator();
+        $reply = $ai->json(
+            $model,
             IntakePrompt::interviewSystem(),
             IntakePrompt::interview($campaign, $finishNow),
             IntakePrompt::interviewSchema(),
             config('ai.intake.interview_effort'),
         );
 
-        // Claude sends the whole brief back; take what it adds or corrects, never let it blank a field.
+        // The model sends the whole brief back; take what it adds or corrects, never let it blank a field.
         $fields = $campaign->fields;
         foreach (Brief::keys() as $key) {
             $value = is_string($reply['fields'][$key] ?? null) ? trim($reply['fields'][$key]) : '';
@@ -207,15 +227,15 @@ final class Interviewer
         if ($campaign->mode === 'ai') {
             $campaign->say('agency', 'That’s everything I need. Your brief is filled in'.($campaign->hasSuggestions()
                 ? '. I suggested some answers for you (dashed underline). Check them, or answer more questions to make the content more personal.'
-                : '. You can still add photos.').' Want me to create your content kit now?');
+                : '. You can still add photos.').' Want me to write your content kit, then start making the content?');
         } else {
             $campaign->say('agency', 'Your brief is complete. Copy it or download the package to share it.');
         }
     }
 
     /**
-     * Claude stopped being available mid-interview (the key was removed, say): carry on with the standard
-     * list, and file the answer that's waiting under the field the question was about.
+     * No model is reachable any more mid-interview (the key was removed, say): carry on with the
+     * standard list, and file the answer that's waiting under the field the question was about.
      */
     private function switchToScript(Campaign $campaign): void
     {
@@ -244,9 +264,10 @@ final class Interviewer
         }
 
         try {
+            [$ai, $model] = $this->generator();
             foreach ($photos->chunk(self::PHOTOS_PER_REQUEST) as $batch) {
-                $reply = $this->ai->json(
-                    config('ai.intake.model'),
+                $reply = $ai->json(
+                    $model,
                     IntakePrompt::photosSystem(),
                     IntakePrompt::photos($campaign, $batch),
                     IntakePrompt::photosSchema(),

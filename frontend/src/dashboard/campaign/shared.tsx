@@ -86,7 +86,9 @@ export function Stepper({ stage, tab, onTab }: { stage: CampaignStage; tab: Tab;
       {STEPS.map((s, i) => {
         const done = i < at || (i === at && stage === 'scheduled')
         const current = i === at && stage !== 'scheduled'
-        const reachable = i <= at
+        // Steps ahead of the stage are closed off, except the one you're on: gate 6B sends you
+        // to the schedule before the campaign is scheduled, and that step can't look disabled.
+        const reachable = i <= at || s.tab === tab
         return (
           <button
             key={s.tab}

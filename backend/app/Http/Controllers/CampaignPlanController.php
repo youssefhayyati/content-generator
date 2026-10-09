@@ -32,6 +32,10 @@ class CampaignPlanController extends Controller
 
     /**
      * Hand the brief to the writer and the visual director. Again, before approval, to re-plan.
+     *
+     * Accounts aren't needed to plan: the brief is enough to decide the big idea, the pillars and
+     * the posts. They're needed for the adapter to write each account's version, so the campaign
+     * waits for them at that point instead of refusing to start (see `resume`).
      */
     public function plan(Campaign $campaign): CampaignResource
     {
@@ -39,7 +43,6 @@ class CampaignPlanController extends Controller
 
         $errors = array_filter([
             'brief' => ! $campaign->briefReady() ? 'Finish the brief first.' : null,
-            'account_ids' => empty($campaign->account_ids) ? 'Pick the accounts this campaign goes to.' : null,
             'period_start' => ! $campaign->period_start || ! $campaign->period_end ? 'Set when the campaign runs.' : null,
             'stage' => ! in_array($campaign->stage, ['brief', 'plan_review'], true) ? 'The plan is already approved.' : null,
         ]);
@@ -76,6 +79,18 @@ class CampaignPlanController extends Controller
     public function resume(Campaign $campaign, Pipeline $pipeline): CampaignResource
     {
         Gate::authorize('update', $campaign);
+
+        // Planned before an account was picked: the content got made, but there was nobody to
+        // write a version for. Now that there's an account, put the adapter over it.
+        if ($campaign->stage === 'content_review' && $campaign->items()->whereHas('variants')->doesntExist()) {
+            if ($campaign->accounts()->isEmpty()) {
+                throw ValidationException::withMessages(['account_ids' => 'Add an account for this content to go to.']);
+            }
+            $campaign->update(['stage' => 'producing']);
+            $pipeline->maybeFinish($campaign);
+
+            return CampaignResource::make($campaign->fresh());
+        }
 
         if ($campaign->stage === 'adapting') {
             $campaign->update(['stage' => 'producing']);

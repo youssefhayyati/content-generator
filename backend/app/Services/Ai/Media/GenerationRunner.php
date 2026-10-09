@@ -106,7 +106,7 @@ class GenerationRunner
                 $contents = match (true) {
                     isset($out['b64']) => base64_decode($out['b64']),
                     isset($out['path']) => (string) file_get_contents($out['path']),
-                    default => Http::timeout(300)->get($out['url'])->throw()->body(),
+                    default => Http::timeout(300)->withHeaders($out['headers'] ?? [])->get($out['url'])->throw()->body(),
                 };
                 if (isset($out['path'])) {
                     @unlink($out['path']);
@@ -163,6 +163,7 @@ class GenerationRunner
             'gateway' => app(GatewayImageProvider::class),
             'sound' => app(SoundProvider::class),
             'studio' => app(ReelProvider::class),
+            'google' => app(GoogleGenAiProvider::class),
             default => throw new GenerationFailed('That provider doesn’t make media.'),
         };
     }

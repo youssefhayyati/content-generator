@@ -21,6 +21,15 @@
         <env name="APP_ENV" value="testing"/>
         <!-- Pinned so a developer's local .env can't leak into assertions. -->
         <env name="FRONTEND_URL" value="http://localhost:5173"/>
+        <!-- Model credentials too. Tests fake their generators; a real key here both changes
+             which models count as available and sends live, billable requests from a test run. -->
+        <env name="ANTHROPIC_API_KEY" value=""/>
+        <env name="AI_GATEWAY_URL" value=""/>
+        <env name="AI_GATEWAY_KEY" value=""/>
+        <env name="AI_GATEWAY_REACH" value="Gateway"/>
+        <env name="AI_GATEWAY_IMAGE_MODELS" value=""/>
+        <env name="AI_GATEWAY_LOCAL_MODELS" value=""/>
+        <env name="OLLAMA_URL" value=""/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>

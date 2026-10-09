@@ -31,11 +31,13 @@ class HiggsfieldClient
     {
         $r = $this->call(fn () => $this->http()->withHeaders(['Idempotency-Key' => $idempotencyKey])->post($route, $body));
 
-        if (! $r->json('request_id') || ! $r->json('status_url')) {
+        if (! $r->json('request_id')) {
             throw new GenerationFailed('Higgsfield didn’t accept the request.');
         }
 
-        return ['request_id' => $r->json('request_id'), 'status_url' => $r->json('status_url')];
+        $id = (string) $r->json('request_id');
+
+        return ['request_id' => $id, 'status_url' => (string) ($r->json('status_url') ?: "/requests/{$id}/status")];
     }
 
     /**
@@ -83,6 +85,27 @@ class HiggsfieldClient
         return 'Connected. The key is accepted.';
     }
 
+    /**
+     * Why Higgsfield refused, in its own words. `detail` is a list of field errors on a schema
+     * failure but a bare string on everything else, and losing that string turns a precise
+     * complaint ("Idempotency-Key was already used with different request parameters") into an
+     * unactionable "invalid request".
+     */
+    private function reason(Response $r): string
+    {
+        $detail = $r->json('detail');
+
+        return match (true) {
+            is_string($detail) && trim($detail) !== '' => $detail,
+            is_array($detail) => collect($detail)
+                ->map(fn ($d) => is_array($d)
+                    ? trim(implode(' ', array_filter([is_array($d['loc'] ?? null) ? implode('.', $d['loc']).':' : null, $d['msg'] ?? null])))
+                    : (is_string($d) ? $d : null))
+                ->filter()->take(3)->join('; ') ?: 'invalid request',
+            default => $r->json('message') ?? 'invalid request',
+        };
+    }
+
     private function call(callable $send): Response
     {
         try {
@@ -96,7 +119,7 @@ class HiggsfieldClient
             $r->successful() => $r,
             in_array($r->status(), [401, 403], true) => throw new GenerationFailed('Higgsfield rejected the key.'),
             $r->status() === 402 => throw new GenerationFailed('Higgsfield says the plan is out of credit.'),
-            $r->status() === 422 => throw new GenerationFailed('Higgsfield didn’t accept those settings: '.($r->json('detail.0.msg') ?? $r->json('message') ?? 'invalid request').'.'),
+            $r->status() === 422 => throw new GenerationFailed('Higgsfield didn’t accept those settings: '.$this->reason($r).'.'),
             $r->status() === 429 => throw new GenerationFailed('Higgsfield is rate limiting. Give it a minute.'),
             default => throw new GenerationFailed("Higgsfield couldn’t take the request ({$r->status()})."),
         };

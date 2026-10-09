@@ -94,13 +94,13 @@ class ModelEvals
     }
 
     /**
-     * Claude's 0–100 on how publishable the writing is, or null when Claude isn't available.
+     * A judge model's 0–100 on how publishable the writing is, or null when none is available.
      */
     private function judge(string $prompt, string $output): ?int
     {
         try {
-            [$claude, $name] = $this->models->text('anthropic/'.config('ai.intake.model'));
-            $verdict = $claude->json($name,
+            [$judge, $name] = $this->models->text($this->models->textModelOr((string) config('ai.intake.model')));
+            $verdict = $judge->json($name,
                 'You judge social media copy for a brand studio. Score how ready it is to publish as written: specific, natural, on brief, no filler. 0 is unusable, 100 is ready to post.',
                 "Brief: {$prompt}\n\nCopy:\n{$output}",
                 ['type' => 'object', 'properties' => ['score' => ['type' => 'integer'], 'reason' => ['type' => 'string']], 'required' => ['score', 'reason'], 'additionalProperties' => false],

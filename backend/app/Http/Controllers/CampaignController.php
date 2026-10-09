@@ -6,7 +6,7 @@ use App\Http\Resources\CampaignResource;
 use App\Http\Resources\CampaignSummaryResource;
 use App\Models\Campaign;
 use App\Services\Ai\GenerationFailed;
-use App\Services\Ai\TextGenerator;
+use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Intake\Brief;
 use App\Services\Intake\IntakePrompt;
 use App\Services\Intake\Interviewer;
@@ -184,18 +184,19 @@ class CampaignController extends Controller
      * Write the content kit from the brief, streamed as server-sent events like the composer's
      * writing: `delta` events, then `done` (once it's saved), or an `error` with a message to show.
      */
-    public function kit(Campaign $campaign, TextGenerator $generator): StreamedResponse|JsonResponse
+    public function kit(Campaign $campaign, ModelRegistry $models): StreamedResponse|JsonResponse
     {
         Gate::authorize('update', $campaign);
 
-        if (! $generator->enabled()) {
+        $id = $models->availableText((string) config('ai.intake.model'));
+        if (! $id) {
             return response()->json(['message' => 'AI writing isn’t switched on yet.'], 503);
         }
         if (! $campaign->isComplete()) {
             throw ValidationException::withMessages(['campaign' => 'Finish the interview first.']);
         }
 
-        $model = config('ai.intake.model');
+        [$generator, $model] = $models->text($id);
         $prompt = IntakePrompt::kit($campaign);
 
         return response()->eventStream(function () use ($generator, $campaign, $model, $prompt) {

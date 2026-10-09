@@ -91,7 +91,8 @@ class StudioGenerationTest extends TestCase
         $list = $models();
         $this->assertTrue($list['anthropic/claude-opus-5-5']['available']);
         $this->assertSame('Claude API', $list['anthropic/claude-opus-5-5']['reach']);
-        $this->assertSame('No API route for this model yet.', $list['higgsfield/soul']['reason']);
+        $this->assertSame('Not in your Higgsfield plan.', $list['higgsfield/soul']['reason']);
+        $this->assertSame(['16:9', '9:16', '1:1'], $list['higgsfield/kling-3-pro']['capabilities']['aspect_ratios']);
         $this->assertSame('The Higgsfield connector hasn’t been tested.', $list['higgsfield/ideogram-4']['reason']);
 
         // Testing the connector: bad credentials are refused, good ones get "not found".
@@ -205,10 +206,13 @@ class StudioGenerationTest extends TestCase
         $this->assertSame(['image', 'generated', 'image/png'], [$asset->kind, $asset->source, $asset->mime]);
         $this->spa()->getJson("/api/generations/{$id}")->assertJsonPath('outputs.0.id', $asset->id)->assertJsonPath('model_label', 'Ideogram 4.0');
 
-        // Key auth, an idempotency key, and only the params the model takes.
+        // Key auth, an idempotency key, and only the params the model takes. The key carries more
+        // than the generation id on purpose: ids are reused once a row is deleted and Higgsfield
+        // remembers a key for about a day, so an id-only key can be answered with the image that
+        // belonged to the deleted generation. Row timestamp and body fingerprint rule that out.
         Http::assertSent(fn (Request $r) => $r->url() === 'https://api.higgsfield.ai/ideogram/v4.0'
             && $r->hasHeader('Authorization', 'Key kid:ksecret')
-            && $r->hasHeader('Idempotency-Key', "flowai-generation-{$id}")
+            && preg_match("/^flowai-generation-{$id}-\d+-[0-9a-f]{16}$/", $r->header('Idempotency-Key')[0] ?? '') === 1
             && $r['aspect_ratio'] === '4:5' && ! isset($r['resolution']));
     }
 
@@ -243,10 +247,15 @@ class StudioGenerationTest extends TestCase
         $retry = $this->spa()->postJson("/api/generations/{$id}/retry", ['prompt' => 'Slow push in, candle flame flickers'])
             ->assertCreated()->assertJsonPath('retry_of', $id)->assertJsonPath('prompt', 'Slow push in, candle flame flickers')->json('id');
         $this->assertStringContainsString('flagged the result as unsafe', Generation::find($retry)->error);
+        // Two submissions down one route, two idempotency keys, so the edited prompt is actually
+        // rendered instead of being served the cached answer to the prompt it replaces.
+        $keys = Http::recorded(fn (Request $r) => str_ends_with($r->url(), 'image-to-video'))
+            ->map(fn ($pair) => $pair[0]->header('Idempotency-Key')[0] ?? null);
+        $this->assertSame([2, 2], [$keys->count(), $keys->unique()->count()]);
 
         // Switching to a model that can't run is refused up front.
-        $this->spa()->postJson("/api/generations/{$id}/retry", ['model' => 'higgsfield/kling'])->assertCreated();
-        $this->assertSame('Kling isn’t available: No API route for this model yet.', Generation::latest('id')->first()->error);
+        $this->spa()->postJson("/api/generations/{$id}/retry", ['model' => 'higgsfield/kling-3-pro'])->assertCreated();
+        $this->assertSame('Kling 3 Pro isn’t available: Not in your Higgsfield plan.', Generation::latest('id')->first()->error);
     }
 
     public function test_the_text_to_video_recipe_runs_its_steps_on_its_own(): void

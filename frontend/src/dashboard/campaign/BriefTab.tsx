@@ -17,13 +17,73 @@ const FIELDS: Array<{ key: keyof BriefForm; label: string; hint: string; rows?: 
   { key: 'deadline', label: 'Deadline', hint: 'When it has to be done by.', type: 'date' },
 ]
 
-/** The brief (the form, or the interview), and what the agents need to plan: accounts and a period. */
-export function BriefTab({ campaign, accounts, onChange }: { campaign: Campaign; accounts: Account[]; onChange: (c: Campaign) => void }) {
+/** Everything the "Plan the campaign" button needs, shared by the interview and the panel below it. */
+type PlanState = {
+  ids: number[]
+  setIds: (v: number[]) => void
+  start: string
+  setStart: (v: string) => void
+  end: string
+  setEnd: (v: string) => void
+  errors: Record<string, string>
+  busy: boolean
+  canPlan: boolean
+  onPlan: () => void
+}
+
+/**
+ * The brief (the form, or the interview), and when the campaign runs.
+ *
+ * Accounts are optional to start: the writer plans from the brief alone, so finishing the
+ * interview takes you straight into the plan. The campaign asks for an account later, when the
+ * adapter needs somebody to write each version for.
+ */
+export function BriefTab({
+  campaign,
+  accounts,
+  onChange,
+  onPlanned,
+}: {
+  campaign: Campaign
+  accounts: Account[]
+  onChange: (c: Campaign) => void
+  onPlanned: () => void
+}) {
+  const toast = useToast()
   const locked = !!campaign.plan_approved_at
+  const [ids, setIds] = useState<number[]>(campaign.account_ids)
+  const [start, setStart] = useState(campaign.period_start ?? '')
+  const [end, setEnd] = useState(campaign.period_end ?? '')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const canPlan = ['brief', 'plan_review'].includes(campaign.stage)
+
+  const onPlan = async () => {
+    setBusy(true)
+    setErrors({})
+    try {
+      await api(`/campaigns/${campaign.id}`, { method: 'PATCH', body: { account_ids: ids, period_start: start || null, period_end: end || null } })
+      onChange(await api<Campaign>(`/campaigns/${campaign.id}/plan`, { method: 'POST' }))
+      onPlanned()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 422) setErrors(Object.fromEntries(Object.keys(e.errors).map((k) => [k.split('.')[0], e.field(k) ?? ''])))
+      else toast(e instanceof Error ? e.message : 'Couldn’t start planning.', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const state: PlanState = { ids, setIds, start, setStart, end, setEnd, errors, busy, canPlan, onPlan }
+
   return (
     <div className="space-y-4">
-      {campaign.source === 'form' ? <FormBrief campaign={campaign} locked={locked} onChange={onChange} /> : <Interview initial={campaign} embedded onChange={onChange} />}
-      <Setup campaign={campaign} accounts={accounts} onChange={onChange} />
+      {campaign.source === 'form' ? (
+        <FormBrief campaign={campaign} locked={locked} onChange={onChange} />
+      ) : (
+        // Once it's planned, "Make the content" is just the way back to the plan.
+        <Interview initial={campaign} embedded onChange={onChange} onNext={canPlan ? onPlan : onPlanned} nextBusy={busy} />
+      )}
+      <Setup campaign={campaign} accounts={accounts} state={state} />
     </div>
   )
 }
@@ -80,37 +140,15 @@ function FormBrief({ campaign, locked, onChange }: { campaign: Campaign; locked:
   )
 }
 
-function Setup({ campaign, accounts, onChange }: { campaign: Campaign; accounts: Account[]; onChange: (c: Campaign) => void }) {
-  const toast = useToast()
+function Setup({ campaign, accounts, state }: { campaign: Campaign; accounts: Account[]; state: PlanState }) {
   const { navigate } = useRouter()
-  const [ids, setIds] = useState<number[]>(campaign.account_ids)
-  const [start, setStart] = useState(campaign.period_start ?? '')
-  const [end, setEnd] = useState(campaign.period_end ?? '')
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [busy, setBusy] = useState(false)
-  const canPlan = ['brief', 'plan_review'].includes(campaign.stage)
-
-  const plan = async () => {
-    setBusy(true)
-    setErrors({})
-    try {
-      await api(`/campaigns/${campaign.id}`, { method: 'PATCH', body: { account_ids: ids, period_start: start || null, period_end: end || null } })
-      const c = await api<Campaign>(`/campaigns/${campaign.id}/plan`, { method: 'POST' })
-      onChange(c)
-      navigate(`/dashboard/campaigns?id=${campaign.id}&tab=plan`, { replace: true })
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 422) setErrors(Object.fromEntries(Object.keys(e.errors).map((k) => [k.split('.')[0], e.field(k) ?? ''])))
-      else toast(e instanceof Error ? e.message : 'Couldn’t start planning.', 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { ids, setIds, start, setStart, end, setEnd, errors, busy, canPlan, onPlan } = state
 
   return (
-    <Panel title="Where and when" sub="The writer plans for these accounts, over this period, at the brief’s rhythm.">
+    <Panel title="Where and when" sub="The writer plans from your brief, over this period, at the brief’s rhythm.">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
-          <Label>Accounts</Label>
+          <Label>Accounts (optional)</Label>
           {accounts.length ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {accounts.map((a) => {
@@ -134,13 +172,14 @@ function Setup({ campaign, accounts, onChange }: { campaign: Campaign; accounts:
             </div>
           ) : (
             <p className="mt-2 text-[12.5px] text-dim">
-              No accounts yet.{' '}
+              None connected yet, which is fine for now.{' '}
               <button type="button" className="text-accent-soft hover:underline" onClick={() => navigate('/dashboard/accounts')}>
                 Add the accounts you post to
-              </button>
-              .
+              </button>{' '}
+              before the captions are written.
             </p>
           )}
+          {accounts.length > 0 && !ids.length && <p className="mt-2 text-[11.5px] text-dim">Pick none and the content goes to every account you add later.</p>}
           <FieldError message={errors.account_ids} />
         </div>
         <div>
@@ -163,7 +202,7 @@ function Setup({ campaign, accounts, onChange }: { campaign: Campaign; accounts:
           )}
         </p>
         {canPlan ? (
-          <Btn variant="primary" icon={campaign.stage === 'plan_review' ? Sparkles : ArrowRight} onClick={plan} loading={busy} disabled={!campaign.brief_ready}>
+          <Btn variant="primary" icon={campaign.stage === 'plan_review' ? Sparkles : ArrowRight} onClick={onPlan} loading={busy} disabled={!campaign.brief_ready}>
             {campaign.stage === 'plan_review' ? 'Plan it again' : 'Plan the campaign'}
           </Btn>
         ) : (

@@ -465,6 +465,20 @@ export type ModelInfo = {
   purpose: string | null
   /** Average eval score, 0–100, once evaluated. */
   score: number | null
+  capabilities: {
+    aspect_ratios?: string[]
+    durations?: number[]
+    resolutions?: string[]
+    default_resolution?: string
+    max_inputs?: number
+    input_optional?: boolean
+    requires_image?: boolean
+    end_frame?: boolean
+    audio?: boolean
+    audio_always_on?: boolean
+    seed?: boolean
+    max_outputs?: number
+  }
 }
 
 /** GET /ai: whether the composer can offer AI writing, and with which models. */

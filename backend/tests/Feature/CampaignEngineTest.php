@@ -330,14 +330,21 @@ class CampaignEngineTest extends TestCase
         $this->assertSame(2, $video->generations()->where('shot', 1)->where('kind', 'video')->count());
     }
 
-    public function test_the_plan_needs_accounts_and_a_period_and_the_form_needs_the_basics(): void
+    public function test_the_plan_needs_a_period_and_the_form_needs_the_basics(): void
     {
         $this->fakeClaude();
         $this->actingAs($this->user)->spa()->postJson('/api/campaigns', ['source' => 'form', 'brief' => ['goal' => 'x']])
             ->assertJsonValidationErrors(['brief.audience' => 'Say who it’s for.', 'brief.message' => 'Say what it has to get across.']);
 
         $id = $this->spa()->postJson('/api/campaigns', ['source' => 'form', 'brief' => ['goal' => 'g', 'audience' => 'a', 'message' => 'm']])->json('id');
-        $this->spa()->postJson("/api/campaigns/{$id}/plan")->assertJsonValidationErrors(['account_ids', 'period_start']);
+        $this->spa()->postJson("/api/campaigns/{$id}/plan")->assertJsonValidationErrors(['period_start'])
+            ->assertJsonMissingValidationErrors('account_ids');
+
+        // Accounts aren't needed to plan: the brief alone is enough for the writer to work from,
+        // and the plan comes back ready to approve with the posts in it.
+        $this->spa()->patchJson("/api/campaigns/{$id}", ['period_start' => now()->toDateString(), 'period_end' => now()->addWeek()->toDateString()])->assertOk();
+        $this->spa()->postJson("/api/campaigns/{$id}/plan")->assertOk()->assertJsonPath('stage', 'plan_review');
+        $this->assertNotEmpty(Campaign::find($id)->items, 'The writer plans posts without knowing the accounts yet.');
 
         $theirs = Account::factory()->create();
         $this->spa()->patchJson("/api/campaigns/{$id}", ['account_ids' => [$theirs->id]])->assertJsonValidationErrors('account_ids.0');
