@@ -70,6 +70,8 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     // Inspire. Every search bills the Apify account, so the rate limit is tight.
     Route::get('trends', [TrendController::class, 'index'])->middleware('throttle:20,1');
+    // Saved searches come from our own database, so they are not rate limited.
+    Route::get('trends/searches', [TrendController::class, 'searches']);
     Route::post('trends/derive-prompt', [TrendController::class, 'derivePrompt'])->middleware('throttle:20,1');
 
     Route::get('inspirations/discover', [InspirationController::class, 'discover'])->middleware('throttle:30,1');
