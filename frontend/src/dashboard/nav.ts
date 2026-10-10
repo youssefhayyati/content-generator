@@ -32,9 +32,13 @@ export type NavItem = {
   count?: (o: Overview) => number
   /** Draw the count as something waiting on you, not just a tally. */
   urgent?: boolean
+  /** A beating dot beside the label while this is true. */
+  live?: (o: Overview) => boolean
 }
 
 export type NavGroup = { label: string | null; items: NavItem[] }
+
+export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
 
 /** The studio's pages, in the order the sidebar shows them. Page numbers follow this order. */
 export const NAV_GROUPS: NavGroup[] = [
@@ -43,7 +47,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/dashboard', label: 'Overview', icon: LayoutGrid },
       { path: '/dashboard/inbox', label: 'Inbox', icon: Inbox, count: (o) => o.inbox, urgent: true },
-      { path: '/dashboard/live', label: 'Live', icon: RadioTower },
+      { path: '/dashboard/comments', label: 'Comments', icon: MessageSquareText },
+      { path: '/dashboard/live', label: 'Live', icon: RadioTower, live: (o) => o.counts.publishing > 0 },
     ],
   },
   {
@@ -57,28 +62,21 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Automate',
-    items: [{ path: '/dashboard/flows', label: 'Flows', icon: Workflow, count: (o) => o.automation?.flows_on ?? 0 }],
-  },
-  {
-    label: 'Engage',
-    items: [{ path: '/dashboard/comments', label: 'Comments', icon: MessageSquareText }],
-  },
-  {
     label: 'Plan',
     items: [
       { path: '/dashboard/inspire', label: 'Inspire', icon: Flame },
       { path: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays, count: (o) => o.counts.scheduled },
       { path: '/dashboard/library', label: 'Gallery', icon: FolderOpen, count: (o) => o.counts.total },
       { path: '/dashboard/automations', label: 'Automations', icon: CalendarClock },
+      { path: '/dashboard/flows', label: 'Flows', icon: Workflow, count: (o) => o.automation?.flows_on ?? 0 },
     ],
   },
   {
     label: 'Publish',
     items: [
+      { path: '/dashboard/publishing', label: 'Publishing', icon: Send },
       { path: '/dashboard/accounts', label: 'Accounts', icon: UsersRound },
       { path: '/dashboard/phones', label: 'Phones', icon: Smartphone },
-      { path: '/dashboard/publishing', label: 'Publishing', icon: Send },
     ],
   },
   {
@@ -90,17 +88,14 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Setup',
-    items: [{ path: '/dashboard/models', label: 'Models', icon: Cpu }],
+    items: [{ path: '/dashboard/models', label: 'Models', icon: Cpu }, SETTINGS],
   },
 ]
 
-export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
-
+/** Every page, Settings included. */
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
-const ALL = [...NAV, SETTINGS]
-
-export const pageLabel = (path: string) => ALL.find((n) => n.path === path)?.label ?? 'Overview'
+export const pageLabel = (path: string) => NAV.find((n) => n.path === path)?.label ?? 'Overview'
 
 /** "04" for the fourth page in the sidebar: the number in each page's header. */
-export const pageIndex = (path: string) => String(Math.max(1, ALL.findIndex((n) => n.path === path) + 1)).padStart(2, '0')
+export const pageIndex = (path: string) => String(Math.max(1, NAV.findIndex((n) => n.path === path) + 1)).padStart(2, '0')

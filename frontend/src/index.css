@@ -354,6 +354,26 @@ html[data-palette='mono'] {
   to { transform: translateY(300%); }
 }
 
+/* ------------------------------------------------------------------ */
+/* Sidebar                                                              */
+/* ------------------------------------------------------------------ */
+
+/* A status dot that breathes while something is happening. */
+.status-beat {
+  animation: status-beat 1.6s ease-in-out infinite;
+}
+@keyframes status-beat {
+  50% { opacity: 0.3; }
+}
+.mask-y {
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 20px), transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-beat {
+    animation: none;
+  }
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--color-accent) / 0.16) transparent;
