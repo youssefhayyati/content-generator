@@ -9,15 +9,21 @@ until it times out. One task runs on the phone at a time, whoever starts it.
 Posting dependably isn't left to the phone's agent. Before it starts, the post's files are uploaded to the
 phone, last one first, so its gallery shows them newest first in slide order; the caption is made typable
 (the input board types printable ASCII only, and no line breaks); and its goal is a phone skill
-(skills/phone/*.md) with the post's details filled in, saying where to tap in that app.
+(skills/phone/*.md) with the post's details filled in, saying where to tap in that app. While it posts, the
+phone asks an OK for plain input it can't check (an Enter in a field it can't read): that's part of the post
+the user asked for, so it's given (PHONE_AUTO_APPROVE_POSTS); anything else waits for the user. When the phone
+drops out (its link, its input board) before the post was shared, it's given the job again (RETRIES), told to
+carry on from where the app is. Whatever the outcome, the screenshot it ended on is kept as proof
+(MEDIA_DIR/phone/<task>.jpg, shown to the user), and the task is closed so the phone is free at once.
 
 Feedback is a phone task too: it opens the post in the app and returns its numbers as JSON (output_schema).
 Every check is kept with the post, so the next one says what changed; one runs by itself
 PHONE_FEEDBACK_AFTER_MINUTES after posting.
 
 PhoneWork is all of that; two things use it. PhoneSession posts a conversation's drafts when the user says
-so (post_on_phone) and tells the user how it goes; backend/publisher.py publishes the posts FlowAI schedules,
-when their time comes, and reports to FlowAI.
+so (post_on_phone; several are posted one after another), tells the user how it goes, and puts each one on
+FlowAI's record (its post and the run, with the proof), so FlowAI's calendar shows it went up;
+backend/publisher.py publishes the posts FlowAI schedules, when their time comes, and reports to FlowAI.
 """
 
 import asyncio
@@ -28,6 +34,7 @@ import mimetypes
 import re
 import time
 import unicodedata
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import asdict, dataclass, field, fields
@@ -39,10 +46,13 @@ import httpx
 
 from . import platforms
 from .skills import Skill, load_skills
+from .studio import StudioError
 
 if TYPE_CHECKING:
+    from .flowai import FlowAISession
+    from .phone_direct import DirectDriver
     from .publisher import Publisher
-    from .studio import StudioSession
+    from .studio import Draft, StudioSession
 
 log = logging.getLogger(__name__)
 
@@ -53,10 +63,30 @@ FEEDBACK_TRIES = 10
 COMMENTS_KEPT = 5
 STREAM_QUIET_S = 60  # a task stream silent this long is checked on (a dead phone can leave it hanging)
 STATUS_TRIES = 5  # a task's status is asked this many times before giving up on it
+RETRIES = 2  # a job the phone dropped is given to it again this many times
+RETRY_WAIT_S = 15
+RETRY_MIN_STEPS = 12  # a FlowAI run retries only with this much of its step budget left
+FEEDBACK_MAX_STEPS = 20  # reading a post's numbers takes about ten; a lost agent holds the phone no longer
+QUEUE_POLL_S = 5  # posts waiting their turn check this often whether the phone is free
+STEPS_KEPT = 80  # of a post's steps, for FlowAI's record
+PROOF_URL = "media/phone/"  # where the proofs in MEDIA_DIR/phone are served (next to the page, like all media)
+
+# The phone dropping out, not the job going wrong: worth another try, if nothing public happened yet
+DROPPED = re.compile(r"PolicyViolation|TargetLost|unreachable|DEVICE_ERROR|can't be reached|answered 5\d\d|"
+                     r"RATE_LIMIT|\bBUSY\b", re.I)
+# A tap meant to publish: "Tap the blue Share button", "Tap 'Post' (top right)", or a button that says so
+SHARE_TAP = re.compile(r"\b(tap|press|click|hit)\b\W+(?:\w+\W+){0,3}?(share|post|publish|tweet|your story)\b"
+                       r"(?![\s'\"]*\(?(the pen|pen|screen|box|text|caption|field|tab|type|picker|menu|options))", re.I)
+SHARE_ELEMENT = re.compile(r"^\W*(share|post|publish|tweet|your story)\W*$", re.I)
+# Plain input the phone wants an OK for while posting (e.g. Enter in a field it can't read): part of the post
+INPUT_ACTIONS = {"tap", "key", "type", "swipe", "long_press", "scroll", "wait", "back"}
+RETRY_NOTE = ("Note: an earlier try at this stopped halfway because the phone lost its connection, so the app "
+              "may still show where it got to. If it shows this same post half made, carry on from there; "
+              "otherwise start from the beginning. Never share it a second time.\n\n")
 
 # Characters the input board can't type, as the nearest ones it can
 ASCII = str.maketrans({"‘": "'", "’": "'", "‚": "'", "“": '"', "”": '"', "„": '"', "–": "-", "—": "-",
-                       "‐": "-", "…": "...", "•": "-", "·": "-", "×": "x", " ": " ", " ": " ",
+                       "‐": "-", "…": "...", "•": "-", "·": "-", "×": "x", " ": " ", " ": " ",
                        "€": "EUR", "£": "GBP", "©": "(c)", "®": "(R)", "™": "TM", "ß": "ss", "æ": "ae",
                        "Æ": "AE", "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "đ": "d"})
 
@@ -124,6 +154,13 @@ def _count(value) -> int | None:
     return int(n * {"": 1, "k": 1_000, "m": 1_000_000}[unit.lower()])
 
 
+def _shares(intent: str, params: dict) -> bool:
+    """Whether a tap was meant to publish the post (FlowAI's tap:post-button): the button it read says so
+    ("TextView 'Share'"), or what the phone's agent said it would do ("Tap the blue Share button")."""
+    element = re.search(r"'([^']*)'", str(params.get("element") or ""))
+    return bool((element and SHARE_ELEMENT.search(element.group(1))) or SHARE_TAP.search(intent or ""))
+
+
 # --- the API --------------------------------------------------------------------
 
 class PhoneClient:
@@ -133,6 +170,9 @@ class PhoneClient:
                                       verify=verify, timeout=httpx.Timeout(30, connect=10))
         self.job: "PhoneJob | None" = None  # the one the phone is doing (or idle after), whoever started it
         self.publisher: "Publisher | None" = None  # publishes FlowAI's scheduled posts, when it's on
+        self.device = ""  # its ID (heracles-phone): FlowAI's phone with that ID is the one that posted
+        # Our own agent on its direct controls (backend/phone_direct.py, PHONE_DRIVER=direct); None: the API's
+        self.driver: "DirectDriver | None" = None
 
     async def close(self):
         await self.http.aclose()
@@ -186,11 +226,27 @@ class PhoneClient:
 
     async def screenshot(self, task_id: str, n: int) -> bytes | None:
         """A step's screenshot (JPEG), or None."""
+        return await self._image(f"/tasks/{task_id}/screenshots/{n}")
+
+    async def proof(self, task_id: str, last_step: int | None) -> bytes | None:
+        """The screenshot that shows how a task ended: the one its run record names as evidence (what a pro
+        run's check looked at), else its last step's, else the screen now. Never raises."""
+        n = last_step
         try:
-            r = await self.http.get(f"/tasks/{task_id}/screenshots/{n}")
+            record = await self.call("GET", f"/tasks/{task_id}/run-record")
+            m = re.search(r"/screenshots/(\d+)$", str(((record or {}).get("evidence") or {}).get("ref") or ""))
+            n = int(m.group(1)) if m else n
+        except PhoneError:
+            pass
+        shot = await self.screenshot(task_id, n) if n else None
+        return shot or await self._image("/phone/screenshot", params={"format": "jpeg", "max_width": 1080})
+
+    async def _image(self, path: str, **kw) -> bytes | None:
+        try:
+            r = await self.http.get(path, **kw)
         except httpx.HTTPError:
             return None
-        return r.content if r.status_code == 200 else None
+        return r.content if r.status_code == 200 and r.headers.get("content-type", "").startswith("image") else None
 
     async def events(self, task_id: str, after: int = 0) -> AsyncIterator[dict]:
         """The task's events after seq `after`, live, until the task ends; a dropped stream is picked up again."""
@@ -239,12 +295,19 @@ class PhonePost:
     placement: str
     caption: str  # as typed
     draft: int | None = None  # the conversation's draft it was
-    flowai_post: int | None = None  # FlowAI's post it was (published when scheduled)
+    version: int | None = None  # that draft's version, as posted
+    flowai_post: int | None = None  # FlowAI's post: the scheduled one it published, or the draft's there
     title: str = ""
     status: str = "posting"  # posting | posted | failed | unsure
+    waiting: bool = False  # posting, once the phone is free (posts go one after another)
     at: str | None = None  # when it went up
     task: str | None = None
     detail: str = ""
+    proof: str | None = None  # the screenshot it ended on (PROOF_URL...): the post up, or where it stopped
+    proof_note: str = ""  # what that shows: the phone's independent check, else its own words
+    run: dict = field(default_factory=dict)  # started, ended, steps, attempts: how it was posted (FlowAI's record)
+    recorded: bool = False  # on FlowAI's record, with its run
+    record_error: str = ""  # why it isn't yet (it's tried again when the conversation is on screen)
     feedback: list[dict] = field(default_factory=list)  # every check, oldest first
     check_at: str | None = None  # the next automatic check
 
@@ -254,15 +317,23 @@ class PhonePost:
 
     @property
     def name(self) -> str:
-        return f"FlowAI post {self.flowai_post}" if self.flowai_post else f"post {self.id}"
+        return f"FlowAI post {self.flowai_post}" if self.flowai_post and self.draft is None else f"post {self.id}"
 
     def info(self) -> dict:
+        """For the assistant."""
         last = self.feedback[-1] if self.feedback else None
         return {"post": self.id, **({"draft": self.draft} if self.draft else {}),
                 **({"flowai_post": self.flowai_post} if self.flowai_post else {}),
-                **({"title": self.title} if self.title else {}), "what": self.label, "status": self.status,
+                **({"title": self.title} if self.title else {}), "what": self.label,
+                "status": "waiting its turn" if self.waiting else self.status,
                 **({"posted": self.at} if self.at else {}), **({"detail": self.detail} if self.detail else {}),
                 **({"last_check": last} if last else {}), **({"next_check": self.check_at} if self.check_at else {})}
+
+    def event(self) -> dict:
+        """For the page: what the assistant knows, and the proof."""
+        return {**self.info(), "status": self.status, "waiting": self.waiting, "platform": self.platform,
+                "placement": self.placement, "proof": self.proof, "proof_note": self.proof_note,
+                "recorded": self.recorded, "attempts": self.run.get("attempts", 0)}
 
     @classmethod
     def load(cls, data: dict) -> "PhonePost":
@@ -276,13 +347,15 @@ class PhoneJob:
     kind: str  # post | publish (a FlowAI run) | feedback | task
     what: str  # what it does, in words
     post: PhonePost | None = None  # the post it's for
-    task: str | None = None  # the API's task id
+    task: str | None = None  # the API's task id (the latest attempt's)
     status: str = "starting"  # starting | running | awaiting approval | waiting (answered; can be told more) |
     #                           done | failed | cancelled
     seq: int = 0  # the last event seen
     intent: str = ""  # what the phone's agent said it would do next
     steps: list[str] = field(default_factory=list)
+    actions: list[dict] = field(default_factory=list)  # the same for FlowAI's record: action, ok, ms, note
     last_step: int | None = None  # its number, for the screenshot
+    last_at: float = field(default_factory=time.monotonic)  # when the last action came, to time the next
     result: str | None = None
     data: object = None  # the JSON result, for feedback
     snapshot: dict | None = None  # what a feedback check read (None: found nothing)
@@ -290,15 +363,27 @@ class PhoneJob:
     verdict: str | None = None
     approval: dict | None = None  # waiting for the user's OK on this
     before: "PhoneJob | None" = None  # the phone's job before this one (closed first if it's idle)
+    attempts: int = 1
+    tapped_post: bool = False  # a tap meant to share it went through: it may be up, so never again
+    direct: bool = False  # run by our own agent on the direct controls, not the API's agent
+    run_args: tuple = ()  # direct: the goal, max steps and schema it runs
+    proof: str | None = None  # the screenshot it ended on, as kept (PROOF_URL...)
+    shot: bytes | None = field(default=None, repr=False)  # the same, for FlowAI
     run: str | None = None  # publish: FlowAI's run
     budget: int = 40  # publish: FlowAI's step budget
-    tapped_post: bool = False  # publish: a tap meant to share it went through (it may be up)
+    started_at: str = field(default_factory=_iso)
     started: float = field(default_factory=time.monotonic)
     runner: asyncio.Task | None = None
 
     @property
     def active(self) -> bool:
         return self.status in ("starting", "running", "awaiting approval")
+
+    def act(self, action: str, ok: bool, note: str = ""):
+        """One thing done, timed since the one before."""
+        now = time.monotonic()
+        self.actions.append({"action": action, "ok": ok, "ms": round((now - self.last_at) * 1000), "note": note[:200]})
+        self.last_at = now
 
 
 @dataclass
@@ -314,10 +399,12 @@ class PhoneWork:
     """Runs jobs on the phone and follows them. The hooks (on_...) say where steps, questions and results go."""
 
     def __init__(self, client: PhoneClient | None, skills_dir: Path, mode: str = "flash", post_mode: str = "pro",
-                 max_steps: int = 40, feedback_after_min: float = 60):
+                 max_steps: int = 40, feedback_after_min: float = 60, proof_dir: Path | None = None,
+                 auto_approve: bool = True):
         self.client, self.skills_dir = client, skills_dir
         self.mode, self.post_mode, self.max_steps = mode, post_mode, max_steps
         self.feedback_after = feedback_after_min * 60
+        self.proof_dir, self.auto_approve = proof_dir, auto_approve
         self.jobs: dict[int, PhoneJob] = {}
         self.timers: dict[int, asyncio.Task] = {}  # post id -> its automatic check
 
@@ -327,11 +414,14 @@ class PhoneWork:
         pass
 
     async def on_step(self, job: PhoneJob, name: str, params: dict, ok: bool, result: str):
-        pass
+        """One thing it did (also transfer, approval and retry, which aren't the phone agent's)."""
 
     async def on_approval(self, job: PhoneJob, approval: dict):
         """Nobody to ask: say no."""
         await self.answer_approval(job, False, "nobody is there to approve it")
+
+    async def on_retry(self, job: PhoneJob, why: str):
+        pass
 
     def on_question(self, job: PhoneJob, text: str):
         pass
@@ -384,8 +474,12 @@ class PhoneWork:
                 if i:
                     await asyncio.sleep(UPLOAD_GAP_S)
                 await self.client.upload(path)
-            job.steps.append(f"put {plan.media} on the phone")
+            done = f"put {plan.media} on the phone" + (f"; it can't type {''.join(plan.dropped)}" if plan.dropped else "")
+            job.steps.append(done)
+            job.act("transfer", True, done)
+            await self.on_step(job, "transfer", {}, True, done)
         except PhoneError as exc:
+            job.act("transfer", False, str(exc))
             return await self.failed(job, f"the files couldn't be put on the phone: {exc}")
         await self.run(job, plan.goal, self.post_mode, started=True, max_steps=max_steps)
 
@@ -406,16 +500,27 @@ class PhoneWork:
 
     async def run(self, job: PhoneJob, goal: str | None, mode: str | None, schema: dict | None = None,
                   started: bool = False, max_steps: int | None = None):
-        """Starts the task (goal) or follows it further after a message (goal None), until it answers or ends."""
+        """Starts the task (goal) or follows it further after a message (goal None), until it answers or ends.
+        A phone that drops out before anything public happened is given the job again (up to RETRIES)."""
         try:
-            if goal is not None:
-                if not started:
-                    await self.started(job)
-                task = await self.client.start(goal, mode, min(max_steps or self.max_steps, self.max_steps), schema)
-                job.task, job.status = task["id"], "running"
-                log.info("phone job %s (%s): task %s", job.id, job.what, job.task)
-            if not await self._follow(job):
-                return await self.failed(job, job.result or "the phone stopped without an answer")
+            if goal is not None and not started:
+                await self.started(job)
+            new = goal is not None
+            while True:
+                try:
+                    if new:
+                        await self._start(job, RETRY_NOTE + goal if job.attempts > 1 else goal, mode, schema,
+                                          self._steps_left(job, max_steps))
+                    answered = await (self._follow_direct(job) if job.direct else self._follow(job))
+                    if answered:
+                        break
+                    why = job.result or "the phone stopped without an answer"
+                except PhoneError as exc:
+                    log.warning("phone job %s: %s", job.id, exc)
+                    why = f"the phone couldn't do it: {exc}"
+                if goal is None or not self._may_retry(job, why, max_steps):
+                    return await self.failed(job, why)
+                new = await self._again(job, why)
             await self.finished(job)
         except asyncio.CancelledError:
             job.status, job.result = "cancelled", "cancelled"
@@ -424,15 +529,82 @@ class PhoneWork:
                 self.on_changed(job.post)
             await self.on_finished(job)
             raise
-        except PhoneError as exc:
-            log.warning("phone job %s failed: %s", job.id, exc)
-            await self.failed(job, f"the phone couldn't do it: {exc}")
         except Exception as exc:
             log.exception("phone job %s failed", job.id)
             await self.failed(job, f"it failed with an error: {exc}")
 
+    async def _start(self, job: PhoneJob, goal: str, mode: str | None, schema: dict | None, steps: int):
+        """A task for the goal: our own agent's on the direct controls (PHONE_DRIVER=direct), else the API's."""
+        if self.client.driver:
+            job.direct, job.task = True, f"direct-{uuid.uuid4().hex[:16]}"
+            job.run_args = (goal, steps, schema)
+        else:
+            task = await self.client.start(goal, mode, steps, schema)
+            job.task = task["id"]
+        job.status, job.seq = "running", 0
+        if job.post and job.kind in ("post", "publish"):
+            job.post.task = job.task  # it may go up from now on
+            self.on_changed(job.post)
+        log.info("phone job %s (%s): %s %s%s", job.id, job.what, "our agent, run" if job.direct else "task",
+                 job.task, f", attempt {job.attempts}" if job.attempts > 1 else "")
+
+    async def _follow_direct(self, job: PhoneJob) -> bool:
+        """Our own agent on the direct controls: its events, taken in like the API agent's."""
+        goal, steps, schema = job.run_args
+        check = None
+        if job.post and job.kind in ("post", "publish"):
+            lines = job.post.caption.split("\n") if job.post.caption else []
+            check = f"a new {job.post.label}" + (f" whose caption starts with {_first_words(lines)}" if lines else "")
+        answered = False
+        async with aclosing(self.client.driver.run(job, goal, steps, schema, check)) as events:
+            async for event in events:
+                await self._event(job, event, answered)
+                answered = answered or event.get("type") == "result"
+        return answered
+
+    def _steps_left(self, job: PhoneJob, max_steps: int | None) -> int:
+        """The new task's max_steps. A FlowAI run's steps, all attempts' together, stay within its budget."""
+        limit = min(max_steps or self.max_steps, self.max_steps)
+        if job.kind == "publish":
+            limit = min(limit, job.budget - len(job.actions))
+        return max(1, limit)
+
+    def _may_retry(self, job: PhoneJob, why: str, max_steps: int | None) -> bool:
+        """The phone dropped out (not the job going wrong), and trying again can't post it twice."""
+        return (job.kind in ("post", "publish", "feedback") and job.attempts <= RETRIES and not job.tapped_post
+                and bool(DROPPED.search(why)) and self._steps_left(job, max_steps) >= RETRY_MIN_STEPS)
+
+    async def _again(self, job: PhoneJob, why: str) -> bool:
+        """Before another try: True to start the task over, False when the phone carried on with it (only our
+        link to it dropped) and it's followed again."""
+        job.attempts += 1
+        note = f"the phone dropped out ({why}); trying again"
+        job.steps.append(note)
+        job.act("retry", False, why)
+        log.info("phone job %s: %s in %d s", job.id, note, RETRY_WAIT_S)
+        await self.on_step(job, "retry", {}, False, why)
+        await self.on_retry(job, why)
+        await asyncio.sleep(RETRY_WAIT_S)
+        if job.task and not job.direct:
+            try:
+                status = (await self.client.task(job.task))["status"]
+            except PhoneError:
+                status = None
+            if status in ("queued", "starting", "running", "awaiting_approval", "idle", "succeeded"):
+                log.info("phone job %s: task %s is %s after all; following it again", job.id, job.task, status)
+                job.status = "running"
+                return False
+            if status not in TERMINAL:  # unknown: make sure it doesn't go on beside the new one
+                try:
+                    await self.client.cancel(job.task)
+                except PhoneError:
+                    pass
+        job.task, job.last_step, job.result, job.success, job.data, job.verdict = None, None, None, None, None, None
+        job.status = "running"
+        return True
+
     async def cancel_job(self, job: PhoneJob):
-        if job.task:
+        if job.task and not job.direct:
             try:
                 await self.client.cancel(job.task)
             except PhoneError as exc:
@@ -467,10 +639,14 @@ class PhoneWork:
         elif kind == "action":
             name = data.get("name", "")
             params = {k: v for k, v in (data.get("params") or {}).items() if k not in ("transport", "perception")}
-            result = "ok" if data.get("ok") else f"failed: {data.get('error')}"
+            ok = bool(data.get("ok"))
+            result = "ok" if ok else f"failed: {data.get('error')}"
+            if name == "tap" and ok and job.kind in ("post", "publish") and _shares(job.intent, params):
+                name, job.tapped_post = "tap:post-button", True  # FlowAI's name for it
             job.steps.append(f"{name} {json.dumps(params, ensure_ascii=False)[:120]}: {result}")
             job.last_step = data.get("n") or job.last_step
-            await self.on_step(job, name, params, bool(data.get("ok")), result)
+            job.act(name, ok, job.intent or result)
+            await self.on_step(job, name, params, ok, result)
         elif kind == "result":
             job.result = str(data.get("text") or "").strip() or None
             job.data, job.success = data.get("data"), data.get("success")
@@ -501,28 +677,78 @@ class PhoneWork:
         if not pending or (job.approval and job.approval["id"] == pending[0]["id"]):
             return
         a = pending[0]
-        job.status = "awaiting approval"
         job.approval = {"id": a["id"], "action": a.get("action"), "params": a.get("params"),
                         "reason": a.get("reason"), "expires": a.get("expires_at")}
+        # Publishing a post FlowAI has approved, or the post the user just asked for: plain input is part of it
+        if self.auto_approve and (job.kind == "publish" or (job.kind == "post" and a.get("action") in INPUT_ACTIONS)):
+            what = f"{a.get('action')} {json.dumps(a.get('params') or {}, ensure_ascii=False)[:80]}"
+            job.steps.append(f"OK given for {what} ({a.get('reason')})")
+            job.act("approval", True, f"the phone asked: {a.get('reason') or what}")
+            log.info("phone job %s: OK given for %s (%s)", job.id, what, a.get("reason"))
+            await self.on_step(job, "approval", {"action": a.get("action")}, True, str(a.get("reason") or what))
+            try:
+                await self.answer_approval(job, True, "part of the post that was asked for")
+            except PhoneError as exc:
+                log.warning("phone job %s: the OK couldn't be given: %s", job.id, exc)
+            return
+        job.status = "awaiting approval"
         await self.on_approval(job, job.approval)
 
     async def finished(self, job: PhoneJob):
-        if job.task and job.success is not None:
-            try:  # pro runs add an independent verdict
+        if job.task and job.success is not None and not job.direct:
+            try:  # pro runs add an independent verdict (ours makes its own, phone_direct.py)
                 task = await self.client.task(job.task)
                 job.verdict = task.get("verdict") if task.get("verified") is not None else None
                 if task.get("verified") is False:
                     job.success = False
             except PhoneError:
                 pass
+        if job.task:
+            await self._keep_proof(job)
         if job.active:
             job.status = "done"
-        log.info("phone job %s %s in %d s: %s", job.id, job.status, round(time.monotonic() - job.started), job.result)
         if job.kind == "post" and job.post:
             self.posted(job, job.post)
         elif job.kind == "feedback" and job.post and job.status != "failed":
             job.snapshot = self.checked(job, job.post)
+        if job.kind in ("publish", "feedback") or (job.kind == "post" and job.success):
+            await self._close(job)  # nothing more to tell it: the phone is free at once
+        log.info("phone job %s (%s) %s in %d s%s: %s", job.id, job.what, job.status,
+                 round(time.monotonic() - job.started), f" after {job.attempts} tries" if job.attempts > 1 else "",
+                 job.result)
         await self.on_finished(job)
+
+    async def _keep_proof(self, job: PhoneJob):
+        """The screenshot it ended on, kept as MEDIA_DIR/phone/<task>.jpg (our agent took it itself)."""
+        if not (job.direct and job.shot):
+            job.shot = await self.client.proof(job.task, job.last_step)
+        if not job.shot or not self.proof_dir:
+            return
+        path = self.proof_dir / f"{job.task}.jpg"
+
+        def write():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(job.shot)
+
+        try:
+            await asyncio.to_thread(write)
+            job.proof = PROOF_URL + path.name
+        except OSError as exc:
+            log.warning("the phone's screenshot couldn't be kept: %s", exc)
+
+    async def _close(self, job: PhoneJob):
+        if job.task and job.status == "waiting":
+            try:
+                await self.client.cancel(job.task)
+                job.status = "done"
+            except PhoneError:
+                pass  # it times out by itself; the next job closes it first
+
+    def proof_file(self, post: PhonePost) -> Path | None:
+        if not (post.proof and self.proof_dir and post.proof.startswith(PROOF_URL)):
+            return None
+        path = self.proof_dir / post.proof[len(PROOF_URL):]
+        return path if path.is_file() else None
 
     # --- posts and their feedback ---------------------------------------------------
 
@@ -534,9 +760,13 @@ class PhoneWork:
             post.status, post.at = "posted", _iso()
             if self.feedback_after > 0:
                 self.plan_check(post, datetime.now(timezone.utc) + timedelta(seconds=self.feedback_after))
-        else:
-            post.status = "failed" if job.status == "failed" else "unsure"
+        else:  # it may be up anyway if it said so, or got as far as sharing
+            post.status = "failed" if job.status == "failed" and not job.tapped_post else "unsure"
         post.detail = job.result or ""
+        post.proof, post.proof_note = job.proof or post.proof, (job.verdict or job.result or "")[:600]
+        post.run = {"started": job.started_at, "ended": _iso(), "attempts": job.attempts,
+                    "steps": job.actions[-STEPS_KEPT:]}
+        post.recorded, post.record_error = False, ""
         self.on_changed(post)
 
     def checked(self, job: PhoneJob, post: PhonePost) -> dict | None:
@@ -549,6 +779,8 @@ class PhoneWork:
                                    for c in (data.get("latest_comments") or [])[:COMMENTS_KEPT] if isinstance(c, dict)]
         if data.get("notes"):
             snap["notes"] = str(data["notes"])
+        if job.proof:
+            snap["proof"] = job.proof
         post.feedback.append(snap)
         self.on_changed(post)
         return snap
@@ -567,7 +799,8 @@ class PhoneWork:
                              "posted": post.at or "recently", "comments_kept": str(COMMENTS_KEPT)})
         job = self.new_job("feedback", f"checking how {post.name} ({post.label}) is doing"
                            + (", as planned after posting" if auto else ""), post)
-        job.runner = asyncio.create_task(self.run(job, goal, self.mode, FEEDBACK_SCHEMA))
+        job.runner = asyncio.create_task(self.run(job, goal, self.mode, FEEDBACK_SCHEMA,
+                                                  max_steps=FEEDBACK_MAX_STEPS))
         return job
 
     def plan_check(self, post: PhonePost, at: datetime):
@@ -625,22 +858,30 @@ def feedback_note(post: PhonePost, snap: dict | None, result: str | None, data=N
 # --- a conversation's work on the phone -------------------------------------------
 
 class PhoneSession(PhoneWork):
-    """Posts the conversation's drafts when the user says so, and tells the user how it goes."""
+    """Posts the conversation's drafts when the user says so (one after another), tells the user how it goes,
+    and puts each one on FlowAI's record."""
 
     def __init__(self, client: PhoneClient | None, studio: "StudioSession", skills_dir: Path,
                  send: Callable[..., Awaitable[None]], notify: Callable[[str], None],
                  remember: Callable[[str], None], changed: Callable[[], None],
-                 mode: str = "flash", post_mode: str = "pro", max_steps: int = 40, feedback_after_min: float = 60):
-        super().__init__(client, skills_dir, mode, post_mode, max_steps, feedback_after_min)
+                 mode: str = "flash", post_mode: str = "pro", max_steps: int = 40, feedback_after_min: float = 60,
+                 proof_dir: Path | None = None, auto_approve: bool = True):
+        super().__init__(client, skills_dir, mode, post_mode, max_steps, feedback_after_min, proof_dir, auto_approve)
         self.studio = studio
         self.send, self.notify, self.remember, self.changed = send, notify, remember, changed
         self.posts: dict[int, PhonePost] = {}
+        self.queue: list[tuple[PhonePost, list[Path], PostPlan, str]] = []  # waiting for the phone, in order
+        self.draining: asyncio.Task | None = None
+        # FlowAI, while this conversation is on screen in a page signed in to it (FlowAISession.attach)
+        self.recorder: "FlowAISession | None" = None
+        self.recording: set[asyncio.Task] = set()
+        self.on_record: set[int] = set()  # posts being put on FlowAI's record right now (once at a time)
 
     @property
     def busy(self) -> bool:
         """Something still runs or is due for it, so the conversation stays in memory."""
-        return any(j.runner and not j.runner.done() for j in self.jobs.values()) or \
-            any(not t.done() for t in self.timers.values())
+        return any(j.runner and not j.runner.done() for j in self.jobs.values()) or bool(self.queue) or \
+            any(not t.done() for t in self.timers.values()) or any(not t.done() for t in self.recording)
 
     @property
     def job(self) -> PhoneJob | None:
@@ -648,8 +889,19 @@ class PhoneSession(PhoneWork):
 
     # --- what the tools do ----------------------------------------------------------
 
-    async def post(self, ref=None) -> dict:
-        d = self.studio.get(ref)
+    async def post(self, refs=None, again: bool = False) -> dict:
+        """Posts drafts, one after another: the first now if the phone is free, the others when it is."""
+        replies = [self._post_one(ref, again) for ref in (refs if isinstance(refs, list) and refs else [refs])]
+        if len(replies) == 1:
+            return replies[0]
+        return {"posts": replies, "note": "they go up one after another, by themselves; you are told as each "
+                                          "one is up, so there is nothing to check on meanwhile"}
+
+    def _post_one(self, ref, again: bool) -> dict:
+        try:
+            d = self.studio.get(ref)
+        except StudioError as exc:
+            return {"error": str(exc)}
         if d.check and not d.check.get("ok", True):
             fails = [c["detail"] for c in d.check.get("checks", []) if c["status"] == "fail"]
             return {"error": f"draft {d.id} doesn't pass {d.label}'s check: {' '.join(fails)} Fix it first"}
@@ -658,30 +910,83 @@ class PhoneSession(PhoneWork):
             return {"error": f"draft {d.id} has no pictures yet"}
         if missing := [p.name for p in files if not p.exists()]:
             return {"error": f"draft {d.id}'s files are gone ({', '.join(missing)}); show it again to redraw it"}
-        plan = self.plan_post(d.platform, d.placement, d.caption, [f.kind for _, f in d.files])
-        if busy := self.busy_error():
-            return busy
-        post = PhonePost(len(self.posts) + 1, d.platform, d.placement, plan.caption, draft=d.id, title=d.title)
-        self.posts[post.id] = post
-        job = self.new_job("post", f"posting draft {d.id} as {d.a_label}", post)
-        job.runner = asyncio.create_task(self.post_files(job, files, plan))
-        reply = {"phone_job": job.id, "post": post.id, "status": "started: uploading the "
-                 + (f"{plan.media} to the phone, then posting from the app" if files else "post from the app")}
+        try:
+            plan = self.plan_post(d.platform, d.placement, d.caption, [f.kind for _, f in d.files])
+        except PhoneError as exc:
+            return {"error": str(exc)}
+        last = max((p for p in self.posts.values() if p.draft == d.id), key=lambda p: p.id, default=None)
+        if last and last.status == "posting":
+            return {"error": f"draft {d.id} is already being posted (post {last.id})"
+                    + (", waiting its turn" if last.waiting else "")}
+        if last and last.status in ("posted", "unsure") and not again:
+            return {"error": f"draft {d.id} is already {'up' if last.status == 'posted' else 'maybe up'} (post "
+                             f"{last.id}{', ' + last.at if last.at else ''}). Post it once more only if the user "
+                             "says so, with again true" + (", after checking it with post_feedback"
+                                                           if last.status == "unsure" else "")}
+        if last and last.status == "failed":  # trying it again: the same post, another attempt
+            post = last
+            post.status, post.task, post.detail, post.at, post.proof, post.proof_note = "posting", None, "", None, None, ""
+            post.flowai_post = None  # where this try goes on FlowAI's record is decided anew (FlowAISession)
+            post.caption, post.version, post.title, post.placement = plan.caption, d.version, d.title, d.placement
+        else:
+            post = PhonePost(max(self.posts, default=0) + 1, d.platform, d.placement, plan.caption, draft=d.id,
+                             version=d.version, title=d.title)
+            self.posts[post.id] = post
+        reply: dict = {"post": post.id, "draft": d.id}
+        if not self.queue and not self.busy_error():
+            job = self._start_post(post, files, plan, f"posting draft {d.id} as {d.a_label}")
+            reply |= {"phone_job": job.id, "status": "started: uploading "
+                      + (f"the {plan.media} to the phone, then posting from the app" if files else "nothing; posting "
+                         "from the app")}
+        else:
+            post.waiting = True
+            self.queue.append((post, files, plan, f"posting draft {d.id} as {d.a_label}"))
+            reply["status"] = f"waiting its turn ({len(self.queue)} in line): it starts by itself when the phone is free"
+            if not self.draining or self.draining.done():
+                self.draining = asyncio.create_task(self._drain())
+        reply["note"] = "you are told when it's up (the user sees the screenshot it ends on); don't check on it"
         if plan.dropped:
             reply["left_out_of_caption"] = "".join(plan.dropped)
             reply["why"] = "the phone types plain letters only (no emoji)"
+        self.on_changed(post)
+        self._track(self.send(type="phone_post", **post.event()))
         return reply
+
+    def _start_post(self, post: PhonePost, files: list[Path], plan: PostPlan, what: str) -> PhoneJob:
+        post.waiting = False
+        job = self.new_job("post", what, post)
+        job.runner = asyncio.create_task(self.post_files(job, files, plan))
+        self._track(self._prepare_record(post))
+        return job
+
+    async def _drain(self):
+        """The posts waiting their turn, one at a time, as the phone gets free (from anyone's job)."""
+        while self.queue:
+            if self.busy_error():
+                await asyncio.sleep(QUEUE_POLL_S)
+                continue
+            post, files, plan, what = self.queue.pop(0)
+            job = self._start_post(post, files, plan, what)
+            await asyncio.wait({job.runner})
 
     async def feedback(self, ref=None, flowai_post=None) -> dict:
         if flowai_post not in (None, ""):
-            publisher = self.client.publisher
-            if not publisher:
-                return {"error": "FlowAI's scheduled posts aren't published from the phone here"}
-            post = publisher.find(flowai_post)
+            try:
+                n = int(str(flowai_post).strip().lstrip("#"))
+            except ValueError:
+                raise PhoneError(f"{flowai_post!r} isn't a FlowAI post number") from None
+            mine = [p for p in self.posts.values() if p.flowai_post == n]
+            if mine:
+                post = max(mine, key=lambda p: (p.status in ("posted", "unsure"), p.id))
+            elif self.client.publisher:
+                post = self.client.publisher.find(n)
+            else:
+                return {"error": f"FlowAI post {n} wasn't published from the phone"}
         else:
             post = self._post_ref(ref)
         job = self.check_feedback(post)
-        return {"phone_job": job.id, "status": "started: opening the post in the app to read its numbers"}
+        return {"phone_job": job.id, "status": "started: opening the post in the app to read its numbers",
+                "note": "you are told what it finds"}
 
     async def task(self, instruction: str, skill: str | None = None) -> dict:
         goal = instruction.strip()
@@ -689,12 +994,15 @@ class PhoneSession(PhoneWork):
             found = self.skills().get(str(skill).strip())
             if not found:
                 return {"error": f"there is no phone skill {skill!r}. Skills: {', '.join(self.skills()) or 'none'}"}
+            if found.name.startswith("post-"):
+                return {"error": "posting a draft is post_on_phone's job (also to try a failed one again): it puts "
+                                 "the files on the phone and keeps the post's record"}
             goal = f"{found.instructions}\n\nThe task: {goal}"
         if busy := self.busy_error():
             return busy
         job = self.new_job("task", instruction.strip())
         job.runner = asyncio.create_task(self.run(job, goal, self.mode))
-        return {"phone_job": job.id, "status": "started"}
+        return {"phone_job": job.id, "status": "started", "note": "you are told the result"}
 
     def status(self) -> dict:
         job = self.job
@@ -702,10 +1010,15 @@ class PhoneSession(PhoneWork):
         if job:
             out["job"] = {"phone_job": job.id, "doing": job.what, "status": job.status,
                           "seconds": round(time.monotonic() - job.started), "recent_steps": job.steps[-3:],
+                          **({"tries": job.attempts} if job.attempts > 1 else {}),
                           **({"result": job.result} if job.result else {}),
                           **({"needs_approval": job.approval} if job.approval else {})}
+            if job.active:
+                out["note"] = "still going: you are told when it's done, so don't check on it again"
         else:
             out["job"] = "nothing done on the phone yet in this conversation"
+        if self.queue:
+            out["waiting_their_turn"] = [p.id for p, *_ in self.queue]
         if self.posts:
             out["posts"] = [p.info() for p in self.posts.values()]
         other = self.client.job if self.client else None
@@ -716,11 +1029,19 @@ class PhoneSession(PhoneWork):
         return out
 
     async def cancel(self) -> dict:
-        job = self.job
+        job, dropped = self.job, [p for p, *_ in self.queue]
+        self.queue.clear()
+        for p in dropped:
+            p.status, p.waiting, p.detail = "failed", False, "not posted: stopped before its turn"
+            self.on_changed(p)
+            await self.send(type="phone_post", **p.event())
         if not job or not job.active:
+            if dropped:
+                return {"stopped": f"posts {', '.join(str(p.id) for p in dropped)} won't be posted"}
             return {"error": "nothing this conversation started is running on the phone"}
         await self.cancel_job(job)
-        return {"phone_job": job.id, "status": "cancelled"}
+        return {"phone_job": job.id, "status": "cancelled",
+                **({"not_posted": [p.id for p in dropped]} if dropped else {})}
 
     async def answer(self, text: str | None = None, approve: bool | None = None) -> dict:
         job = self.job
@@ -753,12 +1074,24 @@ class PhoneSession(PhoneWork):
     # --- hooks: the page and the assistant ------------------------------------------
 
     async def on_started(self, job: PhoneJob):
-        await self.send(type="phone_task", id=job.id, kind=job.kind, status="started", text=job.what)
+        await self.send(type="phone_task", id=job.id, kind=job.kind, status="started", text=job.what,
+                        **({"post": job.post.id} if job.post else {}))
+        if job.post:
+            await self.send(type="phone_post", **job.post.event())
 
     async def on_step(self, job: PhoneJob, name: str, params: dict, ok: bool, result: str):
-        shot = await self.client.screenshot(job.task, job.last_step) if job.last_step else None
+        own = name in ("transfer", "approval", "retry")  # ours, not the phone agent's: no screenshot of its own
+        if job.direct:
+            shot = None if own else job.shot  # what our agent looked at for this step
+        else:
+            shot = await self.client.screenshot(job.task, job.last_step) if job.last_step and not own else None
         await self.send(type="phone_step", id=job.id, step=job.last_step, action=name, args=params,
-                        result=result[:300], screenshot=base64.b64encode(shot).decode() if shot else None)
+                        result=result[:300], intent=job.intent[:200],
+                        screenshot=base64.b64encode(shot).decode() if shot else None)
+
+    async def on_retry(self, job: PhoneJob, why: str):
+        await self.send(type="phone_task", id=job.id, kind=job.kind, status="trying again",
+                        text=f"the phone dropped out ({why}); trying again")
 
     async def on_approval(self, job: PhoneJob, a: dict):
         await self.send(type="phone_task", id=job.id, kind=job.kind, status="awaiting approval",
@@ -773,14 +1106,18 @@ class PhoneSession(PhoneWork):
                     "with answer_phone (text).")
 
     def on_changed(self, post: PhonePost | None = None):
-        if post and post.flowai_post and self.client.publisher:
-            self.client.publisher.save_soon()  # FlowAI's post, checked from here
+        publisher = self.client.publisher if self.client else None
+        if post and publisher and publisher.posts.get(post.id) is post:
+            publisher.save_soon()  # FlowAI's scheduled post, checked from here
         self.changed()
 
     async def on_finished(self, job: PhoneJob):
         status = {"failed": "failed", "cancelled": "cancelled"}.get(job.status, "done")
-        await self.send(type="phone_task", id=job.id, kind=job.kind, status=status, text=job.result)
+        await self.send(type="phone_task", id=job.id, kind=job.kind, status=status, text=job.result,
+                        proof=job.proof, **({"post": job.post.id} if job.post else {}))
         if job.status == "cancelled":
+            if job.post and job.kind == "post":
+                await self.send(type="phone_post", **job.post.event())
             return
         tell = "\nTell the user the outcome in one or two short spoken sentences."
         if job.kind == "post":
@@ -789,13 +1126,16 @@ class PhoneSession(PhoneWork):
             note = feedback_note(job.post, job.snapshot, job.result, job.data)
         else:
             note = (f"Phone job {job.id} ({job.what}) has finished. Result: {job.result}"
-                    + (f"\nVerdict: {job.verdict}" if job.verdict else ""))
+                    + (f"\nVerdict: {job.verdict}" if job.verdict else "")
+                    + ("\nThe user sees the screenshot it ended on." if job.proof else ""))
             if job.success is False and job.status != "failed":
                 note += ("\nIf it says what it needs, ask the user and pass the answer on with answer_phone "
                          "(text); the phone keeps the task open for a few minutes.")
             note += tell
         if job.post:
-            await self.send(type="phone_post", **job.post.info())
+            await self.send(type="phone_post", **job.post.event())
+        if job.kind == "post" and job.post:
+            self._track(self._record(job.post))
         self.changed()
         self.notify(note)
 
@@ -803,23 +1143,107 @@ class PhoneSession(PhoneWork):
         post = job.post
         when = (f" Its numbers will be checked by themselves at {post.check_at} (UTC); post_feedback checks "
                 "them now." if post.check_at else " post_feedback checks how it's doing.")
+        proof = " The user sees the screenshot it ended on, as proof." if post.proof else ""
+        tries = f" It took {job.attempts} tries: the phone dropped out first." if job.attempts > 1 else ""
+        coming = [p.id for p in self.posts.values() if p.status == "posting" and p is not post]
+        later = f" Still to go, by themselves: posts {', '.join(map(str, coming))}." if coming else ""
         if post.status == "posted":
             return (f"Draft {post.draft} is now posted from the phone as an {post.label} (post {post.id})."
-                    + when + (f" Verdict: {job.verdict}" if job.verdict else "") + f" The phone said: {job.result}")
+                    + proof + tries + when + (f" Verdict: {job.verdict}" if job.verdict else "")
+                    + f" The phone said: {job.result}" + later)
         return (f"Posting draft {post.draft} as {post.label} from the phone didn't go through "
-                f"({post.status}): {job.result}" + (f"\nVerdict: {job.verdict}" if job.verdict else "")
-                + "\nIf it's unsure, it may be up anyway: say so, and offer to check with post_feedback before "
-                "posting it again, so it doesn't go up twice.")
+                f"({post.status}): {job.result}" + (f"\nVerdict: {job.verdict}" if job.verdict else "") + proof + tries
+                + ("\nIt never got as far as sharing, so post_on_phone can try it again when the user wants."
+                   if post.status == "failed" and not job.tapped_post else
+                   "\nIt may be up anyway: say so, and offer to check with post_feedback before posting it again "
+                   "(again true), so it doesn't go up twice.") + later)
+
+    # --- FlowAI's record ------------------------------------------------------------
+
+    def _track(self, coro):
+        t = asyncio.get_running_loop().create_task(coro)
+        self.recording.add(t)
+        t.add_done_callback(self.recording.discard)
+
+    def _flowai(self) -> "FlowAISession | None":
+        """FlowAI, if this conversation is the one it works on now."""
+        rec = self.recorder
+        return rec if rec and rec.conv.phone is self else None
+
+    async def _prepare_record(self, post: PhonePost):
+        """While the phone posts: the draft saved as a FlowAI post, so the record only adds the run."""
+        if rec := self._flowai():
+            try:
+                await rec.save_for_phone(post)
+            except Exception as exc:
+                log.info("post %d: not saved to FlowAI yet: %s", post.id, exc)
+
+    async def _record(self, post: PhonePost):
+        """The post and its run, with the proof, on FlowAI's record: the calendar shows it went up."""
+        rec = self._flowai()
+        if post.recorded or post.status not in ("posted", "unsure", "failed") or not post.draft or \
+                post.id in self.on_record:
+            return
+        if not rec:
+            post.record_error = "FlowAI isn't open in this conversation's page"
+            return
+        self.on_record.add(post.id)
+        try:
+            shot = None
+            if path := self.proof_file(post):
+                shot = await asyncio.to_thread(path.read_bytes)
+            out = await rec.record_phone(post, shot, self.client.device)
+        except Exception as exc:
+            log.warning("post %d couldn't be put on FlowAI's record: %s", post.id, exc)
+            post.record_error = str(exc)
+            self.on_changed(post)
+            return
+        finally:
+            self.on_record.discard(post.id)
+        post.recorded, post.record_error = True, ""
+        post.flowai_post = out["post"] or post.flowai_post
+        self.on_changed(post)
+        await self.send(type="phone_post", **post.event())
+        if out["post"]:
+            self.remember(f"Post {post.id} is on FlowAI's record as post {out['post']} ({out['status']}), with the "
+                          "screenshot it ended on: FlowAI's calendar shows it.")
+
+    def flush_records(self):
+        """The posts FlowAI hasn't heard of yet (it wasn't there when they finished): now that it is."""
+        for post in self.posts.values():
+            if not post.recorded and post.status in ("posted", "unsure", "failed") and post.run:
+                self._track(self._record(post))
 
     # --- kept with the conversation -------------------------------------------------
+
+    def events(self) -> list[dict]:
+        """For a page that has just opened the conversation."""
+        out = [{"type": "phone_post", **p.event()} for p in self.posts.values()]
+        job = self.job
+        if job and job.active:
+            out.append({"type": "phone_task", "id": job.id, "kind": job.kind, "status": job.status, "text": job.what,
+                        "seconds": round(time.monotonic() - job.started),
+                        **({"post": job.post.id} if job.post else {})})
+        return out
 
     def dump(self) -> dict:
         return {"posts": [asdict(p) for p in self.posts.values()]}
 
     def restore(self, data: dict):
         self.posts = {p["id"]: PhonePost.load(p) for p in data.get("posts", [])}
+        for p in self.posts.values():
+            if p.status == "posting":  # the assistant stopped meanwhile
+                if p.waiting or not p.task:
+                    p.status, p.waiting, p.detail = "failed", False, "not posted: the assistant restarted before its turn"
+                else:
+                    p.status, p.detail = "unsure", "the assistant restarted while posting it; check before posting again"
         if self.client:
             self.replan_checks(self.posts.values())
+
+    async def close(self):
+        await super().close()
+        if self.draining:
+            self.draining.cancel()
 
 
 def _fill(skill: Skill, values: dict[str, str]) -> str:

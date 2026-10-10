@@ -7,6 +7,8 @@ like, reply, repost, bookmark, delete or change anything.
 
 The post: posted {{posted}}, whose text starts with {{first_words}}.
 
+Be quick: this takes about ten steps. Stop as soon as you have read what is listed below.
+
 1. Open the X app (package com.twitter.android). If it shows a login screen, stop and say so. Close any
    pop-up with "Not now" or the X.
 2. Open the profile: tap the profile picture at the top left, then "Profile".

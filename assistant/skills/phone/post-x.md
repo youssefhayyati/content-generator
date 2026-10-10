@@ -15,8 +15,9 @@ those, nothing older.
 3. Tap the round blue "+" button at the bottom right. If it opens a small menu (Go Live, Spaces, Photos,
    Post), tap "Post" (the pen icon).
 4. In the "What's happening?" box, type the text exactly as given, one line at a time: type line 1, press
-   enter, type line 2, and so on. For an "(empty line)" just press enter. Do not press enter after the last
-   line. Ignore any suggestion list that pops up while typing; do not add, fix or translate anything.
+   enter, type line 2, and so on, doing as many lines as you can in one step. For an "(empty line)" just
+   press enter. Do not press enter after the last line. Ignore any suggestion list that pops up while typing;
+   do not add, fix or translate anything.
 
 Text:
 {{caption}}
@@ -29,7 +30,9 @@ Text:
    doubled, fix it before going on.
 7. Tap "Post" (top right). If a pop-up appears (e.g. about who can reply, or a premium offer), close it in the
    way that still posts.
-8. Wait until the compose screen closes and the timeline shows "Your post was sent" or your new post.
+8. Wait until the compose screen closes and the timeline shows "Your post was sent" or your new post, and
+   stop on that screen: your last screenshot is kept as the proof that it is up. Only if you can't tell, open
+   your profile and look at the newest post.
 
 Report in one or two sentences whether the post is now published, or exactly where it stopped and what the
 screen said.

@@ -41,7 +41,7 @@ class PostController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:500'],
         ]);
 
-        $posts = $request->user()->posts()->with(['account', 'assets', 'campaign'])
+        $posts = $request->user()->posts()->with(['account', 'assets', 'campaign', 'latestRun'])
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['platform'] ?? null, fn ($q, $platform) => $q->whereJsonContains('platforms', $platform))
             ->when($filters['account'] ?? null, fn ($q, $account) => $q->where('account_id', $account))
@@ -74,7 +74,7 @@ class PostController extends Controller
     {
         Gate::authorize('view', $post);
 
-        return PostResource::make($post);
+        return PostResource::make($post->load('latestRun'));
     }
 
     public function update(SavePostRequest $request, Post $post): PostResource

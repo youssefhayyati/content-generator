@@ -13,6 +13,8 @@ use App\Models\PublishingRun;
 use App\Models\User;
 use App\Services\Flows\Flows;
 use App\Services\Media\AssetStore;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -208,6 +210,47 @@ class Publisher
         };
     }
 
+    /**
+     * A run the voice assistant drove itself: the person told it to post this now, from the phone, and it
+     * reports how it went with the screenshot it ended on. The same record as a scheduled run's. It went up
+     * when the phone said so, which is where the calendar shows it; and posting it was the person's call,
+     * which is its approval.
+     *
+     * @param  array{outcome: string, note?: ?string, steps?: ?string, started_at?: ?string, ended_at?: ?string, device_ref?: ?string, post_url?: ?string}  $data
+     */
+    public function recordPhoneRun(Post $post, User $user, array $data, ?UploadedFile $screenshot): PublishingRun
+    {
+        abort_if($post->runs()->where('status', 'running')->exists(), 409, 'A phone is publishing this post right now.');
+        $ended = ! empty($data['ended_at']) ? Carbon::parse($data['ended_at']) : now();
+        $device = ! empty($data['device_ref']) ? $user->devices()->where('ref', $data['device_ref'])->first() : null;
+        $run = $post->runs()->create([
+            'user_id' => $user->id,
+            'device_id' => $device?->id,
+            'attempt' => $post->runs()->count() + 1,
+            'goal' => Str::limit(trim($post->title ?: $post->body), 140, ''),
+            'steps' => $this->reportedSteps($data['steps'] ?? null),
+            'started_at' => ! empty($data['started_at']) ? Carbon::parse($data['started_at']) : $ended,
+        ]);
+        if ($screenshot) {
+            $this->attachScreenshot($run, $screenshot->get(), $screenshot->getMimeType() ?: 'image/jpeg');
+        }
+        $note = $data['note'] ?? null;
+        if ($data['outcome'] !== 'failed') {
+            $post->forceFill(['scheduled_at' => $ended, 'approved_at' => $post->approved_at ?? now(), 'approved_by' => $post->approved_by ?? $user->id])->save();
+        }
+        match ($data['outcome']) {
+            'confirmed' => $this->settle($run, true, $data['post_url'] ?? null, $note),
+            'uncertain' => $this->uncertain($run, $note),
+            default => $this->failedOnPhone($run, $note ?: 'The phone couldn’t post it.'),
+        };
+        $run->update(['ended_at' => $ended]);
+        if ($data['outcome'] === 'confirmed') {
+            $post->update(['published_at' => $ended]);
+        }
+
+        return $run->refresh();
+    }
+
     /** The operator tries a failed (or unconfirmed) post again: a fresh attempt, right away. */
     public function retry(Post $post): ?PublishingRun
     {
@@ -333,6 +376,37 @@ class Publisher
         $wait = config('publishing.backoff_minutes')[$run->attempt - 1] ?? 30;
         $post->update(['status' => PostStatus::Scheduled, 'scheduled_at' => now()->addMinutes($wait), 'error' => $why]);
         ActionLog::record($run->user, 'agent:publisher', 'publish.retry_scheduled', $post, "Attempt {$run->attempt} failed: {$why} Trying again in {$wait} minutes.", 'auto');
+    }
+
+    /** The assistant's run failed: the post stays as it was (nothing reschedules it), with the reason. */
+    private function failedOnPhone(PublishingRun $run, string $why): void
+    {
+        $run->update(['status' => 'failed', 'error' => $why]);
+        $run->post->update(['error' => $why]);
+        ActionLog::record($run->user, 'assistant', 'publish.failed', $run->post, "Couldn’t post “{$run->goal}” from the phone: {$why}", 'auto');
+    }
+
+    /**
+     * Steps as the assistant reported them (JSON), in the record's shape.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function reportedSteps(?string $json): array
+    {
+        $steps = json_decode((string) $json, true);
+
+        return collect(is_array($steps) ? $steps : [])
+            ->filter(fn ($s) => is_array($s) && isset($s['action']))
+            ->take(100)
+            ->values()
+            ->map(fn (array $s, int $i) => array_filter([
+                'n' => $i + 1,
+                'action' => Str::limit((string) $s['action'], 60, ''),
+                'ok' => (bool) ($s['ok'] ?? false),
+                'ms' => max(0, min((int) ($s['ms'] ?? 0), 600000)),
+                'note' => filled($s['note'] ?? null) ? Str::limit((string) $s['note'], 200, '') : null,
+            ], fn ($v) => $v !== null))
+            ->all();
     }
 
     private function failForGood(Post $post, string $why): void

@@ -100,7 +100,8 @@ class Conversation:
         # Posting its drafts from the team's phone, and how those posts do (backend/phone.py)
         self.phone = PhoneSession(store.phone, self.studio, ROOT / settings.phone_skills_dir, self.send, self.notify,
                                   self.remember, self.changed, settings.phone_mode, settings.phone_post_mode,
-                                  settings.phone_max_steps, settings.phone_feedback_after_minutes)
+                                  settings.phone_max_steps, settings.phone_feedback_after_minutes,
+                                  store.media_dir / "phone", settings.phone_auto_approve_posts)
         self.dirty = False
         self.restoring = False
         self._saving: asyncio.Task | None = None

@@ -7,6 +7,15 @@ read: do not like, comment, reply, share, delete or change anything.
 
 The post: a {{placement}} posted {{posted}}, whose caption starts with {{first_words}}.
 
+Be quick: this takes about ten steps. Stop as soon as you have read what is listed below.
+
+If the post is a story (the line above says "a story"): open the Instagram app, close any pop-up, and tap
+your own profile picture at the top left of the home feed. If it has no coloured ring, the story is gone
+(stories last 24 hours): report found false with a note saying so. Otherwise it opens your story: read the
+viewers count at the bottom left ("Seen by N", or the eye icon with N, or "Activity" with N) as views, and
+the number of hearts in that activity as likes if it shows one. Story replies are private messages: report
+comments null. Then report and stop; skip the steps below.
+
 1. Open the Instagram app (package com.instagram.android). If it shows a login screen, stop and say so.
    Close any pop-up with "Not now" or the X.
 2. Open the profile: tap the profile picture at the bottom right.

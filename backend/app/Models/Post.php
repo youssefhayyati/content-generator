@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['title', 'body', 'format', 'placement', 'platforms', 'status', 'account_id', 'campaign_id', 'variant_id', 'scheduled_at', 'published_at', 'approved_at', 'approved_by', 'post_url', 'error'])]
 class Post extends Model
@@ -93,6 +94,16 @@ class Post extends Model
     public function runs(): HasMany
     {
         return $this->hasMany(PublishingRun::class);
+    }
+
+    /**
+     * The latest attempt: how it went, and the screenshot it ended on (the calendar shows it).
+     *
+     * @return HasOne<PublishingRun, $this>
+     */
+    public function latestRun(): HasOne
+    {
+        return $this->hasOne(PublishingRun::class)->latestOfMany();
     }
 
     public function isApproved(): bool

@@ -5,6 +5,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, Toggle } from '../ui'
 import { ConversationBar, ConversationList } from './Conversations'
+import { PhoneCard, PhoneLiveBar } from './PhoneProof'
 import { VoicePicker } from './Voices'
 import type { VoiceState } from './link'
 import { useAssistant, useAssistantLog, useVoiceState, type Approval, type LogItem } from './store'
@@ -54,6 +55,7 @@ export function Conversation({ className, onImport }: { className?: string; onIm
       <ConversationBar onList={() => setListing(true)} />
       <VoiceBar />
       <Log />
+      <PhoneLiveBar />
       <Approvals />
       <Composer onVoice={() => setVoicing(true)} />
       <VoicePicker open={voicing} onClose={() => setVoicing(false)} />
@@ -250,6 +252,8 @@ function Line({ item }: { item: LogItem }) {
           </span>
         </motion.p>
       )
+    case 'phone':
+      return <PhoneCard post={item.post} text={item.text} proof={item.proof} failed={item.failed} />
     case 'note':
       return (
         <motion.p {...enter} className={cn('flex items-start justify-center gap-1.5 text-center font-mono text-[10.5px] leading-snug', item.tone === 'error' ? 'text-fail' : 'text-dim')}>

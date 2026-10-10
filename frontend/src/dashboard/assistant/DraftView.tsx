@@ -40,6 +40,7 @@ import { PICTURE_DRAG, ASSET_DRAG, MediaChooser } from './MediaView'
 import { TextColours } from './Palette'
 import { MaskBar, MaskCanvas, MaskProvider } from './Retouch'
 import { useAssistant, type Draft, type Linked, type Slide, type TextBox } from './store'
+import { DraftPhonePost } from './PhoneProof'
 import { VideoMaker } from './VideoMaker'
 
 const POSITIONS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']
@@ -531,6 +532,7 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
           )}
         </div>
         {!a.accounts.length && <p className="mt-2 text-[11.5px] text-dim">Add an Instagram or X account under Accounts to save drafts to FlowAI.</p>}
+        <DraftPhonePost draft={d.id} />
       </Section>
 
       {d.caption_limit > 0 && (

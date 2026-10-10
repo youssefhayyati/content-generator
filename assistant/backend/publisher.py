@@ -11,9 +11,10 @@ This is that service. A run is posted exactly like a draft from the assistant (b
 goes on the phone first, the caption is made typable, and the goal is the phone skill for that kind of post
 (skills/phone/post-*.md). The phone agent's actions are FlowAI's steps; a tap that the agent meant as
 sharing is named tap:post-button, which is how FlowAI tells "never got to publish" (retry) from "may be up"
-(a person checks) if a run goes quiet. Once a post is up, its numbers are checked like a draft's
-(skills/phone/feedback-*.md), PHONE_FEEDBACK_AFTER_MINUTES later and whenever the assistant is asked
-(post_feedback with flowai_post).
+(a person checks) if a run goes quiet. The phone's OKs are given (the post was approved in FlowAI), a phone
+that drops out before sharing is given the run again within its step budget, and the screenshot it ends on
+is the run's proof. Once a post is up, its numbers are checked like a draft's (skills/phone/feedback-*.md),
+PHONE_FEEDBACK_AFTER_MINUTES later and whenever the assistant is asked (post_feedback with flowai_post).
 
 Every run taken is kept in DATA_DIR/phone/published.json, so a restart in the middle of one never posts it
 twice: a run seen again is ended as uncertain for a person to check.
@@ -24,9 +25,7 @@ import json
 import logging
 import mimetypes
 import os
-import re
 import shutil
-import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -37,7 +36,6 @@ from .phone import PhoneClient, PhoneError, PhoneJob, PhonePost, PhoneWork, feed
 
 log = logging.getLogger(__name__)
 
-POST_BUTTON = re.compile(r"\b(share|post|publish|tweet)\b", re.I)  # what a tap that publishes is meant to do
 KEPT = 200  # published posts remembered
 
 
@@ -48,8 +46,8 @@ class FlowAIAgentError(Exception):
 class Publisher(PhoneWork):
     def __init__(self, client: PhoneClient, flowai_url: str, token: str, device_ref: str, data_dir: Path,
                  skills_dir: Path, poll_s: float = 15, post_mode: str = "pro", mode: str = "flash",
-                 max_steps: int = 40, feedback_after_min: float = 60):
-        super().__init__(client, skills_dir, mode, post_mode, max_steps, feedback_after_min)
+                 max_steps: int = 40, feedback_after_min: float = 60, proof_dir: Path | None = None):
+        super().__init__(client, skills_dir, mode, post_mode, max_steps, feedback_after_min, proof_dir)
         self.http = httpx.AsyncClient(base_url=flowai_url.rstrip("/"), timeout=httpx.Timeout(60, connect=10),
                                       headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
         self.device_ref, self.poll_s = device_ref, poll_s
@@ -58,7 +56,6 @@ class Publisher(PhoneWork):
         self.posts: dict[int, PhonePost] = {}  # by our number
         self.runs: dict[str, int | None] = {}  # every FlowAI run taken -> its post (None: never got that far)
         self.reported: dict[int, int] = {}  # job id -> steps reported to FlowAI
-        self.last_step_at: dict[int, float] = {}
         self.loop_task: asyncio.Task | None = None
         self._saving: asyncio.Task | None = None
         self.error: str | None = None  # why it can't publish right now, for the log
@@ -75,11 +72,12 @@ class Publisher(PhoneWork):
     async def loop(self):
         while True:
             try:
-                if not self.busy_error():
-                    if job := await self.next_job():
+                if not self.busy_error():  # busy: FlowAI isn't asked, so nothing is known about it
+                    job = await self.next_job()
+                    self._ok()
+                    if job:
                         await self.publish(job)
                         continue  # another may be waiting
-                self._ok()
             except FlowAIAgentError as exc:
                 self._problem(str(exc))
             except Exception as exc:
@@ -88,6 +86,8 @@ class Publisher(PhoneWork):
             await asyncio.sleep(self.poll_s)
 
     def _problem(self, why: str):
+        if "No HTTP phone" in why:
+            why += f" (add it on FlowAI's Phones page: driver HTTP, device ID {self.device_ref})"
         if why != self.error:  # once, not every poll
             log.warning("FlowAI publishing: %s", why)
         self.error = why
@@ -153,13 +153,13 @@ class Publisher(PhoneWork):
     async def publish(self, fj: dict):
         run, account, post_in = fj["run_id"], fj.get("account") or {}, fj.get("post") or {}
         platform = account.get("platform", "")
+        if self.busy_error():
+            return  # a conversation took the phone meanwhile: the run stays booked, the next poll takes it
         if run in self.runs:
             # Taken before and not finished (a restart in the middle): it may be up already, so never again
             await self.finish(run, "uncertain", "The assistant restarted while publishing this; check the account "
                                                 "before trying again.")
             return
-        self.runs[run] = None
-        await self.save()
         placement = self._placement(platform, post_in)
         title = post_in.get("title") or fj.get("goal") or ""
         log.info("FlowAI run %s: %s %s for @%s: %s", run, platform, placement, account.get("handle"), title)
@@ -167,29 +167,29 @@ class Publisher(PhoneWork):
             await self.finish(run, "failed", f"Posting on {platform} from the phone isn't set up: there's no phone "
                                              "skill for it (skills/phone).")
             return
+        # The phone is this run's from now on (no await before this): nothing else starts meanwhile
+        job = self.new_job("publish", f"publishing FlowAI post {post_in.get('id') or repr(title)} as an "
+                                      f"{platforms.label(platform, placement)}")
+        job.run = run
+        job.budget = int((fj.get("limits") or {}).get("step_budget") or 40)
+        self.runs[run] = None
         folder = self.dir / "runs" / run
         try:
-            started = time.monotonic()
+            await self.save()
             files = await self._download(fj.get("media") or [], folder)
-            kinds = [_kind(f) for f in files]
-            plan = self.plan_post(platform, placement, post_in.get("caption") or "", kinds)
-            post = PhonePost(max(self.posts, default=0) + 1, platform, placement, plan.caption,
-                             flowai_post=post_in.get("id"), title=title)
+            plan = self.plan_post(platform, placement, post_in.get("caption") or "", [_kind(f) for f in files])
+            job.post = post = PhonePost(max(self.posts, default=0) + 1, platform, placement, plan.caption,
+                                        flowai_post=post_in.get("id"), title=title)
             self.posts[post.id], self.runs[run] = post, post.id
-            job = self.new_job("publish", f"publishing FlowAI post {post.flowai_post or title!r} as an "
-                                          f"{platforms.label(platform, placement)}", post)
-            job.run = run
-            job.budget = budget = int((fj.get("limits") or {}).get("step_budget") or 40)
-            await self.report(run, "transfer", True, round((time.monotonic() - started) * 1000),
-                              f"{plan.media} to the phone" + (f"; the phone can't type {''.join(plan.dropped)}"
-                                                              if plan.dropped else ""), job, budget)
-            self.last_step_at[job.id] = time.monotonic()
-            # The agent's steps, plus the transfer above, stay within FlowAI's budget
-            job.runner = asyncio.create_task(self.post_files(job, files, plan, max_steps=budget - 1))
+            # The agent's steps, with the transfer, approvals and any retry, stay within FlowAI's budget
+            job.runner = asyncio.create_task(self.post_files(job, files, plan, max_steps=job.budget - 1))
             await job.runner
         except PhoneError as exc:
+            job.status, job.result = "failed", str(exc)
             await self.finish(run, "failed", str(exc))
         finally:
+            if job.active:  # never got going (FlowAI's or the phone's error): free the phone
+                job.status = "failed"
             shutil.rmtree(folder, ignore_errors=True)
             await self.save()
 
@@ -222,30 +222,16 @@ class Publisher(PhoneWork):
     # --- hooks: FlowAI's record -----------------------------------------------------
 
     async def on_step(self, job: PhoneJob, name: str, params: dict, ok: bool, result: str):
-        if job.kind != "publish":
-            return
-        now = time.monotonic()
-        ms = round((now - self.last_step_at.get(job.id, now)) * 1000)
-        self.last_step_at[job.id] = now
-        action = "tap:post-button" if name == "tap" and POST_BUTTON.search(job.intent) else name
-        job.tapped_post = job.tapped_post or (action == "tap:post-button" and ok)
-        await self.report(job.run, action, ok, ms, job.intent or result, job, job.budget)
-
-    async def on_approval(self, job: PhoneJob, a: dict):
-        if job.kind == "publish":
-            # The post was approved in FlowAI before it was scheduled: that's the OK publishing it needs
-            log.info("run %s: the phone asked to %s (%s); approved, as the post was", job.run, a.get("action"),
-                     a.get("reason"))
-            await self.report(job.run, "approval", True, 0, f"the phone asked: {a.get('reason') or a.get('action')}",
-                              job, job.budget)
-            await self.answer_approval(job, True, "the post was approved in FlowAI")
-        else:
-            await self.answer_approval(job, False, "nobody is there to approve it")
+        """Every step on FlowAI's record as it happens: the transfer, the phone agent's actions (a tap meant to
+        share is tap:post-button), the OKs given and any retry."""
+        if job.kind == "publish" and job.actions:
+            a = job.actions[-1]
+            await self.report(job.run, a["action"], a["ok"], a["ms"], a["note"] or result, job, job.budget)
 
     async def on_finished(self, job: PhoneJob):
         if job.kind == "feedback" and job.post:
             log.info("%s", feedback_note(job.post, job.snapshot, job.result, job.data).split("\n")[0])
-        if job.kind != "publish" or job.status == "cancelled":
+        if job.kind != "publish" or job.status == "cancelled" or not job.post:
             return
         if job.success and job.status != "failed":
             outcome, up = "confirmed", True
@@ -254,23 +240,19 @@ class Publisher(PhoneWork):
         else:
             outcome, up = ("uncertain" if job.tapped_post else "failed"), False  # failed: FlowAI tries again
         note = " ".join(x for x in (job.result, f"Check: {job.verdict}" if job.verdict else "") if x) or job.status
-        shot = await self.client.screenshot(job.task, job.last_step) if job.task and job.last_step else None
-        if outcome == "confirmed" and not shot:
+        if job.attempts > 1:
+            note += f" ({job.attempts} tries: the phone dropped out)"
+        if outcome == "confirmed" and not job.shot:
             outcome, up = "uncertain", False
             note += " (no screenshot to prove it)"
         try:
-            outcome = await self.finish(job.run, outcome, note, shot)
+            outcome = await self.finish(job.run, outcome, note, job.shot)
         except FlowAIAgentError as exc:
             log.warning("run %s: couldn't be finished in FlowAI: %s", job.run, exc)
         self.posted(job, job.post, up and outcome == "confirmed")
+        job.post.recorded = True  # by the run itself
         if job.post.status == "unsure":
             job.post.detail = note
-        if job.task and job.status == "waiting":  # don't hold the phone until the task times out
-            try:
-                await self.client.cancel(job.task)
-                job.status = "done"
-            except PhoneError:
-                pass
         log.info("FlowAI run %s: %s (%s)", job.run, outcome, note)
 
     def on_changed(self, post: PhonePost | None = None):

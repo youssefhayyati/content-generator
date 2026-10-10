@@ -98,11 +98,20 @@ class Settings(BaseSettings):
     phone_api_url: str = ""  # e.g. https://172.26.0.32/hack/v1; empty = off
     phone_api_key: str = ""  # the team key (hk_...)
     phone_verify_tls: bool = False  # the hackathon server's certificate is self-signed
-    phone_mode: Literal["flash", "pro"] = "flash"  # the phone's agent for feedback and other tasks
+    # Who drives the phone: "direct", our own agent (backend/phone_direct.py) on the phone's direct controls with
+    # PHONE_VISION_MODEL on our Ollama account; "agent", the Phone API's own agent (POST /tasks, the organisers'
+    # model account), with PHONE_MODE and PHONE_POST_MODE
+    phone_driver: Literal["direct", "agent"] = "agent"
+    phone_vision_model: str = "kimi-k3"  # needs vision; glm-5.3-flash works too, a little slower
+    phone_verify_posts: bool = True  # direct: look once more at the screen a post ended on before calling it up
+    phone_mode: Literal["flash", "pro"] = "flash"  # the API's agent for feedback and other tasks
     phone_post_mode: Literal["flash", "pro"] = "pro"  # for posting: pro also checks independently that it went up
     phone_max_steps: int = 40  # the team's limit
     phone_skills_dir: str = "skills/phone"  # how to post and check posts in each app
     phone_feedback_after_minutes: float = 60  # check a post's numbers this long after it went up; 0 = only when asked
+    # While it posts, the phone asks an OK for plain input it can't check (Enter in a field it can't read): give it,
+    # as part of the post the user asked for. Off: the assistant asks the user each time
+    phone_auto_approve_posts: bool = True
     # Publish the posts FlowAI schedules from this phone when their time comes (backend/publisher.py): FlowAI's
     # agent API, with FLOWAI_URL, signed with the user's agent token (FlowAI's Phones page; empty = fetched by
     # signing in with FLOWAI_EMAIL and FLOWAI_PASSWORD)

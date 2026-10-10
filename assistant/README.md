@@ -380,10 +380,34 @@ they do. The phone has an agent of its own; `backend/phone.py` makes its job eas
 3. **A phone skill is the goal.** `skills/phone/post-<platform>-<placement>.md` (or `post-<platform>.md`)
    says where to tap in that app, step by step, with the draft's details filled in (`{{caption}}`,
    `{{count}}`, ... see `skills/phone/_template.md`). Edits apply to the next post, without a restart.
-4. **It is followed live.** Every step and its screenshot show in the task panel of the test console;
-   if the phone asks for an OK (an approval) or a question, the assistant asks you and passes your
-   answer on (`answer_phone`). Posting runs in the phone's `pro` mode, which checks independently that
-   the post went up.
+4. **It is followed live.** Every step and the phone's screen show on the Assistant page (above the
+   composer, with a Stop button) and in the test console's task panel. Posting runs in the phone's
+   `pro` mode, which checks independently that the post went up.
+5. **Plain input needs no one.** While typing a caption the phone asks an OK for Enter in a field it
+   can't read; inside a post you asked for, that (and other plain input: taps, typing, keys) is given
+   by itself (`PHONE_AUTO_APPROVE_POSTS`). Anything else, and every OK in other phone tasks, waits for
+   you: the assistant asks and passes your answer on (`answer_phone`).
+6. **A phone that drops out is tried again.** If the phone's link or input board fails (`TargetLost`,
+   `PolicyViolation`, the API down) before the post was shared, the same job goes to it again, twice
+   at most, told to carry on from where the app is; the files are already on the phone. If it dropped
+   after the share tap, it's never tried again: the post is *unsure* (it may be up), so it never goes
+   up twice. When only our link to the API dropped and the phone carried on, it's followed again.
+7. **The screen it ended on is the proof.** The screenshot the phone's run names as its evidence (what
+   `pro`'s check looked at; else its last step's, else the screen then) is kept in
+   `media/phone/<task>.jpg`. The Assistant page shows it in the conversation when the post is up (and
+   on the draft), and so does FlowAI.
+8. **It goes on FlowAI's record.** While the phone posts, the draft is saved as a FlowAI post (with the
+   platform's account when FlowAI has exactly one; else without one); when it's done, the run is added
+   with its steps and the screenshot (`POST /api/posts/{post}/phone-run`). Confirmed, the post is
+   **published at the time it went up**, so FlowAI's calendar (and the Assistant page's Calendar tab)
+   shows it there, with the screenshot; unsure, FlowAI's Inbox asks a person to check; failed, it stays
+   a draft with the reason. If FlowAI isn't open in the conversation's page when it finishes, it's
+   recorded the next time it is.
+
+**Several at once.** "Post them all now" posts the drafts one after another (`post_on_phone` with
+`drafts`): each starts by itself when the phone is free, and the assistant is told as each one is up,
+so it never has to keep checking. A failed post is tried again with `post_on_phone`; one that's up
+(or may be) is posted again only when you say so.
 
 **Feedback.** `post_feedback` opens the post in the app (by its caption's first words) and returns its
 likes, comments, shares, saves, views and latest comments as JSON (`feedback-<platform>.md`); every
@@ -410,10 +434,12 @@ and both paths follow.
 
 - Every action of the phone's agent is a step on FlowAI's run record (within its 40-step budget);
   a tap meant to share the post is recorded as `tap:post-button`.
-- The run ends **confirmed** with the phone's last screenshot as proof, **failed** if it never got as
-  far as sharing (FlowAI tries again after 5, 15 and 30 minutes), or **uncertain** if it may be up
-  (FlowAI's Inbox asks a person to look), so a post never goes up twice. A run seen again after a
-  restart is ended uncertain for the same reason (runs taken are kept in `data/phone/published.json`).
+- The run ends **confirmed** with the screenshot the phone ended on as proof (the calendar shows it on
+  the post), **failed** if it never got as far as sharing (FlowAI tries again after 5, 15 and 30
+  minutes), or **uncertain** if it may be up (FlowAI's Inbox asks a person to look), so a post never
+  goes up twice. A run seen again after a restart is ended uncertain for the same reason (runs taken are
+  kept in `data/phone/published.json`). A phone that drops out before sharing is given the run again,
+  within what's left of its step budget.
 - If the phone asks for an OK while publishing, it is given: the post was approved in FlowAI.
 - Its numbers are checked like a draft's: `PHONE_FEEDBACK_AFTER_MINUTES` later, and whenever you ask
   ("how is FlowAI post 12 doing?": `post_feedback` with `flowai_post`). `phone_status` lists the latest.

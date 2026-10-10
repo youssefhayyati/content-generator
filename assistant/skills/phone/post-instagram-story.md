@@ -15,7 +15,8 @@ its words are already on the {{kind}}, so add no text, stickers or music.
 5. In the story editor change nothing. Tap "Your story" (bottom left) or the arrow "->" then "Share" next to
    "Your story". Do not choose "Close friends".
 6. Wait until the story has finished uploading (your profile picture at the top left of the feed gets a
-   coloured ring, or the upload indicator disappears).
+   coloured ring, or the upload indicator disappears), and stop on that screen: your last screenshot is kept
+   as the proof that it is up.
 
 Report in one or two sentences whether the story is now published, or exactly where it stopped and what the
 screen said.

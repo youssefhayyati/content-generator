@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\PostResource;
 use App\Http\Resources\PublishingRunResource;
 use App\Models\ActionLog;
 use App\Models\Post;
@@ -12,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 /**
  * Publishing runs: the records, the stop button, and the operator's recovery moves
@@ -86,6 +88,34 @@ class PublishingController extends Controller
         $publisher->confirmLive($post, $data['post_url'], $request->user());
 
         return response()->json(['status' => 'published', 'post_url' => $data['post_url']]);
+    }
+
+    /**
+     * The voice assistant posted this from the team's phone because the person told it to, right then:
+     * the run as the phone did it, with the screenshot it ended on. Confirmed, the post is published at
+     * that moment (and shows on the calendar there); uncertain, a person checks; failed, nothing changes
+     * but the error.
+     */
+    public function phoneRun(Request $request, Post $post, Publisher $publisher): JsonResponse
+    {
+        Gate::authorize('update', $post);
+        $data = $request->validate([
+            'outcome' => ['required', Rule::in(['confirmed', 'uncertain', 'failed'])],
+            'note' => ['nullable', 'string', 'max:2000'],
+            'steps' => ['nullable', 'json'],
+            'started_at' => ['nullable', 'date'],
+            'ended_at' => ['nullable', 'date'],
+            'device_ref' => ['nullable', 'string', 'max:100'],
+            'post_url' => ['nullable', 'url', 'max:500'],
+            'screenshot' => ['nullable', 'file', 'image', 'max:10240'],
+        ]);
+        abort_if($data['outcome'] === 'confirmed' && ! $request->hasFile('screenshot') && empty($data['post_url']), 422, 'Confirmed needs proof: the screenshot, or the post’s URL.');
+        $run = $publisher->recordPhoneRun($post, $request->user(), $data, $request->file('screenshot'));
+
+        return response()->json([
+            'run' => PublishingRunResource::make($run->load(['post', 'device'])),
+            'post' => PostResource::make($post->fresh(['account', 'assets', 'campaign', 'latestRun'])),
+        ], 201);
     }
 
     /** The token the automation service signs its calls with. Shown once per page load; rotate any time. */

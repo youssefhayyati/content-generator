@@ -78,9 +78,11 @@ Wire protocol
     json:   ready | vad | transcript | assistant_delta | assistant_done |
             tool_call | tool_result | interrupt | error |
             browser_task (started/done/failed/cancelled) | browser_step |
-            phone_task (a job on the team's phone, kind post/feedback/task: started/awaiting approval/done/
-                        failed/cancelled) | phone_step (one thing it did, with its screenshot) |
-            phone_post (a draft posted from the phone: status, when, and its latest feedback numbers) |
+            phone_task (a job on the team's phone, kind post/feedback/task: started/awaiting approval/
+                        trying again/done/failed/cancelled; when it ends, proof: the screenshot it ended on) |
+            phone_step (one thing it did, with its screenshot) |
+            phone_post (a draft posted from the phone: status, waiting its turn, when, the proof screenshot
+                        and what it shows, its FlowAI post once recorded, its latest feedback numbers) |
             media_job (generate/install: started/running/done/failed/cancelled) |
             media (a generated or attached file, served at media/..., next to the page) |
             draft (a post draft's new version: its slides as files, where its texts are and how
@@ -91,7 +93,8 @@ Wire protocol
             linked (a draft that is a FlowAI campaign's post: campaign, item, version, status, times) |
             approval (something the user must approve on screen, and its outcome) |
             conversation (the conversation now on screen, whole: history, media, running jobs,
-                          drafts, saved, linked, approvals; the page starts over from it) |
+                          drafts, saved, linked, approvals, phone (its phone posts and job as events);
+                          the page starts over from it) |
             about (its name or campaign changed) |
             conversations (the user's conversations, newest first, and which one is on screen) |
             voice (the voice it speaks in: id, name, description, language) |
@@ -334,10 +337,15 @@ class VoiceSession:
             minutes = settings.phone_feedback_after_minutes
             prompt += (
                 "\n\nYou can publish drafts for real from the team's Android phone, which has the Instagram and X "
-                "apps: post_on_phone puts the draft's pictures or video on the phone and has the phone's own agent "
+                "apps: post_on_phone puts each draft's pictures or video on the phone and has the phone's own agent "
                 "post it with its caption. Publishing is public and can't be undone, so call it only when the user "
-                "has just said to post that draft now; if they only said they like it, ask first. It takes a few "
-                "minutes in the background: say one short sentence, and never say it's posted until you are told. "
+                "has just said to post those drafts now; if they only said they like one, ask first. To post several, "
+                "pass them all at once in drafts: they go up one after another by themselves. Each takes a few "
+                "minutes in the background and you are told when it's up, with the screenshot it ended on shown to "
+                "the user as proof: say one short sentence and end your reply. Never call phone_status or wait to "
+                "follow it, and never say a post is up until you are told. If the phone drops out it is tried again "
+                "by itself; a post that still failed is tried again with post_on_phone, never with phone_task. Every "
+                "post goes on FlowAI's record too (its post, published, on the calendar with the screenshot). "
                 "The phone can only type plain letters, so emoji and special symbols are left out of the caption: "
                 "when the reply says what was left out, tell the user in a few words. post_feedback reads how a "
                 "post is doing (likes, comments, shares, saves, views, the latest comments) and what changed since "
@@ -350,9 +358,10 @@ class VoiceSession:
                    "post_feedback with flowai_post checks one. So to post later, schedule it; to post now, "
                    "post_on_phone. " if self.m.phone.publisher else "")
                 + "phone_task does anything else on the phone (it can follow a phone skill), phone_status says "
-                "what it's doing, answer_phone passes on the user's answer when the phone asks something or waits "
-                "for their OK, and cancel_phone_task stops it. If the phone says an app isn't installed or logged "
-                "in, tell the user: they log in on the phone themselves. Phone skills:\n"
+                "what it's doing when the user asks, answer_phone passes on the user's answer when the phone asks "
+                "something or waits for their OK (only ever as the user said), and cancel_phone_task stops it. If "
+                "the phone says an app isn't installed or logged in, tell the user: they log in on the phone "
+                "themselves. Phone skills:\n"
                 + catalogue(self.phone.skills())
             )
         # The date, not the time, so the prompt stays the same all day (the time is a tool call away)
@@ -622,6 +631,10 @@ class VoiceSession:
         """This connection no longer shows it. A kept one is saved, and its generations go on (their
         pictures land in its drafts); others stop theirs, since nobody would see them."""
         conv.sessions.discard(self)
+        if self.flowai:
+            self.flowai.detach(conv)
+            if not conv.phone.recorder:  # another page still shows it: FlowAI's record goes through that one
+                conv.phone.recorder = next((s.flowai for s in conv.sessions if s.flowai), None)
         if conv.owner:
             await conv.flush()
             self.store.release(conv)
@@ -634,7 +647,8 @@ class VoiceSession:
         await self.try_send(
             **{**c.about(), "type": "conversation"},
             history=c.history(), media=[i.event() for i in c.media.items.values() if i.kind in ("image", "video")],
-            jobs=c.media.running(), drafts=c.studio.events(), **(self.flowai.snapshot() if self.flowai else {}))
+            jobs=c.media.running(), drafts=c.studio.events(), phone=c.phone.events(),
+            **(self.flowai.snapshot() if self.flowai else {}))
 
     async def send_conversations(self):
         owner = self.owner

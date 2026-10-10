@@ -16,6 +16,7 @@ from .conversations import ConversationStore
 from .llm import LLM
 from .music import SongWriter
 from .phone import PhoneClient, PhoneError
+from .phone_direct import DirectDriver, VisionModel
 from .publisher import FlowAIAgentError, Publisher, agent_token
 from .session import Models, VoiceSession
 from .tts import SAMPLE_RATE as TTS_RATE
@@ -34,6 +35,9 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 async def check_phone(phone: PhoneClient):
     try:
         s = await phone.status()
+        phone.device = settings.phone_device_ref or s.get("device_id") or ""
+        if phone.driver:
+            await phone.driver.ready()
         log.info("Phone %s: %s%s", s.get("device_id"), "online" if s.get("online") else "OFFLINE",
                  "" if s.get("ble_linked") else ", input board not linked")
     except PhoneError as exc:
@@ -54,10 +58,11 @@ async def start_publisher(app: FastAPI, phone: PhoneClient):
                 token = await agent_token(settings.flowai_url, settings.flowai_dashboard_url,
                                           settings.flowai_email, settings.flowai_password)
             ref = settings.phone_device_ref or (await phone.status())["device_id"]
+            phone.device = ref
             publisher = Publisher(phone, settings.flowai_url, token, ref, ROOT / settings.data_dir / "phone",
                                   ROOT / settings.phone_skills_dir, settings.phone_publish_poll_seconds,
                                   settings.phone_post_mode, settings.phone_mode, settings.phone_max_steps,
-                                  settings.phone_feedback_after_minutes)
+                                  settings.phone_feedback_after_minutes, MEDIA_DIR / "phone")
             publisher.start()
             app.state.publisher = publisher
             return
@@ -127,6 +132,10 @@ async def lifespan(app: FastAPI):
         log.info("COMFYUI_URL is not set: picture/video generation is off")
     if settings.phone_api_url:
         phone = PhoneClient(settings.phone_api_url, settings.phone_api_key, settings.phone_verify_tls)
+        if settings.phone_driver == "direct":
+            phone.driver = DirectDriver(phone, VisionModel(settings.ollama_host, settings.ollama_api_key,
+                                                           settings.phone_vision_model), settings.phone_verify_posts)
+            log.info("The phone is driven by our own agent (%s) on its direct controls", settings.phone_vision_model)
         app.state.models.phone = phone
         app.state.phone_check = asyncio.create_task(check_phone(phone))
         if settings.phone_publish and settings.flowai_url:
@@ -165,10 +174,12 @@ def health():
 def phone_health() -> str:
     if not app.state.models.phone:
         return "off"
+    phone = app.state.models.phone
+    driver = f"our agent ({settings.phone_vision_model})" if phone.driver else "the Phone API's agent"
     publisher = getattr(app.state, "publisher", None)
     if not publisher:
-        return "on (FlowAI's scheduled posts aren't published from it)"
-    return f"on, publishing FlowAI's scheduled posts as {publisher.device_ref}" + \
+        return f"on, driven by {driver} (FlowAI's scheduled posts aren't published from it)"
+    return f"on, driven by {driver}, publishing FlowAI's scheduled posts as {publisher.device_ref}" + \
         (f" (waiting: {publisher.error})" if publisher.error else "")
 
 

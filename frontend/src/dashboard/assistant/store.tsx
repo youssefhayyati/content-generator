@@ -194,11 +194,40 @@ export type Focus = { draft?: number; slide?: number; text?: number }
 /** The slide being painted on, to change part of its picture. */
 export type Painting = { draft: number; slide: number }
 
+/** A draft posted from the team's phone: how it went, and the screenshot the phone ended on as proof. */
+export type PhonePost = {
+  post: number
+  draft?: number
+  flowai_post?: number
+  title?: string
+  /** E.g. “Instagram reel”. */
+  what: string
+  platform: 'instagram' | 'x'
+  placement: string
+  status: 'posting' | 'posted' | 'failed' | 'unsure'
+  /** Posting once the phone is free: posts go one after another. */
+  waiting: boolean
+  posted?: string
+  detail?: string
+  proof: string | null
+  /** What the screenshot shows: the phone's own check, else its words. */
+  proof_note: string
+  /** On FlowAI's record: its post published, with the run and the screenshot. */
+  recorded: boolean
+  attempts: number
+  last_check?: { at: string; latest_comments: Array<{ author: string; text: string }> } & Partial<Record<'likes' | 'comments' | 'shares' | 'saves' | 'views', number | null>>
+}
+
+/** What the phone is doing for this conversation right now: the step it's on and its screen. */
+export type PhoneLive = { id: number; kind: string; status: string; text: string; post?: number; step?: string; screenshot?: string; started: number }
+
 export type LogItem =
   | { id: number; kind: 'user'; text: string; partial?: boolean }
   | { id: number; kind: 'bot'; text: string; turn: number; cut?: boolean }
   | { id: number; kind: 'act'; name: string; text: string; status: 'running' | 'done' | 'failed'; why?: string }
   | { id: number; kind: 'note'; text: string; tone: 'info' | 'error' }
+  /** A job on the phone ended: a post's outcome (post), or another job's answer, with the screenshot it ended on. */
+  | { id: number; kind: 'phone'; post?: number; text?: string; proof?: string | null; failed?: boolean }
 
 export type Connection = 'idle' | 'connecting' | 'online' | 'offline'
 export type AssistantTab = 'draft' | 'media' | 'calendar'
@@ -222,6 +251,9 @@ type State = {
   approvals: Record<number, Approval>
   pictures: Picture[]
   jobs: Record<number, Job>
+  /** The conversation's posts from the team's phone, by number. */
+  phone: Record<number, PhonePost>
+  phoneLive: PhoneLive | null
   accounts: AssistantAccount[]
   flowaiError: string
   focus: Focus
@@ -251,6 +283,8 @@ const EMPTY_SESSION = {
   approvals: {},
   pictures: [],
   jobs: {},
+  phone: {},
+  phoneLive: null,
   focus: {},
   painting: null,
   videoVoices: null,
@@ -338,7 +372,7 @@ export function describe(name: string, a: Record<string, unknown>): string {
     case 'use_assets':
       return 'Bringing in pictures from the gallery'
     case 'post_on_phone':
-      return 'Posting from the phone'
+      return Array.isArray(a.drafts) && a.drafts.length > 1 ? `Posting drafts ${a.drafts.join(', ')} from the phone` : 'Posting from the phone'
     case 'post_feedback':
       return 'Checking how the post is doing'
     case 'phone_task':
@@ -404,7 +438,7 @@ function opened(s: State, m: AssistantEvent): State {
     tab: list('drafts').length ? 'draft' : s.tab,
   }
   for (const h of list<HistoryItem>('history')) next = push(next, fromHistory(h))
-  const events = [...list<AssistantEvent>('media'), ...list<AssistantEvent>('jobs'), ...list<AssistantEvent>('drafts'), ...list<AssistantEvent>('saved'), ...list<AssistantEvent>('linked'), ...list<AssistantEvent>('approvals')]
+  const events = [...list<AssistantEvent>('media'), ...list<AssistantEvent>('jobs'), ...list<AssistantEvent>('drafts'), ...list<AssistantEvent>('saved'), ...list<AssistantEvent>('linked'), ...list<AssistantEvent>('approvals'), ...list<AssistantEvent>('phone')]
   for (const e of events) next = onEvent(next, { ...e, replay: true })
   return next
 }
@@ -529,8 +563,46 @@ function onEvent(s: State, m: AssistantEvent): State {
     case 'browser_task':
       return push(s, { kind: 'note', text: `Website task ${m.status}${m.text ? `: ${m.text}` : ''}`, tone: 'info' })
     case 'phone_task': {
+      const id = Number(m.id)
+      const status = String(m.status)
+      const over = status === 'done' || status === 'failed' || status === 'cancelled'
+      const mine = s.phoneLive?.id === id ? s.phoneLive : null
+      const next: State = over
+        ? { ...s, phoneLive: mine ? null : s.phoneLive }
+        : {
+            ...s,
+            phoneLive: {
+              id,
+              kind: String(m.kind),
+              status,
+              text: mine?.text ?? String(m.text ?? ''),
+              post: m.post == null ? undefined : Number(m.post),
+              step: status === 'started' ? undefined : status === 'trying again' ? String(m.text ?? '') : mine?.step,
+              screenshot: mine?.screenshot,
+              started: mine?.started ?? Date.now() - Number(m.seconds ?? 0) * 1000,
+            },
+          }
+      if (m.replay || status === 'started') return next
+      // A post's outcome is its card (phone_post); another job's answer comes with the screen it ended on
+      if (over && m.kind === 'post') return next
+      if (over && status !== 'cancelled' && m.proof) return push(next, { kind: 'phone', text: String(m.text ?? ''), proof: assistantUrl(String(m.proof)), failed: status === 'failed' })
       const what = m.kind === 'post' ? 'Posting from the phone' : m.kind === 'feedback' ? 'Feedback check' : 'Phone task'
-      return push(s, { kind: 'note', text: `${what} ${m.status}${m.text ? `: ${m.text}` : ''}`, tone: m.status === 'failed' ? 'error' : 'info' })
+      return push(next, { kind: 'note', text: `${what} ${status}${m.text ? `: ${m.text}` : ''}`, tone: status === 'failed' ? 'error' : 'info' })
+    }
+    case 'phone_step': {
+      const live = s.phoneLive
+      if (!live || live.id !== Number(m.id)) return s
+      const step =
+        m.action === 'transfer' ? `Put on the phone: ${m.result}` : m.action === 'approval' ? `OK given: ${m.result}` : m.action === 'retry' ? 'The phone dropped out; trying again' : String(m.intent || `${m.action} ${m.result}`)
+      return { ...s, phoneLive: { ...live, step, screenshot: m.screenshot ? `data:image/jpeg;base64,${m.screenshot}` : live.screenshot } }
+    }
+    case 'phone_post': {
+      const p = { ...(m as unknown as PhonePost), proof: m.proof ? assistantUrl(String(m.proof)) : null }
+      const before = s.phone[p.post]
+      const next = { ...s, phone: { ...s.phone, [p.post]: p } }
+      // Once, as it ends: what happened and the screenshot it ended on
+      const ended = p.status !== 'posting' && (!before || before.status === 'posting')
+      return ended && !m.replay ? push(next, { kind: 'phone', post: p.post }) : next
     }
     default:
       return s
@@ -574,6 +646,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   setTab: (tab: AssistantTab) => void
   toggleMic: () => Promise<void>
   interrupt: () => void
+  /** Stop what the phone is doing for this conversation (and the posts waiting their turn). */
+  cancelPhone: () => void
   upload: (files: File[]) => Promise<void>
   approve: (a: Approval) => Promise<void>
   decline: (a: Approval) => void
@@ -768,6 +842,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         case 'saved':
           invalidate()
           break
+        case 'phone_post':
+          if (m.recorded && !m.replay) invalidate() // on FlowAI's calendar now
+          break
         case 'approval': {
           const a = m as unknown as Approval
           if (a.status === 'waiting' && autoApprove.current.delete(a.draft)) void approve(a)
@@ -878,6 +955,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       approvals: state.approvals,
       pictures: state.pictures,
       jobs: state.jobs,
+      phone: state.phone,
+      phoneLive: state.phoneLive,
       accounts: state.accounts,
       flowaiError: state.flowaiError,
       focus: state.focus,
@@ -929,6 +1008,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setTab: (tab) => dispatch({ type: 'tab', tab }),
       toggleMic,
       interrupt: () => link.interrupt(),
+      cancelPhone: () => link.send({ type: 'cancel_phone' }),
       upload: async (files) => {
         for (const f of files) {
           try {
@@ -964,7 +1044,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation],
   )
 
   return (

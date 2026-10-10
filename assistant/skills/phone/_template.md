@@ -26,4 +26,5 @@ These are replaced with the draft's details before the goal is sent:
 - {{posted}}, {{comments_kept}}: feedback only: when it went up, and how many comments to read
 
 The phone agent reports its result in its own words, so end with what it should say: whether the post went
-up, or exactly which screen stopped it.
+up, or exactly which screen stopped it. The screenshot it ends on is kept as proof (shown to the user and on
+FlowAI's record), so a posting skill should say to stop on a screen that shows the post is up.

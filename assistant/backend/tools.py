@@ -76,7 +76,8 @@ def get_current_time():
 
 @tool(
     "wait",
-    "Pause for a number of seconds, e.g. while a page loads.",
+    "Pause for a number of seconds, e.g. while a page loads. Never to wait for the phone, a picture or a website "
+    "task: you are told when those finish.",
     {
         "type": "object",
         "properties": {"seconds": {"type": "number", "description": "Seconds to wait (max 10)"}},
@@ -628,14 +629,24 @@ PHONE_TOOLS = {"post_on_phone", "post_feedback", "phone_task", "phone_status", "
 
 @tool(
     "post_on_phone",
-    "Publish a draft for real, from the Instagram or X app on the team's phone: its pictures or video go to the "
-    "phone, then the phone posts it with its caption. Publishing is public and can't be undone: only when the user "
-    "has just said to post this draft now (not save or schedule it). It runs in the background for a few minutes; "
-    "you are told when it's up.",
-    {"type": "object", "properties": {"draft": _DRAFT}},
+    "Publish drafts for real, from the Instagram or X app on the team's phone: each one's pictures or video go to "
+    "the phone, then the phone posts it with its caption. Publishing is public and can't be undone: only when the "
+    "user has just said to post these drafts now (not save or schedule them). Several go up one after another by "
+    "themselves. It runs in the background for a few minutes each; you are told as each one is up (the user sees "
+    "the screenshot it ended on), so don't check on it. Also tries a post that failed again.",
+    {
+        "type": "object",
+        "properties": {
+            "draft": _DRAFT,
+            "drafts": {"type": "array", "items": {"type": "integer"},
+                       "description": "Several drafts to post, in this order (instead of draft)"},
+            "again": {"type": "boolean", "description": "Post a draft that is already up (or may be) once more: "
+                                                        "only when the user said so"},
+        },
+    },
 )
-async def post_on_phone(session, draft: int | None = None):
-    return await session.phone.post(draft)
+async def post_on_phone(session, draft: int | None = None, drafts: list[int] | None = None, again: bool = False):
+    return await session.phone.post(drafts or draft, bool(again))
 
 
 @tool(
@@ -658,8 +669,9 @@ async def post_feedback(session, post: int | None = None, flowai_post: int | Non
 @tool(
     "phone_task",
     "Do something else on the team's Android phone (it has the Instagram and X apps): e.g. check which accounts "
-    "are logged in, reply to a comment, read the notifications. Give a complete, self-contained instruction. It "
-    "runs in the background and you are told the result.",
+    "are logged in, reply to a comment, read the notifications. Not for posting a draft (post_on_phone does that, "
+    "and tries a failed one again). Give a complete, self-contained instruction. It runs in the background and you "
+    "are told the result.",
     {
         "type": "object",
         "properties": {
@@ -674,7 +686,8 @@ async def phone_task(instruction: str, session, skill: str | None = None):
 
 
 @tool("phone_status", "What the phone is doing, what it last said, and the posts made from it (here and FlowAI's "
-                      "scheduled ones) with their numbers.")
+                      "scheduled ones) with their numbers. Only when the user asks: you are told by yourself when "
+                      "a job on the phone finishes.")
 def phone_status(session):
     return session.phone.status()
 
@@ -682,7 +695,8 @@ def phone_status(session):
 @tool(
     "answer_phone",
     "Answer the phone when it asks something or waits for the user's OK: approve true/false for an approval "
-    "(only as the user said), or text to tell it more, or to correct what it just did.",
+    "(only as the user said, and only when you were told it waits for one), or text to tell it more, or to correct "
+    "what it just did.",
     {
         "type": "object",
         "properties": {
@@ -695,6 +709,6 @@ async def answer_phone(session, approve: bool | None = None, text: str | None = 
     return await session.phone.answer(text, approve)
 
 
-@tool("cancel_phone_task", "Stop what the phone is doing.")
+@tool("cancel_phone_task", "Stop what the phone is doing, and the posts waiting their turn.")
 async def cancel_phone_task(session):
     return await session.phone.cancel()
