@@ -210,6 +210,7 @@ docker compose exec api php artisan migrate     # after adding a migration
 - `publishing-studio/` — the device layer it uses (adb + simulator, Instagram/X recipes, named targets)
 - `sound/` — FlowAI Sound: voices, listening and the composer (Python, CPU)
 - `music/` — ACE-Step 1.5 for songs under the assistant's videos (GPU; MIT, licensed training data)
+- `lipsync/` — LatentSync for the assistant's dubbed videos (GPU; Apache-2.0): on the RunPod pod (`lipsync/runpod/setup.sh`, port 8004), or here with `--profile lipsync`
 - `assistant/` — the voice assistant behind the Assistant page (Python, GPU; copied from the gamechange repo, where it's developed)
 - `demo/` — the one-command full cycle
 - `deploy/` — production stack for the VPS (nginx + PHP-FPM + Postgres)

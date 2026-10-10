@@ -245,6 +245,12 @@ export class AssistantLink {
     else data = await readDataUrl(file)
     this.send({ type: 'upload', name, data })
   }
+
+  /** A recording, or a video, to clone a voice from: answered with cloned, under the same id. */
+  async cloneVoice(id: number, recording: Blob, name: string) {
+    if (recording.size > MAX_FILE) throw new Error('The recording is too large (10 MB at most).')
+    this.send({ type: 'clone_voice', id, name, data: await readDataUrl(recording) })
+  }
 }
 
 function readDataUrl(blob: Blob) {

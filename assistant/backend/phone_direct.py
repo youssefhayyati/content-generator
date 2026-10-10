@@ -69,7 +69,10 @@ Rules:
   typing in it, or several lines of typing with "enter" between them, can go in one list.
 - If a pop-up or dialog is in the way, deal with it first ("Not now", "Cancel", "OK", the X), unless the task
   says otherwise.
-- Never type a password. If something needs a login, report it with done and success false.
+- Do only what the task asks, in the apps it names. Never type a password. Never buy or pay for anything, delete
+  anything, change settings or account details, or send messages, comments, likes or follows, unless the task
+  says exactly that. If the task needs one of these and doesn't say so, or something needs a login, stop: report
+  it with done and success false.
 - Check the screen before reporting: success true only when the screen shows the task is done.
 - Be quick: no extra steps once the task is done."""
 

@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     music_url: str = ""
     music_api_key: str = ""  # its ACESTEP_API_KEY, when it has one
     music_timeout_seconds: int = 300  # the first song also loads the model
+    # Lip sync for dubbed videos (backend/lipsync.py): the LatentSync API, e.g. http://lipsync:8000 next to
+    # FlowAI (content-generator/lipsync/) or a pod's; empty = dubbing is off
+    lipsync_url: str = ""
+    lipsync_api_key: str = ""  # its LIPSYNC_API_KEY, when it has one
+    lipsync_timeout_minutes: int = 30  # the first dub also downloads and loads the model
 
     # FlowAI (content-generator/): where drafts are saved as posts and scheduled (backend/flowai.py)
     flowai_url: str = ""  # its API, e.g. http://localhost:8002; empty = off
@@ -98,10 +103,13 @@ class Settings(BaseSettings):
     phone_api_url: str = ""  # e.g. https://172.26.0.32/hack/v1; empty = off
     phone_api_key: str = ""  # the team key (hk_...)
     phone_verify_tls: bool = False  # the hackathon server's certificate is self-signed
-    # Who drives the phone: "direct", our own agent (backend/phone_direct.py) on the phone's direct controls with
-    # PHONE_VISION_MODEL on our Ollama account; "agent", the Phone API's own agent (POST /tasks, the organisers'
-    # model account), with PHONE_MODE and PHONE_POST_MODE
-    phone_driver: Literal["direct", "agent"] = "agent"
+    # Who drives the phone: "agent", the Phone API's own agent (POST /tasks, on the organisers' model account),
+    # with PHONE_MODE and PHONE_POST_MODE; "direct", our own agent (backend/phone_direct.py), which looks at the
+    # screen and sends the phone's direct controls itself, with PHONE_VISION_MODEL on our Ollama account; "auto",
+    # the Phone API's agent, and ours takes a job over when that one errors or hangs (for PHONE_AGENT_RETRY_MINUTES
+    # after it had no model to think with, ours starts the jobs)
+    phone_driver: Literal["auto", "direct", "agent"] = "agent"
+    phone_agent_retry_minutes: float = 30
     phone_vision_model: str = "kimi-k3"  # needs vision; glm-5.3-flash works too, a little slower
     phone_verify_posts: bool = True  # direct: look once more at the screen a post ended on before calling it up
     phone_mode: Literal["flash", "pro"] = "flash"  # the API's agent for feedback and other tasks

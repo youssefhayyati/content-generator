@@ -157,6 +157,30 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
+  # Lip sync for the assistant's dubs: LatentSync (Apache-2.0) redraws a video's mouth to say new
+  # speech. It runs on the RunPod pod (lipsync/runpod/setup.sh, port 8004; LIPSYNC_URL and LIPSYNC_API_KEY
+  # in assistant/.env). This is the same service on this machine's GPU, for one with 8 GB free or more:
+  #   docker compose --profile lipsync up -d lipsync, and LIPSYNC_URL=http://lipsync:8000 in assistant/.env
+  # Its model waits on the CPU between videos. 1.5 needs about 8 GB of GPU memory; LATENTSYNC_VERSION=1.6
+  # is sharper but needs 18 GB. The first start downloads it (about 5.5 GB) into lipsync-models.
+  lipsync:
+    build: ./lipsync
+    profiles: [lipsync]
+    environment:
+      LATENTSYNC_VERSION: ${LATENTSYNC_VERSION:-1.5}
+    ports:
+      - "${LIPSYNC_PORT:-8005}:8000"
+    volumes:
+      - lipsync-models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
   # Catches every email the API sends. Inbox at http://localhost:8025
   mailpit:
     image: axllent/mailpit
@@ -180,3 +204,4 @@ volumes:
   assistant-voices:
   assistant-data:
   music-models:
+  lipsync-models:

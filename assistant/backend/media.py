@@ -48,7 +48,8 @@ class MediaItem:
     workflow: str = ""
     prompt: str = ""
     data: dict | None = None  # the JSON of an attached workflow file
-    meta: dict | None = None  # width, height and duration of a video made here (reel.py)
+    meta: dict | None = None  # width, height and duration of a video made here (reel.py, dub.py); speaker: the
+    # voice cloned from a video to dub it (session.py, speaker_of)
 
     def event(self, job: int | None = None) -> dict:
         return {"type": "media", "id": self.id, "kind": self.kind, "name": self.name, "source": self.source,
@@ -71,6 +72,8 @@ class MediaJob:
     setup_id: str | None = None  # the manager's setup job, for installs
     progress: str = ""
     result: str = ""
+    detail: str = ""  # said with the result, e.g. which voice read a dub
+    stop: Callable[[], None] | None = None  # stops its work elsewhere when cancelled, e.g. a dub's lip sync
     # Called with the files once made (e.g. to put them in a post draft); returns a sentence for the note
     then: Callable[[list["MediaItem"]], Awaitable[str]] | None = None
 
@@ -97,6 +100,19 @@ def _size(ratio: float, width, height) -> tuple[int, int]:
 
 def _seconds(s: float) -> str:
     return f"{s:.0f} seconds" if s < 90 else f"{s / 60:.1f} minutes"
+
+
+def made_files(res: dict) -> list[dict]:
+    """The files a finished job made: its outputs, not the previews of what it was given (a video
+    loader shows its input video, typed "input")."""
+    files = [f for f in res.get("files") or [] if f.get("url")]
+    return [f for f in files if f.get("type", "output") != "input"]
+
+
+def data_url(data: bytes, name: str) -> str:
+    """A file as the pod takes it inline."""
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
 
 
 def _workflow_json(data) -> dict:
@@ -142,28 +158,32 @@ class MediaSession:
         await self.send(**item.event())
         return item
 
-    def _latest(self, kind: str) -> MediaItem | None:
-        return next((i for i in reversed(self.items.values()) if i.kind == kind), None)
-
-    def _resolve(self, ref, kind: str) -> tuple[str, MediaItem | None]:
-        """A media number, "latest" or a URL -> what the pod accepts (a URL or a data URL)."""
-        text = str(ref).strip()
-        if text.startswith(("https://", "http://", "data:")):
-            return text, None
+    def item(self, ref, *kinds: str) -> MediaItem:
+        """A media number or "latest" -> that file, which must be of one of these kinds."""
+        text = str(ref if ref is not None else "").strip()
         if text.lower().lstrip("#") in ("", "last", "latest", "previous", "current", "this", "it"):
-            item = self._latest(kind)
+            item = next((i for i in reversed(self.items.values()) if i.kind in kinds), None)
             if not item:
-                raise ComfyError(f"there is no {kind} in this conversation yet; "
+                raise ComfyError(f"there is no {' or '.join(kinds)} in this conversation yet; "
                                  f"make one first, or ask the user to attach one")
         else:
             number = re.search(r"\d+", text)
             item = self.items.get(int(number.group())) if number else None
             if not item:
                 raise ComfyError(f"there is no number {text} in this conversation")
-        if item.kind != kind:
-            raise ComfyError(f"number {item.id} is {_a(item.kind)}, not {_a(kind)}")
-        mime = mimetypes.guess_type(item.path.name)[0] or "application/octet-stream"
-        return f"data:{mime};base64,{base64.b64encode(item.path.read_bytes()).decode()}", item
+        if item.kind not in kinds:
+            raise ComfyError(f"number {item.id} is {_a(item.kind)}, not {' or '.join(map(_a, kinds))}")
+        if not item.path:
+            raise ComfyError(f"the file of number {item.id} is gone")
+        return item
+
+    def _resolve(self, ref, kind: str) -> tuple[str, MediaItem | None]:
+        """A media number, "latest" or a URL -> what the pod accepts (a URL or a data URL)."""
+        text = str(ref).strip()
+        if text.startswith(("https://", "http://", "data:")):
+            return text, None
+        item = self.item(text, kind)
+        return data_url(item.path.read_bytes(), item.path.name), item
 
     async def upload(self, name: str, data: str | None = None, workflow=None) -> MediaItem:
         """A file the user attached in the web UI: a data URL, or a parsed workflow JSON."""
@@ -208,12 +228,14 @@ class MediaSession:
 
     def edit_workflow(self) -> str | None:
         """The picture-editing workflow (a picture and an instruction in, a picture out)."""
-        found = [w.name for w in self.comfy.workflows.values()
-                 if w.ready and w.output == "image" and w.media_inputs == ["image"]] if self.comfy else []
+        found = [w.name for w in self.comfy.workflows.values()  # one picture in: not a face swap's two
+                 if w.ready and w.output == "image" and w.media_inputs == ["image"] and w.slots.get("images", 1) == 1
+                 and "prompt" in w.inputs] if self.comfy else []
         found.sort(key=lambda n: "edit" not in n)
         return found[0] if found else None
 
-    async def _workflow(self, name: str):
+    async def workflow(self, name: str):
+        """A ready workflow on the pod, by name (raises ComfyError)."""
         self._pod()
         wf = self.comfy.workflows.get(name)
         if wf is None:  # maybe added since the last refresh
@@ -233,7 +255,7 @@ class MediaSession:
         then: see MediaJob.then. transform: made pictures go through it before they are kept (in a
         thread): bytes -> (bytes, file name), e.g. to paste an edited part back into the whole."""
         try:
-            wf = await self._workflow(str(workflow))
+            wf = await self.workflow(str(workflow))
             if isinstance(options, str):
                 try:
                     options = json.loads(options or "{}")
@@ -288,7 +310,7 @@ class MediaSession:
                 raise ComfyError(f"{job.workflow} is still being installed on the pod; try again in a few minutes")
             job.prompt_id = queued["prompt_id"]
             res = await self._wait_for(job)
-            files = [f for f in res.get("files") or [] if f.get("url")]
+            files = made_files(res)
             if not files:
                 raise ComfyError("it finished without producing any file")
             made = []
@@ -349,6 +371,76 @@ class MediaSession:
             if res.get("status") == "error":
                 raise ComfyError(describe_error(res.get("messages")))
         raise ComfyError(f"no result after {_seconds(self.timeout_s)}; the pod may have restarted")
+
+    # --- made here and on the pod ------------------------------------------------------
+
+    def pipeline(self, label: str, workflow: str, prompt: str, makes: str, work, then=None) -> dict:
+        """Steps on this machine and on the pod, in the background like a generation (dub.py: a
+        dub, a face swap). work(job) does them, with on_pod for the pod's, threads for the rest and
+        step(job, text) to show where it is, and returns the files made as (bytes, file name, meta)."""
+        running = [j for j in self.jobs.values() if j.kind == "generate" and j.status == "running"]
+        if len(running) >= MAX_RUNNING:
+            return {"error": f"{len(running)} generations are already running; wait for one to finish"}
+        self.job_count += 1
+        job = MediaJob(self.job_count, "generate", workflow, prompt, label=label, makes=makes, then=then)
+        self.jobs[job.id] = job
+        job.task = asyncio.create_task(self._run_pipeline(job, work))
+        return {"job": job.id, "status": "started", "makes": makes,
+                "expected_time": "a few minutes" if makes == "video" else "under a minute"}
+
+    async def step(self, job: MediaJob, text: str):
+        job.progress = text
+        await self.send(type="media_job", id=job.id, kind="generate", status="running", text=text)
+
+    async def on_pod(self, job: MediaJob, workflow: str, inputs: dict) -> list[tuple[bytes, str]]:
+        """Runs a workflow for a pipeline's job and waits: the files it made, as (bytes, file name)."""
+        queued = await self.comfy.run(workflow, inputs)
+        if queued.get("status") == "setting_up":
+            raise ComfyError(f"{workflow} is still being installed on the pod; try again in a few minutes")
+        job.prompt_id = queued["prompt_id"]
+        files = made_files(await self._wait_for(job))
+        if not files:
+            raise ComfyError("it finished without producing any file")
+        return [(await self.comfy.download(f["url"]), f.get("filename") or "output") for f in files]
+
+    async def _run_pipeline(self, job: MediaJob, work):
+        await self.send(type="media_job", id=job.id, kind="generate", status="started", workflow=job.workflow,
+                        prompt=job.prompt, makes=job.makes, label=job.label)
+        try:
+            made = []
+            for data, name, meta in await work(job):
+                item = await self._store(data, name, file_kind(name), "generated", workflow=job.workflow,
+                                         prompt=job.prompt, meta=meta or None)
+                made.append(item)
+                await self.send(**item.event(job.id))
+            if not made:
+                raise ComfyError("it finished without producing any file")
+            job.status = "done"
+            job.result = ", ".join(f"{i.kind} number {i.id}" for i in made)
+            then = ""
+            if job.then:
+                try:
+                    then = await job.then(made)
+                except Exception:
+                    log.exception("%s %d: follow-up failed", job.workflow, job.id)
+            took = _seconds(time.monotonic() - job.started)
+            await self.send(type="media_job", id=job.id, kind="generate", status="done", text=f"took {took}")
+            note = " ".join(filter(None, [
+                f"{job.label} finished in {took}: {job.result} is now on the user's screen"
+                + (f" ({job.detail})." if job.detail else "."), then, "Tell the user it is ready in one short sentence."]))
+        except asyncio.CancelledError:
+            job.status, job.result = "cancelled", "cancelled"
+            await self.send(type="media_job", id=job.id, kind="generate", status="cancelled")
+            raise
+        except Exception as exc:
+            if not isinstance(exc, ComfyError):
+                log.exception("%s %d failed", job.workflow, job.id)
+            job.status, job.result = "failed", str(exc)
+            await self.send(type="media_job", id=job.id, kind="generate", status="failed", text=str(exc))
+            note = f"{job.label} failed: {exc}. Tell the user briefly."
+        log.info("%s %d %s in %.1f s: %s", job.workflow, job.id, job.status, time.monotonic() - job.started,
+                 job.result)
+        self.notify(note)
 
     # --- made here ------------------------------------------------------------------
 
@@ -433,7 +525,8 @@ class MediaSession:
                 raise ComfyError("the name may only use letters, digits, _ - and . (e.g. wan14_i2v)")
             self._pod()
             sources = [s for s in (template, file, url) if s not in (None, "")]
-            if len(sources) != 1:
+            kit = self.comfy.descriptions.parent / "workflows" / f"{name}.json"  # one that comes with the assistant
+            if len(sources) != 1 and not (not sources and kit.is_file()):
                 raise ComfyError("give exactly one of template, file or url")
             try:
                 await self.comfy.refresh()
@@ -442,7 +535,9 @@ class MediaSession:
             if name in self.comfy.workflows and not replace:
                 raise ComfyError(f"a workflow named {name} already exists; pick another name, "
                                  "or set replace if the user wants to overwrite it")
-            if template:
+            if not sources:
+                started = await self.comfy.register(name, json.loads(kit.read_text(encoding="utf-8")))
+            elif template:
                 started = await self.comfy.install_template(str(template), name)
             elif url:
                 started = await self.comfy.register(name, await self._fetch_workflow(str(url)))
@@ -454,7 +549,7 @@ class MediaSession:
                 started = await self.comfy.register(name, item.data)
         except ComfyError as exc:
             return {"error": str(exc)}
-        if description:
+        if description and sources:  # one that comes with the assistant has its line already
             save_description(self.comfy.descriptions, name, description)
         self.job_count += 1
         job = MediaJob(self.job_count, "install", name, setup_id=started["job_id"])
@@ -593,7 +688,10 @@ class MediaSession:
 
     async def _stop(self, job: MediaJob) -> str:
         pod = "made here, stopped" if job.kind == "render" else "not queued on the pod yet"
-        if job.prompt_id:
+        if job.stop:
+            job.stop()
+            pod = "stopped"
+        elif job.prompt_id:
             try:
                 pod = (await self.comfy.cancel(job.prompt_id)).get("status", "?")
             except ComfyError as exc:

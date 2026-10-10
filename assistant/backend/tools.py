@@ -123,7 +123,7 @@ async def cancel_browser_task(session):
 # --- Images and video (ComfyUI on the RunPod pod) --------------------------------
 
 MEDIA_TOOLS = {"generate_media", "media_status", "cancel_media", "list_media_workflows",
-               "search_workflow_templates", "add_media_workflow", "edit_area"}
+               "search_workflow_templates", "add_media_workflow", "edit_area", "swap_face"}
 
 
 @tool(
@@ -197,7 +197,8 @@ async def search_workflow_templates(query: str, session):
 @tool(
     "add_media_workflow",
     "Add a new workflow to the pod from a built-in template, a workflow file the user attached, or a URL "
-    "of a workflow JSON. Installing its nodes and models runs in the background and can take minutes.",
+    "of a workflow JSON, or one that comes with the assistant (face_swap, face_swap_video: give only its name "
+    "and description). Installing its nodes and models runs in the background and can take minutes.",
     {
         "type": "object",
         "properties": {
@@ -215,6 +216,84 @@ async def search_workflow_templates(query: str, session):
 async def add_media_workflow(name: str, session, description: str = "", template: str | None = None,
                              file: int | None = None, url: str | None = None, replace: bool = False):
     return await session.media.add_workflow(name, description, template, file, url, bool(replace))
+
+
+# --- Voices, dubbing and face swaps (backend/dub.py) -----------------------------
+
+LIPSYNC_TOOLS = {"dub_video"}  # with LIPSYNC_URL
+
+@tool(
+    "clone_voice",
+    "Clone a voice from a recording in this conversation: an audio file, or a video's sound (5 to 20 seconds of "
+    "one person speaking is best). The voice is then one of the ready voices: it can read videos (make_video's "
+    "or dub_video's voice) or be the one you speak in. Only a voice the user has the right to use: their own, "
+    "or someone's who agreed.",
+    {
+        "type": "object",
+        "properties": {
+            "media": {"type": "integer", "description": "Number of the audio or video file (default: the latest)"},
+            "name": {"type": "string", "description": "What to call the voice, e.g. 'Sarah' or 'My voice'"},
+            "speak": {"type": "boolean", "description": "Also speak in it yourself from now on (only if asked)"},
+        },
+    },
+)
+async def clone_voice(session, media: int | None = None, name: str = "", speak: bool = False):
+    return await session.clone_voice(media, name, bool(speak))
+
+
+@tool(
+    "transcribe_media",
+    "What is said in a video or audio file in this conversation, how long it lasts, and about how many words fit "
+    "in that time. Use it before dub_video, to write new words that take about as long as the old ones.",
+    {
+        "type": "object",
+        "properties": {"media": {"type": "integer", "description": "Number of the file (default: the latest video "
+                                                                   "or audio)"}},
+    },
+)
+async def transcribe_media(session, media: int | None = None):
+    return await session.transcribe_media(media)
+
+
+@tool(
+    "dub_video",
+    "Make the person in a video say other words: the words are read in their own voice, cloned from the video "
+    "(or in another voice), and a lip-sync model redraws their mouth to match. The result is a new video. It "
+    "runs in the background for a few minutes; you are told when it is ready.",
+    {
+        "type": "object",
+        "properties": {
+            "video": {"type": "integer", "description": "Number of the video (default: the latest)"},
+            "script": {"type": "string", "description": "Exactly what they say now, in the language to speak, as "
+                                                        "plain spoken words. About as long as the video: see "
+                                                        "transcribe_media"},
+            "voice": {"type": "string", "description": "Leave out for the speaker's own voice. Else a voice id "
+                                                       "(find_voices, clone_voice), a description of a voice, or "
+                                                       "'mine' for the one you speak in"},
+        },
+        "required": ["script"],
+    },
+)
+async def dub_video(session, script: str, video: int | None = None, voice: str | None = None):
+    return await session.dub_video(video, script, voice)
+
+
+@tool(
+    "swap_face",
+    "Put the face from one picture onto the person in another picture or in a video (face swap, inswapper). The "
+    "result is a new picture or video; it runs in the background and you are told when it is ready. Only with "
+    "the consent of the person whose face it is.",
+    {
+        "type": "object",
+        "properties": {
+            "face": {"type": "integer", "description": "Number of the picture with the face to use"},
+            "target": {"type": "integer", "description": "Number of the picture or video to put it on"},
+        },
+        "required": ["face", "target"],
+    },
+)
+async def swap_face(session, face: int, target: int):
+    return await session.swap_face(face, target)
 
 
 # --- Post drafts for Instagram and X (backend/studio.py) -------------------------
@@ -482,7 +561,8 @@ async def make_video(session, draft: int | None = None, lines: list | None = Non
 async def find_voices(session, description: str, language: str = ""):
     tts = session.m.tts
     if not tts.choosable:
-        return {"voices": [tts.default], "note": "this assistant has the one voice (no VoiceStudio server)"}
+        return {"voices": await asyncio.to_thread(tts.profiles),
+                "note": "these are all the voices (no VoiceStudio server): its own and the ones cloned here"}
     found = await asyncio.to_thread(tts.match, description, language, 8)
     return {"voices": [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found],
             "note": "pass a voice's id as make_video's voice"}

@@ -16,6 +16,13 @@ drops out (its link, its input board) before the post was shared, it's given the
 carry on from where the app is. Whatever the outcome, the screenshot it ended on is kept as proof
 (MEDIA_DIR/phone/<task>.jpg, shown to the user), and the task is closed so the phone is free at once.
 
+The phone's agent runs on the organisers' model account, which can run dry or stall. So we have an agent of our
+own (backend/phone_direct.py): it looks at screenshots and sends the phone's direct controls itself (tap, type,
+key, swipe). PHONE_DRIVER=auto starts each job on the phone's agent and hands it to ours when that one errors
+or goes quiet (AGENT_QUIET_S without a sign of life) before anything public happened; an agent with no model to
+think with sends the jobs after it straight to ours for a while (PHONE_AGENT_RETRY_MINUTES). PHONE_DRIVER=direct
+always uses ours; agent (the default) never does.
+
 Feedback is a phone task too: it opens the post in the app and returns its numbers as JSON (output_schema).
 Every check is kept with the post, so the next one says what changed; one runs by itself
 PHONE_FEEDBACK_AFTER_MINUTES after posting.
@@ -70,6 +77,10 @@ FEEDBACK_MAX_STEPS = 20  # reading a post's numbers takes about ten; a lost agen
 QUEUE_POLL_S = 5  # posts waiting their turn check this often whether the phone is free
 STEPS_KEPT = 80  # of a post's steps, for FlowAI's record
 PROOF_URL = "media/phone/"  # where the proofs in MEDIA_DIR/phone are served (next to the page, like all media)
+# The phone's agent sends something (a model call's usage, a screenshot, a step) every 10 to 40 s while it works;
+# silent this long, it has no model to think with (its account ran dry: it hangs, retrying)
+AGENT_QUIET_S = 75
+HANDOVER_SETTLE_S = 10  # a cancelled task of the phone's agent has this long to end before ours takes the phone
 
 # The phone dropping out, not the job going wrong: worth another try, if nothing public happened yet
 DROPPED = re.compile(r"PolicyViolation|TargetLost|unreachable|DEVICE_ERROR|can't be reached|answered 5\d\d|"
@@ -78,10 +89,13 @@ DROPPED = re.compile(r"PolicyViolation|TargetLost|unreachable|DEVICE_ERROR|can't
 SHARE_TAP = re.compile(r"\b(tap|press|click|hit)\b\W+(?:\w+\W+){0,3}?(share|post|publish|tweet|your story)\b"
                        r"(?![\s'\"]*\(?(the pen|pen|screen|box|text|caption|field|tab|type|picker|menu|options))", re.I)
 SHARE_ELEMENT = re.compile(r"^\W*(share|post|publish|tweet|your story)\W*$", re.I)
+# The phone's agent itself out of service (its model account), not the phone: ours takes over for a while
+AGENT_DOWN = re.compile(r"LLM error|Model\w*Error|insufficient balance|exceeded_current_quota|\bquota\b|"
+                        r"suspended|agent went quiet", re.I)
 # Plain input the phone wants an OK for while posting (e.g. Enter in a field it can't read): part of the post
 INPUT_ACTIONS = {"tap", "key", "type", "swipe", "long_press", "scroll", "wait", "back"}
-RETRY_NOTE = ("Note: an earlier try at this stopped halfway because the phone lost its connection, so the app "
-              "may still show where it got to. If it shows this same post half made, carry on from there; "
+RETRY_NOTE = ("Note: an earlier try at this stopped halfway (the phone lost its connection, or the agent doing "
+              "it stopped), so the app may still show where it got to. If it shows this same post half made, carry on from there; "
               "otherwise start from the beginning. Never share it a second time.\n\n")
 
 # Characters the input board can't type, as the nearest ones it can
@@ -161,6 +175,25 @@ def _shares(intent: str, params: dict) -> bool:
     return bool((element and SHARE_ELEMENT.search(element.group(1))) or SHARE_TAP.search(intent or ""))
 
 
+def handover_note(job: "PhoneJob") -> str:
+    """For the assistant: our own agent did the job, and why."""
+    if not job.handed_over:
+        return ""
+    return (f" The phone's agent {job.handed_over}, so our own agent did it instead, driving the phone directly "
+            "(it looks at the screen and taps and types itself).")
+
+
+def agent_problem(why: str) -> str:
+    """What's wrong with the phone's agent, in a few words (its raw error names the organisers' account)."""
+    if re.search(r"insufficient balance|exceeded_current_quota|\bquota\b|suspended", why, re.I):
+        return "has no model to think with (the organisers' model account ran out of balance)"
+    if re.search(r"LLM error|Model\w*Error", why, re.I):
+        return "has no model to think with (its model call failed)"
+    if "agent went quiet" in why:
+        return f"went quiet (no sign of life in {AGENT_QUIET_S} s)"
+    return f"failed ({why[:120]})"
+
+
 # --- the API --------------------------------------------------------------------
 
 class PhoneClient:
@@ -171,8 +204,65 @@ class PhoneClient:
         self.job: "PhoneJob | None" = None  # the one the phone is doing (or idle after), whoever started it
         self.publisher: "Publisher | None" = None  # publishes FlowAI's scheduled posts, when it's on
         self.device = ""  # its ID (heracles-phone): FlowAI's phone with that ID is the one that posted
-        # Our own agent on its direct controls (backend/phone_direct.py, PHONE_DRIVER=direct); None: the API's
+        # Our own agent on its direct controls (backend/phone_direct.py); None: only the API's
         self.driver: "DirectDriver | None" = None
+        self.prefer = "agent"  # PHONE_DRIVER: auto (the API's agent, ours when it fails), direct or agent
+        self.agent_retry_s = 30 * 60.0
+        self.agent_down_until = 0.0  # auto: the API's agent had no model to think with; ours until then
+        self.agent_problem = ""
+        self.choice_file: Path | None = None  # the user's pick on the page (choose)
+
+    def direct_now(self) -> bool:
+        """Whether a job starts on our own agent."""
+        return bool(self.driver) and (self.prefer == "direct" or
+                                      (self.prefer == "auto" and time.monotonic() < self.agent_down_until))
+
+    def agent_down(self, why: str):
+        problem = agent_problem(why)
+        if time.monotonic() >= self.agent_down_until:
+            log.warning("The phone's agent is out of service (%s): our own agent drives the phone for the next %d "
+                        "minutes", problem, self.agent_retry_s // 60)
+        self.agent_down_until, self.agent_problem = time.monotonic() + self.agent_retry_s, problem
+
+    def choice(self) -> dict:
+        """The switch on the Assistant page: who drives the phone, and whether ours takes over a failed job."""
+        down = self.prefer == "auto" and time.monotonic() < self.agent_down_until
+        return {"driver": "direct" if self.prefer == "direct" else "agent", "fallback": self.prefer == "auto",
+                "direct_ok": bool(self.driver), "now": self.driven_by(),
+                **({"agent_down": self.agent_problem} if down else {})}
+
+    def choose(self, driver: str, fallback: bool, save: bool = True):
+        """The user's pick on the page (kept in choice_file, so a restart keeps it): from the next job on."""
+        if driver not in ("agent", "direct"):
+            raise PhoneError(f"no driver {driver!r}: agent or direct")
+        if not self.driver and (driver == "direct" or fallback):
+            raise PhoneError("direct control isn't available: it needs a vision model on Ollama (OLLAMA_API_KEY)")
+        self.prefer = "direct" if driver == "direct" else "auto" if fallback else "agent"
+        self.agent_down_until = 0.0  # picked by hand: the phone's agent gets the next job if that's the pick
+        log.info("The phone is driven by %s", self.driven_by())
+        if save and self.choice_file:
+            self.choice_file.parent.mkdir(parents=True, exist_ok=True)
+            self.choice_file.write_text(json.dumps({"driver": driver, "fallback": fallback}))
+
+    def load_choice(self, path: Path):
+        """The user's last pick on the page, if they made one (else PHONE_DRIVER stands); later picks go there."""
+        self.choice_file = path
+        try:
+            saved = json.loads(path.read_text())
+            self.choose(str(saved["driver"]), bool(saved.get("fallback")), save=False)
+        except FileNotFoundError:
+            pass
+        except (ValueError, KeyError, PhoneError) as exc:
+            log.warning("the phone's driver pick in %s is ignored: %s", path, exc)
+
+    def driven_by(self) -> str:
+        if not self.driver:
+            return "the phone's agent"
+        if self.prefer == "direct":
+            return "our own agent, on the phone's direct controls"
+        if self.prefer == "auto" and time.monotonic() < self.agent_down_until:
+            return f"our own agent, on the phone's direct controls (the phone's agent {self.agent_problem})"
+        return "the phone's agent; ours takes over on the direct controls if it fails"
 
     async def close(self):
         await self.http.aclose()
@@ -366,6 +456,7 @@ class PhoneJob:
     attempts: int = 1
     tapped_post: bool = False  # a tap meant to share it went through: it may be up, so never again
     direct: bool = False  # run by our own agent on the direct controls, not the API's agent
+    handed_over: str = ""  # why ours took it over from the API's agent (which started it)
     run_args: tuple = ()  # direct: the goal, max steps and schema it runs
     proof: str | None = None  # the screenshot it ended on, as kept (PROOF_URL...)
     shot: bytes | None = field(default=None, repr=False)  # the same, for FlowAI
@@ -422,6 +513,9 @@ class PhoneWork:
 
     async def on_retry(self, job: PhoneJob, why: str):
         pass
+
+    async def on_handover(self, job: PhoneJob, problem: str):
+        """Our own agent took the job over: the phone's agent {problem}."""
 
     def on_question(self, job: PhoneJob, text: str):
         pass
@@ -501,7 +595,8 @@ class PhoneWork:
     async def run(self, job: PhoneJob, goal: str | None, mode: str | None, schema: dict | None = None,
                   started: bool = False, max_steps: int | None = None):
         """Starts the task (goal) or follows it further after a message (goal None), until it answers or ends.
-        A phone that drops out before anything public happened is given the job again (up to RETRIES)."""
+        A phone that drops out before anything public happened is given the job again (up to RETRIES); a job
+        the phone's agent fails at (or hangs on) is handed to our own agent, once."""
         try:
             if goal is not None and not started:
                 await self.started(job)
@@ -511,18 +606,23 @@ class PhoneWork:
                     if new:
                         await self._start(job, RETRY_NOTE + goal if job.attempts > 1 else goal, mode, schema,
                                           self._steps_left(job, max_steps))
-                    answered = await (self._follow_direct(job) if job.direct else self._follow(job))
+                    answered = await (self._follow_direct(job) if job.direct else self._follow(job, goal is not None))
                     if answered:
                         break
                     why = job.result or "the phone stopped without an answer"
                 except PhoneError as exc:
                     log.warning("phone job %s: %s", job.id, exc)
                     why = f"the phone couldn't do it: {exc}"
+                if goal is not None and self._may_hand_over(job, why, max_steps):
+                    if await self._hand_over(job, why):
+                        new = True
+                        continue
                 if goal is None or not self._may_retry(job, why, max_steps):
                     return await self.failed(job, why)
                 new = await self._again(job, why)
             await self.finished(job)
         except asyncio.CancelledError:
+            log.info("phone job %s (%s) cancelled after %d s", job.id, job.what, round(time.monotonic() - job.started))
             job.status, job.result = "cancelled", "cancelled"
             if job.post and job.kind in ("post", "publish") and job.post.status == "posting":
                 job.post.status, job.post.detail = "unsure", "the posting was stopped"
@@ -534,8 +634,9 @@ class PhoneWork:
             await self.failed(job, f"it failed with an error: {exc}")
 
     async def _start(self, job: PhoneJob, goal: str, mode: str | None, schema: dict | None, steps: int):
-        """A task for the goal: our own agent's on the direct controls (PHONE_DRIVER=direct), else the API's."""
-        if self.client.driver:
+        """A task for the goal: our own agent's on the direct controls (PHONE_DRIVER direct, or auto with the
+        API's agent out of service or failed at this job), else the API's."""
+        if self.client.driver and (job.handed_over or self.client.direct_now()):
             job.direct, job.task = True, f"direct-{uuid.uuid4().hex[:16]}"
             job.run_args = (goal, steps, schema)
         else:
@@ -573,6 +674,51 @@ class PhoneWork:
         """The phone dropped out (not the job going wrong), and trying again can't post it twice."""
         return (job.kind in ("post", "publish", "feedback") and job.attempts <= RETRIES and not job.tapped_post
                 and bool(DROPPED.search(why)) and self._steps_left(job, max_steps) >= RETRY_MIN_STEPS)
+
+    def _may_hand_over(self, job: PhoneJob, why: str, max_steps: int | None) -> bool:
+        """The phone's agent failed at the job or hung (not the phone dropping out, which a retry is for, and not
+        someone stopping it), our own agent is there to take over, and nothing public happened yet."""
+        return (bool(self.client.driver) and self.client.prefer == "auto" and not job.direct
+                and not job.handed_over and not job.tapped_post and not re.search(r"\bcancelled\b", why)
+                and bool(AGENT_DOWN.search(why) or not DROPPED.search(why))
+                and self._steps_left(job, max_steps) >= RETRY_MIN_STEPS)
+
+    async def _hand_over(self, job: PhoneJob, why: str) -> bool:
+        """Our own agent takes the job over, starting where the app is; False if the API agent's task can't be
+        stopped (two agents never drive the phone at once)."""
+        if job.task and not await self._stop_task(job.task):
+            log.warning("phone job %s: task %s doesn't stop, so our agent can't take over", job.id, job.task)
+            return False
+        if AGENT_DOWN.search(why):
+            self.client.agent_down(why)
+        job.handed_over = agent_problem(why)
+        job.attempts += 1
+        note = f"the phone's agent {job.handed_over}; our own agent takes over"
+        job.steps.append(note)
+        job.act("handover", False, why)
+        log.info("phone job %s: %s", job.id, note)
+        await self.on_step(job, "handover", {}, False, note)
+        await self.on_handover(job, job.handed_over)
+        job.task, job.last_step, job.result, job.success, job.data, job.verdict = None, None, None, None, None, None
+        job.status = "running"
+        return True
+
+    async def _stop_task(self, task_id: str) -> bool:
+        """Cancels a task of the API's agent and waits until it has ended."""
+        try:
+            await self.client.cancel(task_id)
+        except PhoneError:
+            pass  # it may have ended already
+        deadline = time.monotonic() + HANDOVER_SETTLE_S
+        while True:
+            try:
+                if (await self.client.task(task_id))["status"] in TERMINAL:
+                    return True
+            except PhoneError:
+                pass
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(1)
 
     async def _again(self, job: PhoneJob, why: str) -> bool:
         """Before another try: True to start the task over, False when the phone carried on with it (only our
@@ -618,11 +764,20 @@ class PhoneWork:
             await self.client.decide(a["id"], approve, note)
             job.status = "running"
 
-    async def _follow(self, job: PhoneJob) -> bool:
-        """Reads the task's events until it answers (True) or ends without an answer (False)."""
+    async def _follow(self, job: PhoneJob, watch: bool = False) -> bool:
+        """Reads the task's events until it answers (True) or ends without an answer (False). watch: with our own
+        agent to take over (PHONE_DRIVER=auto), the phone's agent silent for AGENT_QUIET_S while it should be
+        working is out of service."""
         answered = False
+        quiet = AGENT_QUIET_S if watch and self.client.driver and self.client.prefer == "auto" else None
         async with aclosing(self.client.events(job.task, job.seq)) as events:
-            async for event in events:
+            while True:
+                try:
+                    event = await asyncio.wait_for(anext(events), quiet if job.status == "running" else None)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    raise PhoneError(f"the phone's agent went quiet: nothing from it in {quiet} s") from None
                 if await self._event(job, event, answered):
                     return True
                 answered = answered or event.get("type") == "result"
@@ -1026,6 +1181,7 @@ class PhoneSession(PhoneWork):
             out["phone"] = f"busy: {other.what}"
         if self.client.publisher:
             out["flowai_scheduled_posts"] = self.client.publisher.recent()
+        out["driven_by"] = self.client.driven_by()
         return out
 
     async def cancel(self) -> dict:
@@ -1080,18 +1236,22 @@ class PhoneSession(PhoneWork):
             await self.send(type="phone_post", **job.post.event())
 
     async def on_step(self, job: PhoneJob, name: str, params: dict, ok: bool, result: str):
-        own = name in ("transfer", "approval", "retry")  # ours, not the phone agent's: no screenshot of its own
+        own = name in ("transfer", "approval", "retry", "handover")  # ours, not an agent's: no screenshot of its own
         if job.direct:
             shot = None if own else job.shot  # what our agent looked at for this step
         else:
             shot = await self.client.screenshot(job.task, job.last_step) if job.last_step and not own else None
         await self.send(type="phone_step", id=job.id, step=job.last_step, action=name, args=params,
-                        result=result[:300], intent=job.intent[:200],
+                        result=result[:300], intent=job.intent[:200], driver="direct" if job.direct else "agent",
                         screenshot=base64.b64encode(shot).decode() if shot else None)
 
     async def on_retry(self, job: PhoneJob, why: str):
         await self.send(type="phone_task", id=job.id, kind=job.kind, status="trying again",
                         text=f"the phone dropped out ({why}); trying again")
+
+    async def on_handover(self, job: PhoneJob, problem: str):
+        await self.send(type="phone_task", id=job.id, kind=job.kind, status="trying again",
+                        text=f"the phone's agent {problem}; driving the phone directly instead")
 
     async def on_approval(self, job: PhoneJob, a: dict):
         await self.send(type="phone_task", id=job.id, kind=job.kind, status="awaiting approval",
@@ -1126,7 +1286,7 @@ class PhoneSession(PhoneWork):
             note = feedback_note(job.post, job.snapshot, job.result, job.data)
         else:
             note = (f"Phone job {job.id} ({job.what}) has finished. Result: {job.result}"
-                    + (f"\nVerdict: {job.verdict}" if job.verdict else "")
+                    + (f"\nVerdict: {job.verdict}" if job.verdict else "") + handover_note(job)
                     + ("\nThe user sees the screenshot it ended on." if job.proof else ""))
             if job.success is False and job.status != "failed":
                 note += ("\nIf it says what it needs, ask the user and pass the answer on with answer_phone "
@@ -1144,7 +1304,8 @@ class PhoneSession(PhoneWork):
         when = (f" Its numbers will be checked by themselves at {post.check_at} (UTC); post_feedback checks "
                 "them now." if post.check_at else " post_feedback checks how it's doing.")
         proof = " The user sees the screenshot it ended on, as proof." if post.proof else ""
-        tries = f" It took {job.attempts} tries: the phone dropped out first." if job.attempts > 1 else ""
+        tries = handover_note(job) or (f" It took {job.attempts} tries: the phone dropped out first."
+                                       if job.attempts > 1 else "")
         coming = [p.id for p in self.posts.values() if p.status == "posting" and p is not post]
         later = f" Still to go, by themselves: posts {', '.join(map(str, coming))}." if coming else ""
         if post.status == "posted":

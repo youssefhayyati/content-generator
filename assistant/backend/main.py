@@ -14,6 +14,7 @@ from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import ConversationStore
 from .llm import LLM
+from .lipsync import LipSync
 from .music import SongWriter
 from .phone import PhoneClient, PhoneError
 from .phone_direct import DirectDriver, VisionModel
@@ -73,6 +74,17 @@ async def start_publisher(app: FastAPI, phone: PhoneClient):
         await asyncio.sleep(30)
 
 
+async def check_lipsync(lipsync: LipSync):
+    """Keeps /health's answer about dubbing fresh, and says in the log when it changes."""
+    said = None
+    while True:
+        status = await asyncio.to_thread(lipsync.check)
+        if status != said:
+            log.info("Lip sync at %s: %s", lipsync.url, status)
+            said = status
+        await asyncio.sleep(60)
+
+
 async def check_comfy(comfy: ComfyClient):
     try:
         await comfy.refresh()
@@ -124,6 +136,10 @@ async def lifespan(app: FastAPI):
     if settings.music_url:
         app.state.models.music = SongWriter(settings.music_url, settings.music_api_key, settings.music_timeout_seconds)
         log.info("Songs for videos: ACE-Step at %s", settings.music_url)
+    if settings.lipsync_url:
+        lipsync = LipSync(settings.lipsync_url, settings.lipsync_api_key, settings.lipsync_timeout_minutes * 60)
+        app.state.models.lipsync = lipsync
+        app.state.lipsync_check = asyncio.create_task(check_lipsync(lipsync))
     if settings.comfyui_url:
         comfy = ComfyClient(settings.comfyui_url, settings.comfyui_api_key, ROOT / settings.comfyui_descriptions)
         app.state.models.comfy = comfy
@@ -132,10 +148,17 @@ async def lifespan(app: FastAPI):
         log.info("COMFYUI_URL is not set: picture/video generation is off")
     if settings.phone_api_url:
         phone = PhoneClient(settings.phone_api_url, settings.phone_api_key, settings.phone_verify_tls)
-        if settings.phone_driver == "direct":
+        phone.prefer, phone.agent_retry_s = settings.phone_driver, settings.phone_agent_retry_minutes * 60
+        # Our own agent, there for the switch on the Assistant page (used only when PHONE_DRIVER or the switch says)
+        if settings.ollama_api_key or "ollama.com" not in settings.ollama_host:
             phone.driver = DirectDriver(phone, VisionModel(settings.ollama_host, settings.ollama_api_key,
                                                            settings.phone_vision_model), settings.phone_verify_posts)
-            log.info("The phone is driven by our own agent (%s) on its direct controls", settings.phone_vision_model)
+        elif settings.phone_driver != "agent":
+            log.warning("PHONE_DRIVER=%s needs OLLAMA_API_KEY for our own agent: the phone's agent drives it",
+                        settings.phone_driver)
+            phone.prefer = "agent"
+        phone.load_choice(ROOT / settings.data_dir / "phone" / "driver.json")  # the switch's last position
+        log.info("The phone is driven by %s", phone.driven_by())
         app.state.models.phone = phone
         app.state.phone_check = asyncio.create_task(check_phone(phone))
         if settings.phone_publish and settings.flowai_url:
@@ -147,6 +170,8 @@ async def lifespan(app: FastAPI):
         settings.comfyui_timeout_minutes * 60, app.state.models.phone)
     log.info("Ready")
     yield
+    if check := getattr(app.state, "lipsync_check", None):
+        check.cancel()
     if app.state.models.browser:
         await app.state.models.browser.close()
     if app.state.models.comfy:
@@ -168,14 +193,15 @@ def health():
     return {"ok": True, "llm": settings.llm_model, "asr_mode": settings.asr_mode,
             "tts": "voicestudio" if settings.tts_url else "local", "flowai": settings.flowai_url or "off",
             "phone": phone_health(),
-            "comfyui": "off" if not comfy else (comfy.error or f"ok, {len(comfy.workflows)} workflows")}
+            "comfyui": "off" if not comfy else (comfy.error or f"ok, {len(comfy.workflows)} workflows"),
+            "lipsync": app.state.models.lipsync.status if app.state.models.lipsync else "off"}
 
 
 def phone_health() -> str:
     if not app.state.models.phone:
         return "off"
     phone = app.state.models.phone
-    driver = f"our agent ({settings.phone_vision_model})" if phone.driver else "the Phone API's agent"
+    driver = phone.driven_by()
     publisher = getattr(app.state, "publisher", None)
     if not publisher:
         return f"on, driven by {driver} (FlowAI's scheduled posts aren't published from it)"

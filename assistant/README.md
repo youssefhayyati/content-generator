@@ -200,6 +200,59 @@ The list is refreshed from the pod every minute, so workflows saved in the Comfy
 integration. Run `deploy.ps1` once so the pod gets it. Until then, "stop" only stops waiting, and the pod
 finishes the job.
 
+### Dubbing a video and swapping faces
+
+The assistant can make the person in a video say other words, in their own voice and with lips that match,
+and put a face from one picture onto someone in another picture or a video. `backend/dub.py` does the
+ffmpeg steps here; the models run elsewhere:
+
+| What | Model | Runs on |
+|---|---|---|
+| Lip sync | LatentSync 1.6 (ByteDance, Apache-2.0) | a service of its own, `content-generator/lipsync/`, on the RunPod pod (`LIPSYNC_URL`) |
+| Face swap | ReActor with `inswapper_128.onnx`, CodeFormer to restore the face | the ComfyUI pod: `face_swap` (pictures), `face_swap_video` (videos, the sound kept) |
+
+| You say | What happens |
+|---|---|
+| (attach a video) "Make him say: the sale ends Friday" | `transcribe_media` (what's said now, how many words fit), then `dub_video` |
+| "Same, but in Spanish" / "in a deeper voice" | `dub_video` again, with the new words, or with `voice` |
+| "Put the face from picture 2 on video 5" | `swap_face(face=2, target=5)` |
+| "Clone my voice from this recording" | `clone_voice` (see [Voice](#voice)) |
+
+A dub follows the usual recipe: the video's sound is taken out (24 kHz mono) and its speaker's voice is
+cloned from the first 20 seconds of it, as a voice of the same TTS the assistant speaks with (kept with the
+video, so a second dub reuses it). The new words are read in that voice and asked to last as long as the
+video (VoiceStudio's `duration`); a read that still runs long is sped up by at most 1.3×, a short one is padded
+with silence. The video goes to the lip sync service at 25 fps (what LatentSync works at), at most 1920 px,
+with the speech; it redraws the mouth (a longer speech plays the video back and forth), and the sound is laid
+under the result if it comes back without. Videos are 60 seconds at most, and every frame needs a face.
+
+**The lip sync service** (`content-generator/lipsync/`) is LatentSync behind a job API: `POST /v1/lipsync` (the
+video and the speech), then `GET /v1/lipsync/{id}` until it's done, and `GET /v1/lipsync/{id}/video`. Jobs run
+one at a time and nothing waits on a long request, so it works behind RunPod's proxy. It runs on the RunPod pod,
+next to ComfyUI and VoiceStudio, on port 8004 (`LIPSYNC_URL=https://<pod-id>-8004.proxy.runpod.net` and
+`LIPSYNC_API_KEY` in `.env`): `lipsync/runpod/setup.sh` installs it on the pod the first time and starts it (run
+it again after the pod restarts), with the same kit layout as the others (`/workspace/lipsync-kit`: the script,
+`app.py`, the requirements and `env` with the key). On the pod's A40 it runs LatentSync 1.6 (faces at 512 px,
+18 GB of GPU memory); `LATENTSYNC_VERSION=1.5` (256 px, 8 GB) is the smaller one. The first start downloads the
+model (about 5 GB); it loads on the first dub and waits on the CPU between dubs, so the GPU it shares is free
+meanwhile. Its `/health` says whether it's ready, and so does the agent's (`"lipsync"`). The same service also
+runs on this machine's GPU (`docker compose --profile lipsync up -d lipsync`, `LIPSYNC_URL=http://lipsync:8000`),
+but it needs about 8 GB free: on a 6 GB card next to the speech recognition, Windows lets the GPU borrow system
+memory and a 10-second dub takes most of an hour. Without `LIPSYNC_URL` the assistant doesn't offer dubbing.
+
+**The face swaps** come with the assistant as workflow bundles (`comfyui/workflows/`). Say "set up face
+swapping": the assistant calls `add_media_workflow` with the workflow's name, and the pod installs ReActor and
+downloads `inswapper_128.onnx` in the background. Or register them by hand: `curl -X POST
+"$BASE/workflows/face_swap" -H "X-API-Key: $KEY" -H "Content-Type: application/json" --data-binary
+@comfyui/workflows/face_swap.json`. Each bundle's `ui` only lists the custom node to install; the graph that runs
+is its `api`.
+
+**Transcripts.** Cloning needs the words of the recording. They come from VoiceStudio's speech recognition
+when it has a speech-to-text model, else from FlowAI Sound's Whisper (`SOUND_URL`; both understand any
+language), else from this machine's ASR, which only knows English.
+
+Clone a voice, dub someone or swap a face only for people who agreed to it. The assistant is told the same.
+
 ## Content studio (posts for Instagram and X)
 
 The assistant makes posts as **drafts** and changes them when you ask. A draft is shaped like a
@@ -423,6 +476,34 @@ Before the first post, Instagram (com.instagram.android) and X (com.twitter.andr
 and logged in on the phone: do that yourself (the console at https://172.26.0.32/team shows the phone
 live); the agent never types passwords. One task runs on the phone at a time, from any conversation.
 
+**When the phone's agent is out of service.** The phone's agent runs on the organisers' model account;
+when that runs dry, its tasks hang with no steps or fail with `LLM error ... 429 ... insufficient
+balance`. Who drives the phone is a switch on the Assistant page, in each draft's **From the phone**
+panel (next to its **Post now** button, which asks once more before posting publicly): **Phone agent**
+(with a box for direct control to take over if it fails) or **Direct control**. It applies to every
+post from the phone from the next job on, FlowAI's scheduled ones too, and stays set across restarts
+(`data/phone/driver.json`). Until it's first used, `PHONE_DRIVER` decides:
+
+- `agent` (the default): only the phone's agent.
+- `auto`: the phone's agent starts each job. If it fails, or sends nothing for 75 s, before anything
+  public happened, its task is stopped (and must have ended) and **our own agent**
+  (`backend/phone_direct.py`) takes the job over from where the app is.
+  - It works on the phone's direct controls: it takes a screenshot, asks a vision model on our Ollama
+    account (`PHONE_VISION_MODEL`, `kimi-k3` by default) what to do, then taps, types, presses keys or
+    swipes, and looks again.
+  - It uses the same skills. Apps the phone won't start by name (Instagram, X) are opened from the app
+    list.
+  - Before a post counts as up, it checks the screen it ended on once more (`PHONE_VERIFY_POSTS`).
+  - If the phone's agent had no model to think with, ours starts every job for the next
+    `PHONE_AGENT_RETRY_MINUTES` (30); after that the phone's agent gets the next one again.
+  - No handover after a share tap (the post may be up), after someone stopped the task, or when the phone
+    itself dropped out (that's a retry, as above).
+- `direct`: always our own agent.
+
+Our agent needs no OK for Enter. It doesn't do anything the task doesn't ask for: no payments, deletions,
+settings changes, messages, likes or follows, and no passwords. When a task would need one, it stops and
+says so. The Assistant page and `phone_status` say which agent drives the phone.
+
 ### FlowAI's scheduled posts
 
 The assistant is also FlowAI's automation service (`backend/publisher.py`): when an approved post's
@@ -539,6 +620,13 @@ unless it is given a recording to clone, so the agent always passes one:
   becomes a profile the first time it is picked (about 3 s), and picking it again gives the same
   profile.
 
+**Cloning a voice.** Under the ready voices, **Clone a voice** records 5 to 20 seconds with the mic, or
+takes an audio or video file, and makes a voice of it once you confirm it's yours or the person agreed (the
+`clone_voice` message, answered with `cloned`). The same is in the video's **Voice** panel, where the clone
+then reads the video. By voice, `clone_voice` clones from a file in the conversation. With VoiceStudio, a
+clone is a profile of kind `clone`; locally, OmniVoice keeps it in `voices/` (`cloned-<key>.pt`). Either way
+it's one of the ready voices from then on, to speak in, to read videos, or to dub with.
+
 The pick is kept per user in `prefs.json`, next to their conversations, so it's the voice in all
 of them and after a reload. If the pod is replaced and the profile is gone, the agent sets the
 catalog voice up again on the next connection, and it sounds the same, because VoiceStudio
@@ -613,6 +701,8 @@ backend/
   studio.py    post drafts: slides, texts drawn with Pillow, colours and readability, versions and undo
   retouch.py   changing only the painted part of a picture (cut out, edited, pasted back seamlessly)
   reel.py      a draft's pictures as a video: motion, the voice, captions, end card, music, ffmpeg
+  dub.py       dubbing (sound out, speech fitted, lips synced, sound back in) and face swaps
+  lipsync.py   the lip sync service for dubs (LatentSync, LIPSYNC_URL)
   music.py     songs written for videos by ACE-Step (MUSIC_URL)
   platforms.py Instagram and X specs and the pre-export check (mirrors FlowAI's)
   flowai.py    FlowAI: accounts and voice, saving, finding, opening and scheduling posts, campaigns

@@ -5,7 +5,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, inputClass, Label, Segmented, Skeleton, Toggle } from '../ui'
 import { useAssistant, useVoiceState, type Draft, type VideoRecipe, type Voice } from './store'
-import { describe, VoiceRow } from './Voices'
+import { CloneVoice, describe, VoiceRow } from './Voices'
 
 /*
  * A post's pictures as a short video with a voice over them (assistant/backend/reel.py): a line per
@@ -383,9 +383,17 @@ function VideoVoice({ draft, lines, voice, made, onChange }: { draft: number; li
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease }} className="overflow-hidden">
             <div className="pt-2">
               {list && !list.choosable ? (
-                <p className="px-1 text-[11.5px] leading-snug text-dim">
-                  This assistant has the one voice made on its computer. Connected to a VoiceStudio server (TTS_URL), a video can be read by any of over a thousand.
-                </p>
+                <>
+                  <div className="space-y-1.5">
+                    {list.voices.map((v, i) => (
+                      <VoiceRow key={v.id} v={v} i={i} catalog={false} current={chosen(v)} speaking={speaking} onUse={() => pick(v)} currentLabel="Chosen" />
+                    ))}
+                  </div>
+                  {list.clonable && <CloneVoice className="mt-2" onCloned={pick} />}
+                  <p className="mt-2 px-1 text-[11.5px] leading-snug text-dim">
+                    This assistant has its own voice{list.clonable ? ' and the ones cloned here' : ''}. Connected to a VoiceStudio server (TTS_URL), a video can be read by any of over a thousand.
+                  </p>
+                </>
               ) : (
                 <>
                   <div className="mb-2 flex gap-1.5">
@@ -440,6 +448,7 @@ function VideoVoice({ draft, lines, voice, made, onChange }: { draft: number; li
                       <VoiceRow v={mine} i={0} catalog={false} current={chosen(mine)} speaking={speaking} onUse={() => pick(mine)} currentLabel="Chosen" />
                     </div>
                   )}
+                  {list?.clonable && <CloneVoice className="mt-3" onCloned={pick} />}
                   {voice && !made && (
                     <button type="button" onClick={() => onChange(null)} className="mt-2.5 px-1 text-[11.5px] text-muted underline decoration-white/25 underline-offset-2 hover:text-fg hover:decoration-white/60">
                       Let it pick one that suits the post instead

@@ -153,6 +153,8 @@ export type Voice = {
   use?: string
   /** In a video's voices: it's from the catalog (set up when the video is made), not a ready one. */
   catalog?: boolean
+  /** Cloned from a recording (clone_voice). */
+  cloned?: boolean
 }
 export type VoiceList = {
   q: string
@@ -160,6 +162,8 @@ export type VoiceList = {
   current: string
   /** False: this assistant has the one voice (no VoiceStudio server). */
   choosable: boolean
+  /** A voice can be cloned from a recording. */
+  clonable?: boolean
   ready: Voice[]
   catalog: Voice[]
   /** Catalog voices matching the search (or featured), of which the first ones are in catalog. */
@@ -177,6 +181,7 @@ export type VideoVoices = {
   voices: Voice[]
   languages: string[]
   choosable: boolean
+  clonable?: boolean
   /** The voice the assistant speaks in. */
   mine: Voice
   error?: string
@@ -219,7 +224,19 @@ export type PhonePost = {
 }
 
 /** What the phone is doing for this conversation right now: the step it's on and its screen. */
-export type PhoneLive = { id: number; kind: string; status: string; text: string; post?: number; step?: string; screenshot?: string; started: number }
+export type PhoneLive = { id: number; kind: string; status: string; text: string; post?: number; step?: string; screenshot?: string; started: number; driver?: 'agent' | 'direct' }
+/** Who drives the team's phone (the switch on the page, for every post from the next one): its own agent, or ours, directly. */
+export type PhoneDriver = {
+  driver: 'agent' | 'direct'
+  /** With the phone's agent: ours takes over a job it fails at. */
+  fallback: boolean
+  /** Direct control can be picked (the assistant has a vision model for it). */
+  direct_ok: boolean
+  /** Who drives it now, in words. */
+  now: string
+  /** The phone's agent is out of service, so ours starts the jobs for a while: why. */
+  agent_down?: string
+}
 
 export type LogItem =
   | { id: number; kind: 'user'; text: string; partial?: boolean }
@@ -254,6 +271,8 @@ type State = {
   /** The conversation's posts from the team's phone, by number. */
   phone: Record<number, PhonePost>
   phoneLive: PhoneLive | null
+  /** Null: no phone on this assistant. */
+  phoneDriver: PhoneDriver | null
   accounts: AssistantAccount[]
   flowaiError: string
   focus: Focus
@@ -300,6 +319,7 @@ const INITIAL: State = {
   log: [],
   seq: 0,
   open: null,
+  phoneDriver: null,
   accounts: [],
   flowaiError: '',
   tab: 'draft',
@@ -355,6 +375,14 @@ export function describe(name: string, a: Record<string, unknown>): string {
       return a.mode === 'remove' ? 'Removing the painted part' : a.mode === 'replace' ? `Putting ${a.prompt || 'something else'} there` : a.mode === 'improve' ? 'Improving the painted part' : 'Changing the painted part'
     case 'make_video':
       return 'Making the video'
+    case 'clone_voice':
+      return 'Cloning the voice'
+    case 'transcribe_media':
+      return a.media != null ? `Listening to number ${a.media}` : 'Listening to what’s said'
+    case 'dub_video':
+      return a.video != null ? `Dubbing video ${a.video}` : 'Dubbing the video'
+    case 'swap_face':
+      return `Swapping the face onto number ${a.target}`
     case 'save_draft':
       return 'Saving to FlowAI'
     case 'schedule_post':
@@ -436,6 +464,7 @@ function opened(s: State, m: AssistantEvent): State {
     open: null,
     log: [],
     tab: list('drafts').length ? 'draft' : s.tab,
+    phoneDriver: (m.phone_driver as PhoneDriver | undefined) ?? null,
   }
   for (const h of list<HistoryItem>('history')) next = push(next, fromHistory(h))
   const events = [...list<AssistantEvent>('media'), ...list<AssistantEvent>('jobs'), ...list<AssistantEvent>('drafts'), ...list<AssistantEvent>('saved'), ...list<AssistantEvent>('linked'), ...list<AssistantEvent>('approvals'), ...list<AssistantEvent>('phone')]
@@ -589,12 +618,15 @@ function onEvent(s: State, m: AssistantEvent): State {
       const what = m.kind === 'post' ? 'Posting from the phone' : m.kind === 'feedback' ? 'Feedback check' : 'Phone task'
       return push(next, { kind: 'note', text: `${what} ${status}${m.text ? `: ${m.text}` : ''}`, tone: status === 'failed' ? 'error' : 'info' })
     }
+    case 'phone_driver':
+      return { ...s, phoneDriver: m as unknown as PhoneDriver }
     case 'phone_step': {
       const live = s.phoneLive
       if (!live || live.id !== Number(m.id)) return s
+      const driver = m.action === 'handover' ? 'direct' : m.driver === 'direct' || m.driver === 'agent' ? m.driver : live.driver
       const step =
-        m.action === 'transfer' ? `Put on the phone: ${m.result}` : m.action === 'approval' ? `OK given: ${m.result}` : m.action === 'retry' ? 'The phone dropped out; trying again' : String(m.intent || `${m.action} ${m.result}`)
-      return { ...s, phoneLive: { ...live, step, screenshot: m.screenshot ? `data:image/jpeg;base64,${m.screenshot}` : live.screenshot } }
+        m.action === 'transfer' ? `Put on the phone: ${m.result}` : m.action === 'approval' ? `OK given: ${m.result}` : m.action === 'retry' ? 'The phone dropped out; trying again' : m.action === 'handover' ? `Driving the phone directly: ${m.result}` : String(m.intent || `${m.action} ${m.result}`)
+      return { ...s, phoneLive: { ...live, step, driver, screenshot: m.screenshot ? `data:image/jpeg;base64,${m.screenshot}` : live.screenshot } }
     }
     case 'phone_post': {
       const p = { ...(m as unknown as PhonePost), proof: m.proof ? assistantUrl(String(m.proof)) : null }
@@ -632,6 +664,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   previewVoice: (v: Voice, catalog: boolean) => void
   /** The voices that fit a draft's video: matching q, or without q one suited to the post (and these lines). */
   findVideoVoices: (draft: number, q?: string, lang?: string, lines?: string[]) => void
+  /** A voice cloned from a recording (or a video's sound), one of the ready voices from then on. */
+  cloneVoice: (recording: Blob, name: string) => Promise<Voice>
   /** A FlowAI campaign's posts into the conversation on screen. */
   importCampaign: (campaign: number) => void
   say: (text: string) => Promise<void>
@@ -648,6 +682,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   interrupt: () => void
   /** Stop what the phone is doing for this conversation (and the posts waiting their turn). */
   cancelPhone: () => void
+  /** Who drives the phone from the next job on: its own agent (fallback: ours takes over a job it fails at), or ours, directly. */
+  setPhoneDriver: (driver: PhoneDriver['driver'], fallback: boolean) => void
   upload: (files: File[]) => Promise<void>
   approve: (a: Approval) => Promise<void>
   decline: (a: Approval) => void
@@ -655,6 +691,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   schedule: (draft: number, at: Date | 'queue') => void
   /** Pictures and videos can be made (ComfyUI is connected). */
   generation: boolean
+  /** Videos can be dubbed (the lip sync service is set up). */
+  dubbing: boolean
   /** Text waiting in the composer, so other parts of the page can start a sentence. */
   input: string
   setInput: (text: string) => void
@@ -740,6 +778,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const speechRef = useRef(speech)
   const [booking, setBooking] = useState<number[]>([])
   const [generation, setGeneration] = useState(false)
+  const [dubbing, setDubbing] = useState(false)
   const wanted = useRef(false)
   const connecting = useRef(false)
   /** The assistant's FlowAI session, kept for reconnects until it nearly runs out. */
@@ -754,6 +793,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const queued = useRef<Record<string, unknown> | null>(null)
   /** The voice list last asked for, to ask again once the voice changes. */
   const voiceQuery = useRef<{ q: string; lang: string } | null>(null)
+  /** Voices being cloned, by request: settled when the assistant answers (cloned), or the link drops. */
+  const clones = useRef(new Map<number, { resolve: (v: Voice) => void; reject: (e: Error) => void }>())
+  const cloneSeq = useRef(0)
   const handlers = useRef<{ onEvent: (m: AssistantEvent) => void; onClose: () => void }>(null!)
 
   const link = useMemo(
@@ -784,8 +826,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       retry.current = 0
       fetch(`${ASSISTANT_BASE}health`)
         .then((r) => r.json())
-        .then((h: { comfyui?: string }) => setGeneration(!!h.comfyui?.startsWith('ok')))
-        .catch(() => setGeneration(false))
+        .then((h: { comfyui?: string; lipsync?: string }) => {
+          setGeneration(!!h.comfyui?.startsWith('ok'))
+          setDubbing(!!h.lipsync && h.lipsync !== 'off') // still downloading its model: a dub says so
+        })
+        .catch(() => (setGeneration(false), setDubbing(false)))
     } catch {
       dispatch({ type: 'conn', conn: 'offline' })
       if (wanted.current) {
@@ -839,6 +884,15 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           // The list shows the one in use, and a catalog voice just set up is a ready one now
           if (voiceQuery.current) link.send({ type: 'voices', ...voiceQuery.current })
           break
+        case 'cloned': {
+          const wait = clones.current.get(Number(m.id))
+          clones.current.delete(Number(m.id))
+          if (m.voice) {
+            wait?.resolve(m.voice as Voice)
+            if (voiceQuery.current) link.send({ type: 'voices', ...voiceQuery.current }) // a ready one now
+          } else wait?.reject(new Error(String(m.error || 'The voice couldn’t be cloned.')))
+          break
+        }
         case 'saved':
           invalidate()
           break
@@ -859,6 +913,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     onClose: () => {
       setMicOn(false)
       dispatch({ type: 'lost' })
+      for (const wait of clones.current.values()) wait.reject(new Error('The connection dropped. Try again.'))
+      clones.current.clear()
       if (wanted.current) retryTimer.current = window.setTimeout(connect, 1000)
     },
   }
@@ -957,6 +1013,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       jobs: state.jobs,
       phone: state.phone,
       phoneLive: state.phoneLive,
+      phoneDriver: state.phoneDriver,
       accounts: state.accounts,
       flowaiError: state.flowaiError,
       focus: state.focus,
@@ -992,6 +1049,18 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         link.send({ type: 'preview_voice', ...(catalog ? { archetype: v.id } : { id: v.id }) })
       },
       findVideoVoices,
+      cloneVoice: async (recording, name) => {
+        if (!link.open) throw new Error('The assistant is offline.')
+        const id = ++cloneSeq.current
+        const done = new Promise<Voice>((resolve, reject) => clones.current.set(id, { resolve, reject }))
+        try {
+          await link.cloneVoice(id, recording, name)
+        } catch (e) {
+          clones.current.delete(id)
+          throw e
+        }
+        return done
+      },
       importCampaign: (campaign) => action('open_campaign', { campaign }),
       say,
       action,
@@ -1009,6 +1078,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       toggleMic,
       interrupt: () => link.interrupt(),
       cancelPhone: () => link.send({ type: 'cancel_phone' }),
+      setPhoneDriver: (driver, fallback) => link.send({ type: 'phone_driver', driver, fallback }),
       upload: async (files) => {
         for (const f of files) {
           try {
@@ -1025,6 +1095,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         action('schedule', { draft, when: at === 'queue' ? 'queue' : at.toISOString() })
       },
       generation,
+      dubbing,
       input,
       setInput,
       inputRef,
@@ -1044,7 +1115,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.phoneDriver, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation, dubbing],
   )
 
   return (

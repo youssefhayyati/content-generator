@@ -1,0 +1,27 @@
+# LatentSync's inference (its requirements.txt, without training, evaluation and gradio), on the
+# PyTorch the Dockerfile installs first. numpy stays below 2 for decord, which reads the audio.
+numpy==1.26.4
+diffusers==0.32.2
+transformers==4.48.0
+huggingface-hub==0.30.2
+accelerate==1.2.1
+einops==0.7.0
+omegaconf==2.3.0
+opencv-python-headless==4.10.0.84
+decord==0.6.0
+librosa==0.10.1
+ffmpeg-python==0.2.0
+imageio==2.36.1
+imageio-ffmpeg==0.5.1
+kornia==0.8.0
+onnxruntime-gpu==1.22.0
+DeepCache==0.1.1
+soundfile==0.12.1
+matplotlib==3.9.2
+more-itertools==10.5.0
+regex==2024.11.6
+tqdm==4.67.1
+# the API
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.20

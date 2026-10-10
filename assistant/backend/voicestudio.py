@@ -15,6 +15,10 @@ before it is used: VoiceStudio renders its sample once, and asking again returns
 
 A video has a voice of its own (session.py, video_voice): match finds the voices that fit a
 description of it ("warm young female, upbeat, for an ad") among the ready ones and the catalog.
+
+A voice can also be cloned from a recording (clone): a profile of kind "clone", which then reads
+like any other. Dubbing a video (dub.py) clones its speaker this way, and asks for speech that
+lasts as long as the video (duration, a VoiceStudio extension of the speech API).
 """
 
 import io
@@ -65,10 +69,13 @@ def _first_sentence(text: str) -> str:
 def _profile(p: dict) -> dict:
     """A profile as the page shows it."""
     tag = str(p.get("personality") or "")
+    cloned = p.get("kind") == "clone"
     return {"id": p["id"], "name": p.get("name") or p["id"],
-            "description": _first_sentence(p.get("description")) or p.get("instruct") or "",
-            "language": p.get("language") or "",
-            "archetype": tag.removeprefix("archetype:") if tag.startswith("archetype:") else None}
+            "description": _first_sentence(p.get("description")) or p.get("instruct")
+            or ("Cloned from a recording" if cloned else ""),
+            "language": "" if p.get("language") == "Auto" else p.get("language") or "",
+            "archetype": tag.removeprefix("archetype:") if tag.startswith("archetype:") else None,
+            "cloned": cloned}
 
 
 def _archetype(a: dict) -> dict:
@@ -94,6 +101,7 @@ class VoiceStudioTTS:
     voice calls below (all blocking: called in a thread)."""
 
     choosable = True  # the user can pick the voice
+    clonable = True  # and clone one from a recording
 
     def __init__(self, url: str, api_key: str, voice: str, speed: float = 1.0, model: str = "omnivoice"):
         self.http = httpx.Client(base_url=url.rstrip("/"), timeout=60,
@@ -129,16 +137,19 @@ class VoiceStudioTTS:
         return {"id": "default", "name": "VoiceStudio default", "description": "A different voice each sentence",
                 "language": "", "archetype": None}
 
-    def _speech(self, text: str, voice: str) -> np.ndarray:
-        r = self.http.post("/v1/audio/speech", json={"model": self.model, "input": text, "voice": voice,
-                                                     "speed": self.speed, "response_format": "pcm"})
+    def _speech(self, text: str, voice: str, seconds: float | None = None) -> np.ndarray:
+        body = {"model": self.model, "input": text, "voice": voice, "speed": self.speed, "response_format": "pcm"}
+        if seconds:
+            body["duration"] = round(seconds, 2)
+        r = self.http.post("/v1/audio/speech", json=body, **({"timeout": 300} if seconds else {}))
         r.raise_for_status()
         return np.frombuffer(r.content, dtype="<i2").astype(np.float32) / 32768.0
 
-    def synthesize(self, text: str, voice: str | None = None) -> np.ndarray:
+    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None) -> np.ndarray:
+        """seconds: how long the speech should last (a dub fits its video), else its natural length."""
         for attempt in (1, 2):
             try:
-                return self._speech(text, voice or self.default["id"])
+                return self._speech(text, voice or self.default["id"], seconds)
             except httpx.HTTPError as exc:
                 log.warning("VoiceStudio speech failed (attempt %d): %s", attempt, exc)
         return np.zeros(0, dtype=np.float32)  # the words still show on screen
@@ -226,6 +237,24 @@ class VoiceStudioTTS:
         """A catalog voice as a profile: rendered the first time (about 3 s), the same one after that."""
         pid = self.http.post(f"/archetypes/{archetype}/use").raise_for_status().json()["profile_id"]
         return _profile(self.http.get(f"/profiles/{pid}").raise_for_status().json())
+
+    def clone(self, name: str, wav: bytes, text: str = "") -> dict:
+        """A voice cloned from a recording (a WAV of one person speaking, best 5 to 20 seconds) as a
+        profile. text: what the recording says, which makes the clone closer."""
+        r = self.http.post("/profiles", timeout=180, files={"ref_audio": ("reference.wav", wav, "audio/wav")},
+                           data={"name": name, "kind": "clone", "ref_text": text, "language": "Auto"})
+        r.raise_for_status()
+        made = r.json()
+        if "kind" not in made:  # only its id came back
+            made = self.http.get(f"/profiles/{made['id']}").raise_for_status().json()
+        return _profile(made)
+
+    def listen(self, wav: bytes) -> str:
+        """What a recording says (the server's speech recognition, in any language)."""
+        r = self.http.post("/v1/audio/transcriptions", timeout=300, files={"file": ("speech.wav", wav, "audio/wav")},
+                           data={"model": "whisper-1", "response_format": "json"})
+        r.raise_for_status()
+        return " ".join(str(r.json().get("text") or "").split())
 
     def sample(self, voice: str | None = None, archetype: str | None = None) -> np.ndarray:
         """How a voice sounds: a profile's own recording, or a catalog voice's preview (rendered the

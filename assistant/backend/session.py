@@ -7,6 +7,9 @@ Wire protocol
             {"type": "interrupt"}              stop the assistant
             {"type": "cancel_task"}            stop the running browser task
             {"type": "cancel_phone"}           stop what the team's phone is doing
+            {"type": "phone_driver", "driver": "agent" | "direct", "fallback": true}
+                                               who drives the phone from the next job: its own agent (with
+                                               fallback, ours takes over a job it fails at) or ours, directly
             {"type": "upload", "name": "...", "data": "data:image/png;base64,..."}
                                                attach an image/video/audio file
             {"type": "upload", "name": "x.json", "workflow": {...}}
@@ -44,6 +47,7 @@ Wire protocol
               place {"draft": 1, "media": 4, "slide": 2}
                                                a picture on a slide (no slide: a new last one)
               new_draft {"platform": "instagram", "placement": "feed"}
+              post_phone {"draft": 1, "again": false}   post it from the phone now (the page asks first)
               use_assets {"assets": [7, 8], "draft": 1}
                                                FlowAI gallery files into the conversation (and the draft)
               schedule {"draft": 1, "when": "2026-10-16T09:00:00Z"}
@@ -73,6 +77,9 @@ Wire protocol
             {"type": "video_voices", "draft": 1, "q": "calm deep male", "lang": "", "lines": [...]}
                                                the voices that fit a draft's video best: the ones matching
                                                q, or without q one suited to the post (and lines)
+            {"type": "clone_voice", "id": 1, "name": "My voice", "data": "data:audio/webm;base64,..."}
+                                               a voice cloned from a recording (audio, or a video's sound);
+                                               answered with cloned, under the same id
   server -> client
     binary: 4-byte little-endian turn id + PCM16 mono 24 kHz assistant speech
     json:   ready | vad | transcript | assistant_delta | assistant_done |
@@ -80,7 +87,8 @@ Wire protocol
             browser_task (started/done/failed/cancelled) | browser_step |
             phone_task (a job on the team's phone, kind post/feedback/task: started/awaiting approval/
                         trying again/done/failed/cancelled; when it ends, proof: the screenshot it ended on) |
-            phone_step (one thing it did, with its screenshot) |
+            phone_step (one thing it did, with its screenshot, and which agent did it) |
+            phone_driver (who drives the phone: driver agent/direct, fallback, direct_ok, now) |
             phone_post (a draft posted from the phone: status, waiting its turn, when, the proof screenshot
                         and what it shows, its FlowAI post once recorded, its latest feedback numbers) |
             media_job (generate/install: started/running/done/failed/cancelled) |
@@ -93,7 +101,8 @@ Wire protocol
             linked (a draft that is a FlowAI campaign's post: campaign, item, version, status, times) |
             approval (something the user must approve on screen, and its outcome) |
             conversation (the conversation now on screen, whole: history, media, running jobs,
-                          drafts, saved, linked, approvals, phone (its phone posts and job as events);
+                          drafts, saved, linked, approvals, phone (its phone posts and job as events),
+                          phone_driver;
                           the page starts over from it) |
             about (its name or campaign changed) |
             conversations (the user's conversations, newest first, and which one is on screen) |
@@ -101,6 +110,7 @@ Wire protocol
             voices (the ones ready to use, catalog voices matching the search, and the current one) |
             video_voices (for a draft's video: the description they fit, the voices, best first, each
                           with catalog true or false, and the assistant's own voice) |
+            cloned (a voice cloned for clone_voice, under its id: voice, or error) |
             fonts (after ready: the fonts texts can use, by style, each with its file under fonts/)
 
 Conversations are kept (backend/conversations.py): this connection shows one at a time, and a
@@ -108,29 +118,36 @@ conversation outlives the connection, so a reconnect picks it up again.
 """
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
+import mimetypes
 import struct
+import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
-from . import reel, tools
-from .asr import ASREngine, StreamingTranscription
+from . import dub, reel, tools
+from .asr import ASREngine, StreamingTranscription, resample
 from .browser import Browser
 from .browser_agent import BrowserAgent
-from .comfyui import ComfyClient, ComfyError
+from .comfyui import ComfyClient, ComfyError, file_kind
 from .config import ROOT, settings
 from .conversations import Conversation, ConversationStore
 from .flowai import FlowAIClient, FlowAISession
 from .llm import LLM
-from .media import MediaSession
+from .lipsync import LipSync
+from .media import MAX_UPLOAD, MediaSession, data_url
 from .music import SongWriter
-from .phone import PhoneClient, PhoneSession
+from .phone import PhoneClient, PhoneError, PhoneSession
 from .skills import catalogue, load_skills
 from .studio import LOOK, StudioError, StudioSession, fonts_event, fonts_prompt
 from .tts import SAMPLE_RATE as TTS_RATE
@@ -164,6 +181,7 @@ class Models:
     browser_llm: LLM | None = None
     comfy: ComfyClient | None = None
     music: SongWriter | None = None  # songs written for videos (ACE-Step), when MUSIC_URL is set
+    lipsync: LipSync | None = None  # lips redrawn for dubbed videos (LatentSync), when LIPSYNC_URL is set
     phone: PhoneClient | None = None  # the team's phone, posting drafts from its apps, when PHONE_API_URL is set
     conversations: ConversationStore | None = None  # set once comfy is
 
@@ -269,8 +287,21 @@ class VoiceSession:
                 "which workflows exist, media_status for progress, and cancel_media to stop one. To add a "
                 "workflow, find it with search_workflow_templates (or use a workflow file the user attached, or "
                 "a URL they give), confirm the choice with the user, then call add_media_workflow. "
-                "Workflows on the pod:\n" + self.m.comfy.catalogue()
+                "To put the face from one picture onto someone in another picture or a video, call swap_face; it "
+                "runs in the background like the others. Workflows on the pod:\n" + self.m.comfy.catalogue()
             )
+        if self.m.lipsync:
+            prompt += (
+                "\n\nTo make the person in a video say other words, call dub_video with the new words: they are "
+                "read in the person's own voice, cloned from the video, and their lips are redrawn to match. Keep "
+                "the words about as long as what they say now (transcribe_media says what that is and how many "
+                "words fit); translating is fine. It takes a few minutes in the background: say one short "
+                "sentence, and you are told when it is ready.")
+        prompt += (
+            "\n\nclone_voice makes a voice from a recording in the conversation (an audio file, or a video's "
+            "sound): it can then read videos or be the voice you speak in. transcribe_media says what is said in "
+            "one. Clone a voice, dub someone or swap a face only for people who agreed to it (the user, or someone "
+            "they have permission from), and never to pass made-up words or pictures off as a real person's.")
         skills = load_skills(ROOT / settings.content_skills_dir)
         # Small playbooks go in the prompt: that saves a load_skill round (about two seconds) per new
         # kind of post, and prompt length barely changes response time. A big library is loaded on demand.
@@ -357,6 +388,11 @@ class VoiceSession:
                    "themselves when their time comes, and checked the same way: phone_status lists the latest, and "
                    "post_feedback with flowai_post checks one. So to post later, schedule it; to post now, "
                    "post_on_phone. " if self.m.phone.publisher else "")
+                + ("Who drives the phone is the user's pick, with the switch in a draft's From the phone panel "
+                   "(where they can also press Post): the phone's own agent, or direct control, our own agent, "
+                   "which looks at screenshots and taps, types and swipes itself; with the phone's agent picked, "
+                   "ours can also take over a job it fails at. phone_status says which drives it now; to change "
+                   "it, the user uses that switch. " if self.m.phone.driver else "")
                 + "phone_task does anything else on the phone (it can follow a phone skill), phone_status says "
                 "what it's doing when the user asks, answer_phone passes on the user's answer when the phone asks "
                 "something or waits for their OK (only ever as the user said), and cancel_phone_task stops it. If "
@@ -437,6 +473,8 @@ class VoiceSession:
                 await self.cancel_browser_task()
             case "cancel_phone":
                 self.spawn(self.phone.cancel())
+            case "phone_driver":
+                self.spawn(self.set_phone_driver(msg))
             case "upload":
                 await self.on_upload(msg)
             case "hello":
@@ -478,6 +516,8 @@ class VoiceSession:
                     self.speaking_until = 0.0  # the page stopped playing what was left
             case "video_voices":
                 self.spawn(self.send_video_voices(msg))
+            case "clone_voice":
+                self.spawn(self.on_clone_voice(msg))
 
     async def on_upload(self, msg: dict):
         try:
@@ -561,6 +601,10 @@ class VoiceSession:
             done = f"asked for a video of draft {result.get('source')} with these lines: " \
                    f"{json.dumps(msg.get('lines'), ensure_ascii=False)}, read by {result.get('voice')}; it is " \
                    f"being made into {result.get('into')}"
+        elif name == "post_phone" and self.m.phone:
+            result = await self.phone.post(draft, again=bool(msg.get("again")))
+            done = f"pressed Post on the phone for draft {draft}, driven by {self.m.phone.driven_by()}: " + \
+                   json.dumps(result, ensure_ascii=False)[:400] + ". You are told when it's up, like any post"
         elif name == "open_campaign" and self.flowai:
             if self.flowai_loading:
                 await self.flowai_loading  # its accounts say which platform each post is for
@@ -648,7 +692,25 @@ class VoiceSession:
             **{**c.about(), "type": "conversation"},
             history=c.history(), media=[i.event() for i in c.media.items.values() if i.kind in ("image", "video")],
             jobs=c.media.running(), drafts=c.studio.events(), phone=c.phone.events(),
+            **({"phone_driver": self.m.phone.choice()} if self.m.phone else {}),
             **(self.flowai.snapshot() if self.flowai else {}))
+
+    async def set_phone_driver(self, msg: dict):
+        """The switch on the page: the phone's agent or direct control (ours), for every post from the next one.
+        It's the one phone, so every page showing a conversation hears of it."""
+        phone = self.m.phone
+        if not phone:
+            return
+        try:
+            phone.choose(str(msg.get("driver") or ""), bool(msg.get("fallback")))
+        except PhoneError as exc:
+            await self.send(type="error", message=str(exc)[:1].upper() + str(exc)[1:] + ".")
+            await self.try_send(type="phone_driver", **phone.choice())
+            return
+        for conv in list(self.store.live.values()):
+            await conv.send(type="phone_driver", **phone.choice())
+        self.remember(f"On screen, the user switched the phone to be driven by {phone.driven_by()}, from the next "
+                      "job on.")
 
     async def send_conversations(self):
         owner = self.owner
@@ -710,7 +772,7 @@ class VoiceSession:
             log.warning("voices couldn't be listed: %s", exc)
             return await self.try_send(type="error", message="The voice server didn't answer. Try again in a moment.")
         await self.try_send(type="voices", q=q, lang=lang, current=self.voice["id"], choosable=tts.choosable,
-                            ready=ready, catalog=catalog, total=total, languages=languages)
+                            clonable=tts.clonable, ready=ready, catalog=catalog, total=total, languages=languages)
 
     async def preview_voice(self, msg: dict):
         """How a voice sounds, played like speech: it cuts off whatever was being said."""
@@ -783,10 +845,10 @@ class VoiceSession:
         tts = self.m.tts
         if wanted.strip().lower() in MY_VOICE:
             return self.voice
-        if not tts.choosable:
-            return tts.default
-        found = await asyncio.to_thread(tts.find, wanted)
+        found = await asyncio.to_thread(tts.find, wanted)  # a ready voice: one cloned here too
         if not found:
+            if not tts.choosable:
+                return tts.default
             best = await asyncio.to_thread(tts.match, wanted, "", 1)
             if not best:
                 raise StudioError(f"no voice fits “{wanted}”; describe it in fewer words, e.g. “young female, warm”")
@@ -835,7 +897,7 @@ class VoiceSession:
     async def send_video_voices(self, msg: dict):
         tts, q, lang = self.m.tts, str(msg.get("q") or "").strip(), str(msg.get("lang") or "")
         reply = {"type": "video_voices", "draft": msg.get("draft"), "q": q, "lang": lang, "choosable": tts.choosable,
-                 "mine": self.voice}
+                 "clonable": tts.clonable, "mine": self.voice}
         try:
             described = {"voice": q, "language": ""}
             if not q:
@@ -850,6 +912,198 @@ class VoiceSession:
             return await self.try_send(type="error", message="The voice server didn't answer. Try again in a moment.")
         await self.try_send(**reply, described=described["voice"], language=described["language"], voices=voices,
                             languages=languages)
+
+    # --- a voice cloned, a video dubbed, a face swapped (dub.py) -------------------------
+    # A voice cloned from a recording is one of the ready voices from then on: it can read videos
+    # or be the one the assistant speaks in. A dub makes a video say new words in its speaker's own
+    # voice, cloned from the video, and a lip-sync model on the pod redraws the mouth to match.
+
+    async def hear(self, wav: bytes) -> str:
+        """What a recording (a 24 kHz WAV) says: the voice server's recognition, else FlowAI Sound's
+        (Whisper; both in any language), else this machine's (English)."""
+        try:
+            if heard := await asyncio.to_thread(self.m.tts.listen, wav):
+                return heard
+        except Exception as exc:  # e.g. VoiceStudio without a speech-to-text model installed
+            log.info("the voice server didn't transcribe it (%s)", exc)
+        if settings.sound_url:
+            try:
+                async with httpx.AsyncClient(timeout=300) as http:
+                    r = await http.post(f"{settings.sound_url.rstrip('/')}/v1/transcribe", content=wav,
+                                        headers={"Content-Type": "audio/wav"})
+                    r.raise_for_status()
+                if heard := " ".join(str(r.json().get("text") or "").split()):
+                    return heard
+            except Exception as exc:
+                log.info("FlowAI Sound didn't transcribe it (%s)", exc)
+        asr = self.m.asr
+        audio = resample(dub.samples(wav), dub.RATE, asr.sample_rate)
+        return await asyncio.to_thread(asr.transcribe, audio)
+
+    async def _clone(self, path: Path, name: str) -> tuple[dict, str]:
+        """A voice cloned from the sound of a file, and what the recording it was cloned from says."""
+        tts = self.m.tts
+        clip = await asyncio.to_thread(dub.reference, await asyncio.to_thread(dub.sound_of, path))
+        try:
+            heard = await self.hear(clip)
+        except Exception as exc:
+            log.warning("the voice sample couldn't be transcribed: %s", exc)
+            heard = ""
+        if not heard:  # a clone without the words of its recording can't speak (OmniVoice needs them)
+            raise dub.DubError("no words could be made out in the recording, and cloning needs them: use one "
+                               "of a person speaking clearly, without music")
+        try:
+            voice = await asyncio.to_thread(tts.clone, name[:60], clip, heard)
+        except Exception as exc:
+            log.warning("voice %r couldn't be cloned: %s", name, exc)
+            raise dub.DubError(f"the voice server couldn't clone it ({type(exc).__name__})") from None
+        log.info("cloned voice %s (%s) from %s", voice["name"], voice["id"], path.name)
+        return voice, heard
+
+    async def clone_voice(self, media=None, name: str = "", speak: bool = False, data: str | None = None) -> dict:
+        """A voice cloned from an audio or video file: one in the conversation (media), or a recording
+        the page sent (data, a data URL). speak: the assistant speaks in it from now on."""
+        try:
+            if data:
+                try:
+                    header, b64 = str(data).split(",", 1)
+                    raw = base64.b64decode(b64, validate=True)
+                except (ValueError, binascii.Error):
+                    raise dub.DubError("the recording could not be read") from None
+                if len(raw) > MAX_UPLOAD:
+                    raise dub.DubError(f"the recording is too large (max {MAX_UPLOAD // 2**20} MB)")
+                suffix = mimetypes.guess_extension(header.removeprefix("data:").split(";")[0]) or ".bin"
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / f"recording{suffix}"
+                    path.write_bytes(raw)
+                    voice, heard = await self._clone(path, name.strip() or "My voice")
+            else:
+                item = self.media.item(media, "audio", "video")
+                voice, heard = await self._clone(item.path, name.strip() or f"Voice from {Path(item.name).stem}")
+        except ComfyError as exc:
+            return {"error": str(exc)}
+        if speak:
+            await self.set_voice({"id": voice["id"]})
+        return {"voice": voice, "heard": heard,
+                "note": "it is one of the ready voices now: pass its id as make_video's or dub_video's voice"}
+
+    async def on_clone_voice(self, msg: dict):
+        result = await self.clone_voice(name=str(msg.get("name") or ""), data=msg.get("data"))
+        await self.try_send(type="cloned", id=msg.get("id"), **result)
+        if "voice" in result:
+            v = result["voice"]
+            self.remember(f"The user cloned a voice from a recording on screen: {v['name']} (voice {v['id']}). It "
+                          "can read videos (make_video's or dub_video's voice) or be the one you speak in.")
+
+    async def transcribe_media(self, media=None) -> dict:
+        try:
+            item = self.media.item(media, "video", "audio")
+            wav = await asyncio.to_thread(dub.sound_of, item.path)
+            words = await self.hear(wav)
+        except ComfyError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:
+            log.warning("number %s couldn't be transcribed: %s", media, exc)
+            return {"error": "the speech recognition didn't answer; try again in a moment"}
+        seconds = dub.seconds(wav)
+        return {"media": item.id, "kind": item.kind, "seconds": round(seconds, 1), "words": words or "(nothing heard)",
+                "fits": f"about {max(1, round(seconds * 2.5))} spoken words fit in that time"}
+
+    async def speaker_of(self, job, item) -> dict:
+        """The voice of whoever speaks in a video: cloned from it the first time, kept with the video."""
+        known = (item.meta or {}).get("speaker")
+        if known and any(v["id"] == known["id"] for v in await asyncio.to_thread(self.m.tts.profiles)):
+            return known
+        await self.media.step(job, "cloning the voice")
+        voice, _ = await self._clone(item.path, f"Voice from video {item.id}")
+        item.meta = {**(item.meta or {}), "speaker": voice}
+        return voice
+
+    async def needs(self, workflow: str, what: str):
+        """Raises when a workflow this machine relies on isn't on the pod (or still installing)."""
+        try:
+            await self.media.workflow(workflow)
+        except ComfyError as exc:
+            if "no workflow named" not in str(exc):
+                raise
+            raise ComfyError(f"{what} isn't set up on the ComfyUI pod yet. It comes with the assistant: once the "
+                             f"user agrees, call add_media_workflow with name {workflow} (it installs in the "
+                             "background, can take a while the first time)") from None
+
+    async def dub_video(self, video=None, script: str = "", voice: str | None = None) -> dict:
+        tts, script = self.m.tts, " ".join(str(script or "").split())
+        try:
+            if not script:
+                raise dub.DubError("dub_video needs the words to say (script)")
+            item = self.media.item(video, "video")
+            if not self.m.lipsync:
+                raise dub.DubError("lip sync is off (LIPSYNC_URL is not set)")
+            info = await asyncio.to_thread(dub.check, item.path)
+            # None: the speaker's own voice, cloned from the video
+            chosen = await self.video_voice(str(voice)) if voice not in (None, "") else None
+            if chosen is None and not await asyncio.to_thread(dub.has_sound, item.path):
+                raise dub.DubError("the video has no sound to clone the speaker's voice from: give a voice to read it")
+        except (ComfyError, StudioError) as exc:
+            return {"error": str(exc)}
+        except Exception as exc:
+            log.warning("no voice for the dub: %s", exc)
+            return {"error": "the voice server couldn't set up that voice; try again in a moment"}
+
+        async def work(job):
+            speaker = chosen or await self.speaker_of(job, item)
+            await self.media.step(job, f"reading the words in {speaker['name']}’s voice")
+            audio = await asyncio.to_thread(tts.synthesize, script, speaker["id"], info["duration"])
+            if not len(audio):
+                raise dub.DubError("the voice server didn't read the words")
+            speech, seconds = await asyncio.to_thread(dub.fit, audio, info["duration"])
+            await self.media.step(job, "preparing the video")
+            clip = await asyncio.to_thread(dub.for_pod, item.path, dub.LIPSYNC_FPS, False)
+            await self.media.step(job, "syncing the lips")
+            stop = threading.Event()
+            job.stop = stop.set
+
+            def progress(text: str):  # from the lip sync's thread
+                asyncio.run_coroutine_threadsafe(self.media.step(job, text), self.loop)
+
+            made = await asyncio.to_thread(self.m.lipsync.sync, clip, speech, progress, stop.is_set)
+            data = await asyncio.to_thread(dub.with_sound, made, speech)
+            job.detail = f"read by {speaker['name']} (voice {speaker['id']}), {seconds:.1f} seconds of speech"
+            return [(data, f"dub-{item.id}.mp4", await asyncio.to_thread(dub.meta, data))]
+
+        started = self.media.pipeline(f"Dubbing video {item.id}", "lip sync", script, "video", work)
+        return {**started, "video": item.id, "voice": chosen["name"] if chosen else "the speaker's own, cloned "
+                "from the video", "video_seconds": info["duration"]}
+
+    async def swap_face(self, face=None, target=None) -> dict:
+        try:
+            source = self.media.item(face, "image")
+            into = self.media.item(target, "image", "video")
+            if into.id == source.id:
+                raise dub.DubError("the face and what to put it on are the same picture")
+            workflow = dub.FACE_SWAP_VIDEO if into.kind == "video" else dub.FACE_SWAP
+            await self.needs(workflow, "Face swapping" + (" in videos" if into.kind == "video" else ""))
+            if into.kind == "video":
+                await asyncio.to_thread(dub.check, into.path)
+        except ComfyError as exc:
+            return {"error": str(exc)}
+
+        async def work(job):
+            face_url = data_url(source.path.read_bytes(), source.path.name)
+            if into.kind == "video":
+                await self.media.step(job, "preparing the video")
+                clip = await asyncio.to_thread(dub.for_pod, into.path)
+                inputs = {"video": data_url(clip, "target.mp4"), "image": face_url}
+            else:
+                inputs = {"image": data_url(into.path.read_bytes(), into.path.name), "image_2": face_url}
+            await self.media.step(job, "swapping the face on the pod")
+            files = await self.media.on_pod(job, workflow, inputs)
+            return [(d, n, await asyncio.to_thread(dub.meta, d) if file_kind(n) == "video" else None)
+                    for d, n in files if file_kind(n) == into.kind]
+
+        what = f"{'video' if into.kind == 'video' else 'picture'} {into.id}"
+        started = self.media.pipeline(f"Swapping the face in {what}", workflow, f"the face from picture {source.id}",
+                                      into.kind, work)
+        return {**started, "face": f"picture {source.id}", "into": what}
 
     def focus_note(self) -> str | None:
         """What the user selected or painted on screen, for "this" and "it", when it changed since the LLM
@@ -987,6 +1241,7 @@ class VoiceSession:
                   (set() if self.m.comfy else tools.MEDIA_TOOLS) | \
                   (set() if self.flowai else tools.FLOWAI_TOOLS) | \
                   (set() if self.m.phone else tools.PHONE_TOOLS) | \
+                  (set() if self.m.lipsync else tools.LIPSYNC_TOOLS) | \
                   ({"load_skill"} if self.skills_inline else set())
         try:
             for _ in range(settings.llm_max_tool_rounds):

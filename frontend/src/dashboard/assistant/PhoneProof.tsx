@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CalendarCheck, LoaderCircle, Smartphone, Square } from 'lucide-react'
+import { Bot, CalendarCheck, Hand, LoaderCircle, Send, Smartphone, Square } from 'lucide-react'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { fmtTime } from '../data'
-import { Btn } from '../ui'
-import { useAssistant, type PhonePost } from './store'
+import { Btn, Segmented } from '../ui'
+import { useAssistant, type Draft, type PhonePost } from './store'
 
 const LOOK: Record<PhonePost['status'], { label: string; tone: string; box: string }> = {
   posted: { label: 'Posted from the phone', tone: 'text-ok', box: 'border-ok/25 bg-ok/[0.04]' },
@@ -111,6 +111,7 @@ export function PhoneLiveBar() {
         <p className={cn('flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]', live.status === 'awaiting approval' ? 'text-warn' : 'text-accent-soft')}>
           <LoaderCircle className="size-3 animate-spin" />
           {LIVE[live.status] ?? live.status} · {mmss(now - live.started)}
+          {live.driver && <span className="normal-case tracking-normal text-dim">· {live.driver === 'direct' ? 'direct control' : 'phone agent'}</span>}
           {waiting > 0 && <span className="normal-case tracking-normal text-dim">· {waiting} more waiting</span>}
         </p>
         <p className="mt-0.5 truncate text-[12.5px]">{live.text}</p>
@@ -149,6 +150,74 @@ export function DraftPhonePost({ draft }: { draft: number }) {
           Calendar
         </Btn>
       )}
+    </div>
+  )
+}
+
+/** In a draft's inspector: who drives the phone (a switch, for every post from the next one), and posting the draft
+ * from it now. Posting is public, so the button asks once more before it goes. */
+export function PostFromPhone({ d }: { d: Draft }) {
+  const a = useAssistant()
+  const pd = a.phoneDriver
+  const [sure, setSure] = useState(false)
+
+  useEffect(() => {
+    if (!sure) return
+    const t = window.setTimeout(() => setSure(false), 5000)
+    return () => window.clearTimeout(t)
+  }, [sure])
+
+  if (!pd) return null
+  const last = Object.values(a.phone)
+    .filter((x) => x.draft === d.id)
+    .sort((x, y) => y.post - x.post)[0]
+  const posting = last?.status === 'posting'
+  const up = last?.status === 'posted' || last?.status === 'unsure'
+  const failing = (d.check.checks ?? []).some((c) => c.status === 'fail')
+  const blocked = posting ? 'It’s being posted' : failing ? 'Fix what the check flags first' : d.platform === 'instagram' && !d.slides.length ? 'Add a picture first' : ''
+  const post = () => {
+    if (!sure) return setSure(true)
+    setSure(false)
+    a.action('post_phone', { draft: d.id, again: up })
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented
+          id="phone-driver"
+          label="Who drives the phone"
+          value={pd.driver}
+          onChange={(driver) => a.setPhoneDriver(driver, pd.fallback)}
+          options={[
+            { value: 'agent', label: <><Bot className="size-3.5" />Phone agent</> },
+            { value: 'direct', label: <><Hand className="size-3.5" />Direct control</> },
+          ]}
+        />
+        <Btn size="sm" variant={sure ? 'danger' : 'primary'} icon={posting ? LoaderCircle : Send} disabled={!!blocked} title={blocked || undefined} onClick={post} className={posting ? '[&>svg]:animate-spin' : undefined}>
+          {posting ? 'Posting…' : sure ? 'Post publicly now?' : up ? 'Post again' : 'Post now'}
+        </Btn>
+        {sure && (
+          <Btn size="sm" variant="subtle" onClick={() => setSure(false)}>
+            Cancel
+          </Btn>
+        )}
+      </div>
+      <p className="mt-2 text-[11.5px] leading-snug text-dim">
+        {pd.driver === 'direct'
+          ? 'Direct control: the assistant drives the phone itself. It looks at the screen and taps, types and swipes, with no agent in between.'
+          : pd.agent_down
+            ? `The phone’s agent ${pd.agent_down}, so direct control posts for now.`
+            : 'The phone’s own agent posts it.'}
+        {!pd.direct_ok && ' Direct control needs a vision model (OLLAMA_API_KEY on the assistant).'}
+      </p>
+      {pd.driver === 'agent' && pd.direct_ok && (
+        <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-[11.5px] text-muted">
+          <input type="checkbox" checked={pd.fallback} onChange={(e) => a.setPhoneDriver('agent', e.target.checked)} className="accent-[var(--color-accent)]" />
+          Direct control takes over if the agent fails
+        </label>
+      )}
+      <DraftPhonePost draft={d.id} />
     </div>
   )
 }
