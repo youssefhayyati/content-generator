@@ -18,7 +18,7 @@ call it with simple JSON such as `{"name": "...", "prompt": "...", "image": "<ur
 
 | | |
 |---|---|
-| Base URL | `https://<pod-id>-8000.proxy.runpod.net`. The pod id changes when a new pod is created (see RUNPOD_SETUP.md). |
+| Base URL | `https://<pod-id>-8001.proxy.runpod.net` (the image's nginx forwards 8001 to the manager on 8000). The pod id changes when a new pod is created (see ../README.md). |
 | Auth | Header `X-API-Key: <key>`, or `?key=<key>` in the URL (useful for `<img src>` / download links). Every endpoint needs it except `/health`. |
 | Body | JSON (`Content-Type: application/json`). |
 | Time limit | RunPod's proxy cuts any request at about **100 s**. Anything slower (all video) must use `"wait": false` and poll. |
@@ -102,12 +102,8 @@ Images are PNG. Videos are MP4 (H.264) with `subfolder=video` and `metadata` hol
 | `flux2_klein_edit` | Image + prompt → edited image (FLUX.2 Klein 4B) | **`image`**, `prompt`, `megapixels` 1, `steps` 4, `seed`, `batch_size` | ~7 s |
 | `wan_t2v` | Text to video (Wan 2.2 5B) | `prompt`, `negative_prompt`, `width` 1280, `height` 704, `length` 121, `fps` 24, `steps` 20, `cfg` 5, `seed`, `denoise`, `batch_size` | ~5 min |
 | `wan_i2v` | Image + prompt → video (Wan 2.2 5B) | **`image`**, `prompt`, `negative_prompt`, `megapixels` 0.9, `length` 121, `fps` 24, `steps` 20, `cfg` 5, `seed`, `denoise`, `batch_size` | ~5 min |
-| `face_swap` | Picture + face → picture (ReActor, inswapper_128, CodeFormer) | **`image`** (to change), **`image_2`** (the face), `faces` "0" | ~5 s |
-| `face_swap_video` | Video + face → video, sound kept (ReActor, inswapper_128) | **`video`**, **`image`** (the face), `faces` "0" | ~1 min per 10 s |
 
 - Edit and image-to-video outputs keep the input image's aspect ratio. `megapixels` sets the size.
-- The face swaps come with the voice agent (`workflows/*.json`) and aren't on a pod until registered. Their
-  custom node (ComfyUI-ReActor) is installed from the bundle's `ui`, which lists only that.
 - Wan `length` is the frame count and must be 4n+1. At 24 fps, 49 frames is about 2 s, 81 is about 3.4 s and 121 is about 5 s. Fewer frames render faster.
 
 ---
@@ -179,8 +175,8 @@ Custom nodes in it are installed and models are downloaded *if* the workflow has
 
 Registering is idempotent: POSTing the same name again replaces the workflow. `GET /workflows/{name}/bundle`
 returns exactly this format. It's also how workflows move to the next pod: whenever a workflow becomes ready,
-or its mapping changes, the manager saves its bundle to the network volume (`/workspace/comfy-kit/workflows/`),
-and a new pod registers everything found there (see RUNPOD_SETUP.md). `DELETE` removes it there too.
+or its mapping changes, the manager saves its bundle to the network volume (`/workspace/flowai/comfyui/workflows/`),
+and a new pod registers everything found there (see ../README.md). `DELETE` removes it there too.
 
 ### Inputs and mappings
 
@@ -243,7 +239,7 @@ Workflow names: letters, digits, `_ - .`, up to 120 characters. Prefer `lower_sn
 import time
 import requests
 
-BASE = "https://<pod-id>-8000.proxy.runpod.net"
+BASE = "https://<pod-id>-8001.proxy.runpod.net"
 HEADERS = {"X-API-Key": "<api key>"}
 
 
@@ -275,7 +271,7 @@ def generate(name, timeout=900, **inputs):
 
 ### JavaScript (Node 18+, server-side)
 ```js
-const BASE = "https://<pod-id>-8000.proxy.runpod.net";
+const BASE = "https://<pod-id>-8001.proxy.runpod.net";
 const KEY = process.env.COMFY_API_KEY;
 const headers = { "X-API-Key": KEY, "Content-Type": "application/json" };
 
@@ -312,4 +308,4 @@ async function generate(name, inputs = {}, timeoutMs = 15 * 60_000) {
 - Check `ignored_keys` in the response. A misspelled input name doesn't fail, it just gets ignored.
 - A workflow saved in the ComfyUI editor under the name of an API-registered workflow **replaces** it. Use different names.
 - Outputs pile up on the pod (`ComfyUI/output`). Download them and treat the pod as temporary.
-- Don't publish the port-8188 URL (the ComfyUI editor): it has no password. Only port 8000 checks the key.
+- Don't publish the port-8188 URL (the ComfyUI editor): it has no password. Only the manager (8000, and 8001 through nginx) checks the key.

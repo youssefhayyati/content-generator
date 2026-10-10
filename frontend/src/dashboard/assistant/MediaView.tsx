@@ -225,7 +225,7 @@ function PictureModal({ p, onClose }: { p: Picture | null; onClose: () => void }
                   Change what they say…
                 </Btn>
               )}
-              {a.generation && (
+              {a.faceswap && (
                 <Btn size="sm" icon={ScanFace} onClick={() => write(`Put the face from picture  on ${p.kind === 'video' ? 'video' : 'picture'} ${p.id}`, 'Put the face from picture '.length)}>
                   Swap a face…
                 </Btn>

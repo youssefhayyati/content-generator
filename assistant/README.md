@@ -24,7 +24,7 @@ browser speaker ◀──PCM16 24k── OmniVoice TTS (local GPU) ◀── GLM
 | LLM | `glm-5.3-flash` via Ollama cloud API | ollama.com |
 | TTS | `k2-fsa/OmniVoice` | this PC, or a VoiceStudio server (`TTS_URL`) |
 | VAD | Silero VAD | this PC (CPU) |
-| Pictures / video | ComfyUI workflows (Z-Image Turbo, FLUX.2 Klein, Wan 2.2, ...) | RunPod GPU pod (`comfyui/`) |
+| Pictures / video | ComfyUI workflows (Z-Image Turbo, FLUX.2 Klein, Wan 2.2, ...) | RunPod GPU pod (`content-generator/runpod/`) |
 
 ## Setup
 
@@ -155,16 +155,17 @@ Set `WEBSITE_URL` in `.env`, replace the two TodoMVC skills with skills for your
 
 ## Pictures and videos (ComfyUI on RunPod)
 
-The `comfyui/` folder is the RunPod kit: a small API (`manager.py`) in front of ComfyUI that installs
-workflows and runs them from simple JSON (see `comfyui/API.md` and `comfyui/RUNPOD_SETUP.md`).
+ComfyUI runs on the RunPod pod with FlowAI's other GPU services, all in one folder, `content-generator/runpod/`
+(its README says how to deploy it). Its part is a small API (`runpod/comfyui/manager.py`) in front of ComfyUI that
+installs workflows and runs them from simple JSON (see `runpod/comfyui/API.md`).
 The voice assistant talks to that API directly. It doesn't use the browser for this, which is faster
 and more reliable than clicking through the ComfyUI editor.
 
 ### Connecting it
 
-1. Start the pod (`bash /workspace/comfy-kit/setup.sh`, see `comfyui/RUNPOD_SETUP.md`).
-2. In `.env`, set `COMFYUI_URL=https://<pod-id>-8000.proxy.runpod.net` (it changes with every new pod)
-   and `COMFYUI_API_KEY` to `MANAGER_API_KEY` from `comfyui/pod.env` (that one doesn't change).
+1. Deploy the pod (`runpod/deploy.sh <its SSH target>`, see `runpod/README.md`).
+2. In `.env`, set `COMFYUI_URL=https://<pod-id>-8001.proxy.runpod.net` (it changes with every new pod)
+   and `COMFYUI_API_KEY` to `MANAGER_API_KEY` from the pod's `env` (that one doesn't change).
 3. Restart the server. The log says `ComfyUI at ...: z_image_turbo, flux2_klein_edit, ...`, and
    http://localhost:8000/health shows `"comfyui": "ok, 4 workflows"`.
 
@@ -191,13 +192,13 @@ Results are downloaded to `media/` (the pod's disk is not permanent) and served 
 
 ### Telling the assistant what each workflow is for
 
-`comfyui/descriptions.yaml` has one line per workflow (what it does, how long it takes, input quirks such as
+`workflows/descriptions.yaml` has one line per workflow (what it does, how long it takes, input quirks such as
 Wan's 4n+1 frame counts). The assistant sees these lines with each workflow's inputs and defaults. Workflows
 it adds get a line automatically. Workflows without one are described from their inputs ("Image to video.").
 The list is refreshed from the pod every minute, so workflows saved in the ComfyUI editor show up too.
 
-**Cancelling** needs the `POST /cancel/{prompt_id}` endpoint, which was added to `comfyui/manager.py` with this
-integration. Run `deploy.ps1` once so the pod gets it. Until then, "stop" only stops waiting, and the pod
+**Cancelling** needs the `POST /cancel/{prompt_id}` endpoint, which was added to `runpod/comfyui/manager.py` with
+this integration; a pod deployed with `runpod/deploy.sh` has it. Without it, "stop" only stops waiting, and the pod
 finishes the job.
 
 ### Dubbing a video and swapping faces
@@ -208,14 +209,15 @@ ffmpeg steps here; the models run elsewhere:
 
 | What | Model | Runs on |
 |---|---|---|
-| Lip sync | LatentSync 1.6 (ByteDance, Apache-2.0) | a service of its own, `content-generator/lipsync/`, on the RunPod pod (`LIPSYNC_URL`) |
-| Face swap | ReActor with `inswapper_128.onnx`, CodeFormer to restore the face | the ComfyUI pod: `face_swap` (pictures), `face_swap_video` (videos, the sound kept) |
+| Lip sync | LatentSync 1.6 (ByteDance, Apache-2.0) | a service of its own on the RunPod pod, `content-generator/runpod/lipsync/` (`LIPSYNC_URL`) |
+| Face swap | InsightFace's `inswapper_128.onnx`, GFPGAN 1.4 to restore the face (both ONNX) | a service of its own on the RunPod pod, `content-generator/runpod/faceswap/` (`FACESWAP_URL`) |
 
 | You say | What happens |
 |---|---|
 | (attach a video) "Make him say: the sale ends Friday" | `transcribe_media` (what's said now, how many words fit), then `dub_video` |
 | "Same, but in Spanish" / "in a deeper voice" | `dub_video` again, with the new words, or with `voice` |
 | "Put the face from picture 2 on video 5" | `swap_face(face=2, target=5)` |
+| "Put my face on the post's picture" | `swap_face(face=<the face picture>, draft=1, slide=1)`: the result takes the slide's place |
 | "Clone my voice from this recording" | `clone_voice` (see [Voice](#voice)) |
 
 A dub follows the usual recipe: the video's sound is taken out (24 kHz mono) and its speaker's voice is
@@ -226,13 +228,12 @@ with silence. The video goes to the lip sync service at 25 fps (what LatentSync 
 with the speech; it redraws the mouth (a longer speech plays the video back and forth), and the sound is laid
 under the result if it comes back without. Videos are 60 seconds at most, and every frame needs a face.
 
-**The lip sync service** (`content-generator/lipsync/`) is LatentSync behind a job API: `POST /v1/lipsync` (the
+**The lip sync service** (`content-generator/runpod/lipsync/`) is LatentSync behind a job API: `POST /v1/lipsync` (the
 video and the speech), then `GET /v1/lipsync/{id}` until it's done, and `GET /v1/lipsync/{id}/video`. Jobs run
 one at a time and nothing waits on a long request, so it works behind RunPod's proxy. It runs on the RunPod pod,
 next to ComfyUI and VoiceStudio, on port 8004 (`LIPSYNC_URL=https://<pod-id>-8004.proxy.runpod.net` and
-`LIPSYNC_API_KEY` in `.env`): `lipsync/runpod/setup.sh` installs it on the pod the first time and starts it (run
-it again after the pod restarts), with the same kit layout as the others (`/workspace/lipsync-kit`: the script,
-`app.py`, the requirements and `env` with the key). On the pod's A40 it runs LatentSync 1.6 (faces at 512 px,
+`LIPSYNC_API_KEY` in `.env`), deployed with the others by `runpod/deploy.sh` (on the pod: `/workspace/flowai/lipsync`,
+its key in `/workspace/flowai/env`). On the pod's A40 it runs LatentSync 1.6 (faces at 512 px,
 18 GB of GPU memory); `LATENTSYNC_VERSION=1.5` (256 px, 8 GB) is the smaller one. The first start downloads the
 model (about 5 GB); it loads on the first dub and waits on the CPU between dubs, so the GPU it shares is free
 meanwhile. Its `/health` says whether it's ready, and so does the agent's (`"lipsync"`). The same service also
@@ -240,12 +241,17 @@ runs on this machine's GPU (`docker compose --profile lipsync up -d lipsync`, `L
 but it needs about 8 GB free: on a 6 GB card next to the speech recognition, Windows lets the GPU borrow system
 memory and a 10-second dub takes most of an hour. Without `LIPSYNC_URL` the assistant doesn't offer dubbing.
 
-**The face swaps** come with the assistant as workflow bundles (`comfyui/workflows/`). Say "set up face
-swapping": the assistant calls `add_media_workflow` with the workflow's name, and the pod installs ReActor and
-downloads `inswapper_128.onnx` in the background. Or register them by hand: `curl -X POST
-"$BASE/workflows/face_swap" -H "X-API-Key: $KEY" -H "Content-Type: application/json" --data-binary
-@comfyui/workflows/face_swap.json`. Each bundle's `ui` only lists the custom node to install; the graph that runs
-is its `api`.
+**The face swap service** (`content-generator/runpod/faceswap/`, port 8005; `FACESWAP_URL` and `FACESWAP_API_KEY`
+in `.env`) has the same job API as the lip sync: `POST /v1/faceswap` with the face picture and the target (a
+picture or a video), then `GET /v1/faceswap/{id}` and `GET /v1/faceswap/{id}/result`. InsightFace's buffalo_l
+finds the faces and describes the source face, `inswapper_128.onnx` swaps the largest face (or every face, with
+`every`), and GFPGAN 1.4 restores it at 512 px, blended over it (128 px looks soft on a big picture). Each face
+is done in a crop around it, so a 10-second 1080 x 1920 video takes about a minute on the A40 (a picture,
+seconds), frame by frame with its sound kept. `swap_face` sends a video at most 1920 px and 60 seconds long; with
+`draft` (and `slide`), the result replaces that slide's picture or video, and Undo goes back. The content skill
+`skills/content/face-swap.md` gives the assistant the steps (consent, the face picture, the target, a dub after).
+InsightFace's models are licensed for non-commercial research only. Without `FACESWAP_URL` the assistant doesn't
+offer face swaps.
 
 **Transcripts.** Cloning needs the words of the recording. They come from VoiceStudio's speech recognition
 when it has a speech-to-text model, else from FlowAI Sound's Whisper (`SOUND_URL`; both understand any
@@ -390,8 +396,8 @@ closest to words you type, and the assistant's own voice. The voice you pick is 
 
 #### The video's music
 
-With a music model (`MUSIC_URL`: ACE-Step 1.5, MIT, trained on licensed music; `content-generator/music/`
-runs it next to FlowAI), each video gets an instrumental song written for it:
+With a music model (`MUSIC_URL`: ACE-Step 1.5, MIT, trained on licensed music; it runs on the RunPod pod,
+port 8003, from `content-generator/runpod/music/`), each video gets an instrumental song written for it:
 
 - **Written for the post:** the casting call that describes the voice also describes the music, for
   the music model: genre, two or three instruments, mood and energy, tempo, e.g. "upbeat acoustic
@@ -493,7 +499,13 @@ post from the phone from the next job on, FlowAI's scheduled ones too, and stays
     swipes, and looks again.
   - It uses the same skills. Apps the phone won't start by name (Instagram, X) are opened from the app
     list.
-  - Before a post counts as up, it checks the screen it ended on once more (`PHONE_VERIFY_POSTS`).
+  - Before a post counts as up, it checks the screen it ended on once more (`PHONE_VERIFY_POSTS`). If
+    that look can't tell, it opens the profile and finds the post, only looking; that screen is the proof.
+    A post it can't find there is *unsure*, and the assistant asks before checking it. A later check
+    (`post_feedback`) that finds it makes it posted, and FlowAI's record follows.
+  - It sends the phone one thing at a time, at least `PHONE_ACTION_GAP_SECONDS` (5) apart: a tap, a key,
+    a swipe or a line of typing.
+  - Going back and forth (the same few moves again and again) gets it told to try another way or stop.
   - If the phone's agent had no model to think with, ours starts every job for the next
     `PHONE_AGENT_RETRY_MINUTES` (30); after that the phone's agent gets the next one again.
   - No handover after a share tap (the post may be up), after someone stopped the task, or when the phone
@@ -659,8 +671,8 @@ through the Vite proxy at `/assistant/`. Beyond this page, it adds:
 After changing the agent here, copy it over and rebuild:
 
 ```bash
-rsync -a --delete --exclude __pycache__ --exclude comfyui/outputs --exclude comfyui/pod.env \
-  backend web skills fonts comfyui requirements.txt Dockerfile .dockerignore .env.example .gitignore README.md \
+rsync -a --delete --exclude __pycache__ \
+  backend web skills fonts workflows requirements.txt Dockerfile .dockerignore .env.example .gitignore README.md \
   content-generator/assistant/
 cd content-generator && docker compose up -d --build assistant
 ```
@@ -702,7 +714,7 @@ backend/
   retouch.py   changing only the painted part of a picture (cut out, edited, pasted back seamlessly)
   reel.py      a draft's pictures as a video: motion, the voice, captions, end card, music, ffmpeg
   dub.py       dubbing (sound out, speech fitted, lips synced, sound back in) and face swaps
-  lipsync.py   the lip sync service for dubs (LatentSync, LIPSYNC_URL)
+  podjobs.py   the pod's job services: lip sync for dubs (LIPSYNC_URL) and face swaps (FACESWAP_URL)
   music.py     songs written for videos by ACE-Step (MUSIC_URL)
   platforms.py Instagram and X specs and the pre-export check (mirrors FlowAI's)
   flowai.py    FlowAI: accounts and voice, saving, finding, opening and scheduling posts, campaigns
@@ -713,7 +725,8 @@ skills/        browser agent skills (markdown)
   content/     content skills: how to make each kind of post
   phone/       phone skills: how to post and read feedback in the Instagram and X apps
 fonts/         fonts for text on pictures, by style (fonts.yaml), with their licences
-comfyui/       RunPod kit (manager.py, setup scripts, workflow bundles) + descriptions.yaml
+workflows/     what each ComfyUI workflow is for (descriptions.yaml); the pod itself (ComfyUI, VoiceStudio,
+               songs, lip sync, face swaps) is content-generator/runpod/
 media/         generated and attached files (served at media/, next to the page)
 data/          conversations and each user's voice (not served)
 web/           the agent page (index.html, agent.js), the test console (console.html, app.js),

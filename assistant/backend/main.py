@@ -14,7 +14,7 @@ from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import ConversationStore
 from .llm import LLM
-from .lipsync import LipSync
+from .podjobs import FaceSwap, JobService, LipSync
 from .music import SongWriter
 from .phone import PhoneClient, PhoneError
 from .phone_direct import DirectDriver, VisionModel
@@ -74,13 +74,13 @@ async def start_publisher(app: FastAPI, phone: PhoneClient):
         await asyncio.sleep(30)
 
 
-async def check_lipsync(lipsync: LipSync):
-    """Keeps /health's answer about dubbing fresh, and says in the log when it changes."""
+async def check_service(service: JobService, name: str):
+    """Keeps /health's answer about one of the pod's job services fresh, and says in the log when it changes."""
     said = None
     while True:
-        status = await asyncio.to_thread(lipsync.check)
+        status = await asyncio.to_thread(service.check)
         if status != said:
-            log.info("Lip sync at %s: %s", lipsync.url, status)
+            log.info("%s at %s: %s", name, service.url, status)
             said = status
         await asyncio.sleep(60)
 
@@ -139,7 +139,11 @@ async def lifespan(app: FastAPI):
     if settings.lipsync_url:
         lipsync = LipSync(settings.lipsync_url, settings.lipsync_api_key, settings.lipsync_timeout_minutes * 60)
         app.state.models.lipsync = lipsync
-        app.state.lipsync_check = asyncio.create_task(check_lipsync(lipsync))
+        app.state.lipsync_check = asyncio.create_task(check_service(lipsync, "Lip sync"))
+    if settings.faceswap_url:
+        faceswap = FaceSwap(settings.faceswap_url, settings.faceswap_api_key, settings.faceswap_timeout_minutes * 60)
+        app.state.models.faceswap = faceswap
+        app.state.faceswap_check = asyncio.create_task(check_service(faceswap, "Face swap"))
     if settings.comfyui_url:
         comfy = ComfyClient(settings.comfyui_url, settings.comfyui_api_key, ROOT / settings.comfyui_descriptions)
         app.state.models.comfy = comfy
@@ -152,7 +156,8 @@ async def lifespan(app: FastAPI):
         # Our own agent, there for the switch on the Assistant page (used only when PHONE_DRIVER or the switch says)
         if settings.ollama_api_key or "ollama.com" not in settings.ollama_host:
             phone.driver = DirectDriver(phone, VisionModel(settings.ollama_host, settings.ollama_api_key,
-                                                           settings.phone_vision_model), settings.phone_verify_posts)
+                                                           settings.phone_vision_model), settings.phone_verify_posts,
+                                       settings.phone_action_gap_seconds)
         elif settings.phone_driver != "agent":
             log.warning("PHONE_DRIVER=%s needs OLLAMA_API_KEY for our own agent: the phone's agent drives it",
                         settings.phone_driver)
@@ -170,8 +175,9 @@ async def lifespan(app: FastAPI):
         settings.comfyui_timeout_minutes * 60, app.state.models.phone)
     log.info("Ready")
     yield
-    if check := getattr(app.state, "lipsync_check", None):
-        check.cancel()
+    for check in (getattr(app.state, "lipsync_check", None), getattr(app.state, "faceswap_check", None)):
+        if check:
+            check.cancel()
     if app.state.models.browser:
         await app.state.models.browser.close()
     if app.state.models.comfy:
@@ -194,7 +200,8 @@ def health():
             "tts": "voicestudio" if settings.tts_url else "local", "flowai": settings.flowai_url or "off",
             "phone": phone_health(),
             "comfyui": "off" if not comfy else (comfy.error or f"ok, {len(comfy.workflows)} workflows"),
-            "lipsync": app.state.models.lipsync.status if app.state.models.lipsync else "off"}
+            "lipsync": app.state.models.lipsync.status if app.state.models.lipsync else "off",
+            "faceswap": app.state.models.faceswap.status if app.state.models.faceswap else "off"}
 
 
 def phone_health() -> str:

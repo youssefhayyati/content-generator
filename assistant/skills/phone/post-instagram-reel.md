@@ -2,16 +2,17 @@
 name: post-instagram-reel
 description: Publish a reel (one video) from the Instagram app.
 ---
-Publish a new Instagram reel with the video that was just put on this phone and the caption below, from the
-Instagram app. The video is the newest item in the gallery (top left in the picker); use exactly that one.
+Publish a new Instagram reel with the video that was just put on this phone ({{media}}) and the caption below,
+from the Instagram app. The video is the newest item in the gallery (the first video in the picker); use exactly
+that one.
 
 1. Open the Instagram app (package com.instagram.android). If it is not installed, stop and say so. If it
    shows a login screen, stop and say the account must be logged in first; never type a password.
 2. Close anything in the way (notification prompts, "Not now" dialogs) with "Not now", "Cancel" or the X.
-3. Tap the "+" (Create) button (bottom centre or top left of the home feed) and choose REEL in the choice at
-   the bottom of the screen.
-4. In the gallery, tap the first (top left) video. If it opens a camera, tap the gallery thumbnail at the
-   bottom left first.
+3. Tap the "+" (Create) button at the top left of the Home feed (the middle of the bottom bar is Messages, not
+   Create) and choose REEL in the choice at the bottom of the screen.
+4. In the gallery, tap the newest video: the first video tile, top left (skip a camera or templates tile; its
+   length is given above). If it opens a camera, tap the gallery thumbnail at the bottom left first.
 5. Tap "Next" (or "Add" then "Next") until you reach the screen with "Write a caption...". Change nothing in
    the editor: no music, no text, no trimming (the video already has its music and words). If asked about
    adding music or templates, skip it.

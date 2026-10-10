@@ -65,10 +65,10 @@ class Settings(BaseSettings):
     browser_screenshots: bool = True  # send a screenshot to the web UI after each step
     skills_dir: str = "skills"
 
-    # Pictures and videos: the ComfyUI manager API on the RunPod pod (comfyui/API.md)
+    # Pictures and videos: the ComfyUI manager API on the RunPod pod (runpod/comfyui/API.md in content-generator)
     comfyui_url: str = ""  # https://<pod-id>-8000.proxy.runpod.net; empty = off
     comfyui_api_key: str = ""  # MANAGER_API_KEY from comfyui/pod.env
-    comfyui_descriptions: str = "comfyui/descriptions.yaml"  # what each workflow is for
+    comfyui_descriptions: str = "workflows/descriptions.yaml"  # what each workflow is for
     comfyui_timeout_minutes: int = 30  # give up waiting for one generation after this
     media_dir: str = "media"  # generated and attached files, served at /media
     data_dir: str = "data"  # conversations, so they can be reopened (backend/conversations.py); not served
@@ -79,16 +79,21 @@ class Settings(BaseSettings):
     # Music under videos made with make_video (backend/reel.py): FlowAI Sound's composer, e.g.
     # http://sound:8000 next to FlowAI; empty = videos have only the voice
     sound_url: str = ""
-    # Songs written for each video (backend/music.py): an ACE-Step 1.5 API, e.g. http://music:8000 next to
-    # FlowAI (content-generator/music/) or a pod's; empty = only the composer's moods
+    # Songs written for each video (backend/music.py): an ACE-Step 1.5 API, the RunPod pod's (content-generator/
+    # runpod/music/, port 8003), or http://music:8000 next to FlowAI; empty = only the composer's moods
     music_url: str = ""
     music_api_key: str = ""  # its ACESTEP_API_KEY, when it has one
     music_timeout_seconds: int = 300  # the first song also loads the model
-    # Lip sync for dubbed videos (backend/lipsync.py): the LatentSync API, e.g. http://lipsync:8000 next to
-    # FlowAI (content-generator/lipsync/) or a pod's; empty = dubbing is off
+    # Lip sync for dubbed videos (backend/podjobs.py): the LatentSync API, the RunPod pod's (content-generator/
+    # runpod/lipsync/, port 8004), or http://lipsync:8000 next to FlowAI; empty = dubbing is off
     lipsync_url: str = ""
     lipsync_api_key: str = ""  # its LIPSYNC_API_KEY, when it has one
     lipsync_timeout_minutes: int = 30  # the first dub also downloads and loads the model
+    # Face swaps (backend/podjobs.py): inswapper_128 and GFPGAN in ONNX, the RunPod pod's (content-generator/
+    # runpod/faceswap/, port 8005); empty = face swaps are off
+    faceswap_url: str = ""
+    faceswap_api_key: str = ""  # its FACESWAP_API_KEY
+    faceswap_timeout_minutes: int = 20
 
     # FlowAI (content-generator/): where drafts are saved as posts and scheduled (backend/flowai.py)
     flowai_url: str = ""  # its API, e.g. http://localhost:8002; empty = off
@@ -112,6 +117,7 @@ class Settings(BaseSettings):
     phone_agent_retry_minutes: float = 30
     phone_vision_model: str = "kimi-k3"  # needs vision; glm-5.3-flash works too, a little slower
     phone_verify_posts: bool = True  # direct: look once more at the screen a post ended on before calling it up
+    phone_action_gap_seconds: float = 5  # direct: at least this long between two taps, keys, swipes or typings
     phone_mode: Literal["flash", "pro"] = "flash"  # the API's agent for feedback and other tasks
     phone_post_mode: Literal["flash", "pro"] = "pro"  # for posting: pro also checks independently that it went up
     phone_max_steps: int = 40  # the team's limit

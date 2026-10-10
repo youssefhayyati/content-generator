@@ -525,8 +525,7 @@ class MediaSession:
                 raise ComfyError("the name may only use letters, digits, _ - and . (e.g. wan14_i2v)")
             self._pod()
             sources = [s for s in (template, file, url) if s not in (None, "")]
-            kit = self.comfy.descriptions.parent / "workflows" / f"{name}.json"  # one that comes with the assistant
-            if len(sources) != 1 and not (not sources and kit.is_file()):
+            if len(sources) != 1:
                 raise ComfyError("give exactly one of template, file or url")
             try:
                 await self.comfy.refresh()
@@ -535,9 +534,7 @@ class MediaSession:
             if name in self.comfy.workflows and not replace:
                 raise ComfyError(f"a workflow named {name} already exists; pick another name, "
                                  "or set replace if the user wants to overwrite it")
-            if not sources:
-                started = await self.comfy.register(name, json.loads(kit.read_text(encoding="utf-8")))
-            elif template:
+            if template:
                 started = await self.comfy.install_template(str(template), name)
             elif url:
                 started = await self.comfy.register(name, await self._fetch_workflow(str(url)))
@@ -549,7 +546,7 @@ class MediaSession:
                 started = await self.comfy.register(name, item.data)
         except ComfyError as exc:
             return {"error": str(exc)}
-        if description and sources:  # one that comes with the assistant has its line already
+        if description:
             save_description(self.comfy.descriptions, name, description)
         self.job_count += 1
         job = MediaJob(self.job_count, "install", name, setup_id=started["job_id"])
@@ -617,7 +614,7 @@ class MediaSession:
                 raise ComfyError("setup finished but the workflow is not runnable")
             if wf.slots.get("prompt", 0) > 1:
                 problems.append(f"it has {wf.slots['prompt']} prompt inputs, so it may contain more than one "
-                                "pipeline (see comfyui/API.md, Recipe A)")
+                                "pipeline (see runpod/comfyui/API.md, Recipe A)")
             job.status = "done"
             job.result = wf.summary() + (f" Problems: {'; '.join(problems)}." if problems else "")
             await self.send(type="media_job", id=job.id, kind="install", status="done", text=job.result)

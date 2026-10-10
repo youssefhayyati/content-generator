@@ -3,3 +3,6 @@ dist
 *.local
 .DS_Store
 deploy/.env
+
+# The RunPod kit's keys (runpod/env.example lists them)
+runpod/env

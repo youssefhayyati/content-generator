@@ -10,7 +10,7 @@ its words are already on the {{kind}}, so add no text, stickers or music.
    shows a login screen, stop and say the account must be logged in first; never type a password.
 2. Close anything in the way (notification prompts, "Not now" dialogs) with "Not now", "Cancel" or the X.
 3. Tap your own profile picture with the "+" at the top left of the home feed ("Your story"), or tap "+"
-   (Create) and choose STORY at the bottom.
+   (Create, top left of the Home feed; the middle of the bottom bar is Messages) and choose STORY at the bottom.
 4. If a camera opens, tap the gallery thumbnail at the bottom left. Tap the first (top left) item.
 5. In the story editor change nothing. Tap "Your story" (bottom left) or the arrow "->" then "Share" next to
    "Your story". Do not choose "Close friends".
