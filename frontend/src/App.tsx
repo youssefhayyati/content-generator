@@ -1,16 +1,19 @@
 import { lazy, Suspense, type ComponentType } from 'react'
 import { MotionConfig, useReducedMotion } from 'framer-motion'
 import { ReactLenis } from 'lenis/react'
+import { useCursor } from './lib/cursor'
 import { isAppPath, Router, useRouter } from './lib/router'
 import { SessionProvider } from './lib/session'
-import { Cursor } from './components/ui/Cursor'
 import { Grain } from './components/ui/Grain'
 import { PageCurtain } from './components/ui/PageCurtain'
 import { Splash } from './dashboard/Splash'
 import ForgotPassword from './pages/ForgotPassword'
 import Home from './pages/Home'
+import { Cookies, Privacy, Terms } from './pages/Legal'
 import Login from './pages/Login'
+import NotFound from './pages/NotFound'
 import ResetPassword from './pages/ResetPassword'
+import Showcase from './pages/Showcase'
 import Signup from './pages/Signup'
 
 // The studio is its own chunk: people reading the landing page never download it.
@@ -20,8 +23,12 @@ const ROUTES: Record<string, ComponentType> = {
   '/': Home,
   '/login': Login,
   '/signup': Signup,
+  '/showcase': Showcase,
   '/forgot-password': ForgotPassword,
   '/reset-password': ResetPassword,
+  '/privacy': Privacy,
+  '/terms': Terms,
+  '/cookies': Cookies,
 }
 
 function Routes() {
@@ -34,24 +41,21 @@ function Routes() {
       </Suspense>
     )
   }
-  const Page = ROUTES[path] ?? Home
+  const Page = ROUTES[path] ?? NotFound
   return <Page key={path} />
 }
 
-/** The custom cursor and film grain belong to the site, not to the tool people work in. */
+/** The film grain belongs to the site, not to the tool people work in. */
 function SiteChrome() {
   const { path } = useRouter()
   if (isAppPath(path)) return null
-  return (
-    <>
-      <Cursor />
-      <Grain />
-    </>
-  )
+  return <Grain />
 }
 
 export default function App() {
   const reduce = useReducedMotion()
+  // One cursor for the site and the studio.
+  useCursor()
 
   return (
     <MotionConfig reducedMotion="user">

@@ -32,7 +32,6 @@ export default function Comments() {
   return (
     <div>
       <PageHeader
-        eyebrow="Comments"
         title={
           <>
             The comment <Serif>inbox.</Serif>

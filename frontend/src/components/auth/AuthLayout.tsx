@@ -75,12 +75,12 @@ export function AuthLayout({ children, visual }: { children: ReactNode; visual: 
           >
             <span>© 2026 FlowAI</span>
             <span className="flex gap-4">
-              <a href="#" className="transition-colors hover:text-fg">
+              <Link to="/privacy" className="transition-colors hover:text-fg">
                 Privacy
-              </a>
-              <a href="#" className="transition-colors hover:text-fg">
+              </Link>
+              <Link to="/terms" className="transition-colors hover:text-fg">
                 Terms
-              </a>
+              </Link>
             </span>
           </Enter>
         </div>

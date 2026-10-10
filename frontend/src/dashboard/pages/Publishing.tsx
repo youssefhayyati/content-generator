@@ -5,7 +5,7 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, type Device, type PublishingRun, type PublishingUsage } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { fmtRelative, fmtTime, useApi, useInvalidate } from '../data'
+import { count, fmtRelative, fmtTime, useApi, useInvalidate } from '../data'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
 import { Btn, EmptyState, Modal, PageHeader, Skeleton, Stagger } from '../ui'
@@ -40,7 +40,6 @@ export default function Publishing() {
   return (
     <div>
       <PageHeader
-        eyebrow="Publishing"
         title={
           <>
             What the phones <Serif>did.</Serif>
@@ -62,16 +61,16 @@ export default function Publishing() {
         <Stat
           label="A typical run"
           value={usage && usage.runs > 0 ? `${usage.typical.steps} steps · ${fmtMs(usage.typical.wall_clock_ms)}` : '—'}
-          sub={usage && usage.runs > 0 ? `${usage.runs} finished runs` : 'no finished runs yet'}
+          sub={
+            usage && usage.runs > 0
+              ? `${count(usage.runs, 'finished run')}${usage.typical.spend > 0 ? ` · $${usage.typical.spend.toFixed(4)} each` : ''}`
+              : 'no finished runs yet'
+          }
         />
         <Stat
           label="Outcomes"
-          value={
-            usage
-              ? `${usage.outcomes.confirmed ?? 0} confirmed · ${usage.outcomes.uncertain ?? 0} unconfirmed · ${usage.outcomes.failed ?? 0} failed`
-              : '—'
-          }
-          sub={usage && usage.typical.spend > 0 ? `$${usage.typical.spend.toFixed(4)} typical spend` : undefined}
+          value={usage ? `${usage.outcomes.confirmed ?? 0} confirmed` : '—'}
+          sub={usage ? `${usage.outcomes.uncertain ?? 0} unconfirmed · ${usage.outcomes.failed ?? 0} failed` : undefined}
         />
       </Stagger>
 
@@ -108,7 +107,7 @@ export default function Publishing() {
                   <span className="hidden shrink-0 text-right sm:block">
                     <span className={cn('block font-mono text-[10.5px] uppercase tracking-[0.12em]', OUTCOME[run.outcome].text)}>{OUTCOME[run.outcome].label}</span>
                     <span className="mt-0.5 block font-mono text-[10.5px] text-dim">
-                      {run.outcome === 'running' ? `${run.totals.steps} steps so far` : `${run.totals.steps} steps · ${fmtMs(run.totals.wall_clock_ms)}`}
+                      {run.outcome === 'running' ? `${count(run.totals.steps, 'step')} so far` : `${count(run.totals.steps, 'step')} · ${fmtMs(run.totals.wall_clock_ms)}`}
                     </span>
                   </span>
                   <span className="w-20 shrink-0 text-right font-mono text-[10.5px] text-dim">{run.started_at ? fmtRelative(run.started_at) : '—'}</span>

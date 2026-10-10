@@ -42,7 +42,6 @@ export default function Analytics() {
   return (
     <div>
       <PageHeader
-        eyebrow="Analytics"
         title={
           <>
             What you <Serif>shipped.</Serif>

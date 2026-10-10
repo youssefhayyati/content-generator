@@ -84,7 +84,6 @@ type ButtonProps = {
   size?: 'sm' | 'md' | 'lg'
   arrow?: boolean
   className?: string
-  cursor?: string
 }
 
 const sizes = {
@@ -99,14 +98,13 @@ const variants = {
   ghost: 'text-fg border border-line-2 hover:border-white/30 hover:bg-white/[0.04]',
 }
 
-export function Button({ href, children, variant = 'primary', size = 'md', arrow, className, cursor }: ButtonProps) {
+export function Button({ href, children, variant = 'primary', size = 'md', arrow, className }: ButtonProps) {
   const onClick = useLinkClick(href)
   return (
     <Magnetic>
       <a
         href={href}
         onClick={onClick}
-        data-cursor={cursor}
         className={cn(
           'group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-[-0.01em] transition-[background-color,box-shadow,border-color] duration-300',
           sizes[size],

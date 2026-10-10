@@ -56,7 +56,6 @@ export default function Assistant() {
   return (
     <div>
       <PageHeader
-        eyebrow="Assistant"
         title={
           <>
             Say it. <Serif>Watch it happen.</Serif>
@@ -79,7 +78,7 @@ export default function Assistant() {
         }
       />
 
-      <div className="mt-8 grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start">
+      <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[360px_minmax(0,1fr)] xl:items-start">
         <Stagger i={0} className="xl:sticky xl:top-[4.5rem]">
           <Conversation className="h-[540px] xl:h-[min(860px,calc(100dvh-6rem))]" onImport={() => setPicking(true)} />
         </Stagger>

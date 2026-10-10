@@ -67,7 +67,7 @@ export function FinalCTA() {
         </div>
         <Reveal delay={0.3} className="mt-10 flex flex-wrap items-center justify-center gap-3">
           <span ref={targetRef} data-thread="end" className="inline-flex">
-            <Button href="/signup" size="lg" arrow cursor="Go">
+            <Button href="/signup" size="lg" arrow>
               Start Creating Free
             </Button>
           </span>

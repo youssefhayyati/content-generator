@@ -82,6 +82,7 @@ export const NAV: NavEntry[] = [
     },
   },
   { label: 'Workflow', href: '#workflow' },
+  { label: 'Showcase', href: '/showcase' },
   { label: 'Pricing', href: '#start' },
   {
     label: 'Resources',

@@ -5,7 +5,7 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Device, type PublishingRun } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { fmtRelative, useApi, useInvalidate } from '../data'
+import { count, fmtRelative, useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Segmented, Skeleton, Stagger } from '../ui'
 
@@ -27,7 +27,6 @@ export default function Phones() {
   return (
     <div>
       <PageHeader
-        eyebrow="Phones"
         title={
           <>
             The phones that <Serif>post.</Serif>
@@ -135,16 +134,12 @@ function PhoneCard({ device: d, i, run, onEdit }: { device: Device; i: number; r
           </p>
           <p className="mt-1 truncate text-[12.5px]">{run.goal}</p>
           <p className="mt-0.5 text-[11px] text-dim">
-            {run.totals.steps} steps · started {run.started_at ? fmtRelative(run.started_at) : '—'}
+            {count(run.totals.steps, 'step')} · started {run.started_at ? fmtRelative(run.started_at) : '—'}
           </p>
         </div>
       )}
 
-      {d.screenshot_url && (
-        <a href={d.screenshot_url} target="_blank" rel="noreferrer" className="mx-4 mb-3 block overflow-hidden rounded-lg border border-line" title="The phone's latest screen">
-          <img src={d.screenshot_url} alt={`${d.name}'s latest screen`} className="max-h-44 w-full object-cover object-top" loading="lazy" />
-        </a>
-      )}
+      {d.screenshot_url && <Screen url={d.screenshot_url} name={d.name} />}
 
       <div className="mt-auto flex items-center justify-between border-t border-line px-4 py-2.5">
         <span className="truncate font-mono text-[10.5px] text-dim">
@@ -216,7 +211,7 @@ function AutomationService() {
             the phone service uses (the team phone is <span className="font-mono text-[11px]">heracles-phone</span>).
           </p>
         </div>
-        <div className="grid gap-5 px-5 py-4 lg:grid-cols-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 px-5 py-4 lg:grid-cols-2">
           <div>
             <Label>Agent token</Label>
             <div className="mt-2 flex items-center gap-2">
@@ -252,6 +247,18 @@ function AutomationService() {
         </div>
       </section>
     </Stagger>
+  )
+}
+
+/** The phone's latest screen; if its file can't be loaded, the card simply goes without. */
+function Screen({ url, name }: { url: string; name: string }) {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [url])
+  if (broken) return null
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="mx-4 mb-3 block overflow-hidden rounded-lg border border-line" title="The phone's latest screen">
+      <img src={url} alt={`${name}'s latest screen`} className="max-h-44 w-full object-cover object-top" loading="lazy" onError={() => setBroken(true)} />
+    </a>
   )
 }
 

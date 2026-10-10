@@ -94,7 +94,7 @@ export function Router({ children }: { children: ReactNode }) {
       const next = parse(to)
       const instant =
         reduce || phase !== 'idle' || next.path === location.path || (isAppPath(next.path) && isAppPath(location.path))
-      if (instant) return commit(to, 'none')
+      if (instant) return commit(to, 'none', next.path === location.path)
       pending.current = { to, push: false, replace: false }
       setTarget(to)
       setPhase('cover')
@@ -147,6 +147,18 @@ export function useDocumentTitle(title: string) {
   useEffect(() => {
     document.title = title
   }, [title])
+}
+
+/*
+ * A home-page section ("#features") to scroll to once the home page shows. Links to sections
+ * set it when they're clicked on another page (a legal page, the 404), then go home.
+ */
+let section: string | null = null
+export const queueSection = (hash: string) => void (section = hash)
+export function takeSection() {
+  const s = section
+  section = null
+  return s
 }
 
 /** Click handler for internal paths ("/login"). Hash and external links fall through untouched. */

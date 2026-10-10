@@ -31,11 +31,15 @@ class ProfileController extends Controller
             'name' => ['sometimes', 'required', 'string', 'max:80'],
             'email' => ['sometimes', 'required', 'email', 'max:255', Rule::unique(User::class)->ignore($user->id)],
             'timezone' => ['sometimes', 'nullable', 'timezone:all'],
-            'preferences' => ['sometimes', 'array'],
+            // Only these keys: the rest of preferences (how many first posts were written) is the server's.
+            'preferences' => ['sometimes', 'array:platforms,formats,onboarding,studio'],
             'preferences.platforms' => ['sometimes', 'array'],
             'preferences.platforms.*' => ['distinct', Rule::enum(Platform::class)],
             'preferences.formats' => ['sometimes', 'array'],
             'preferences.formats.*' => ['distinct', Rule::enum(PostFormat::class)],
+            // Onboarding can be finished (or skipped), never reopened.
+            'preferences.onboarding' => ['sometimes', Rule::in(['done'])],
+            'preferences.studio' => ['sometimes', 'nullable', 'string', 'max:60'],
         ]);
 
         if (isset($data['preferences'])) {

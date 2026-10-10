@@ -218,7 +218,7 @@ export function FlowEditor({ id, runParam, born }: { id: number; runParam: numbe
   const groups = Object.entries(catalog.groups).filter(([g]) => g !== 'trigger') as Array<[keyof typeof GROUP_HUE, string]>
 
   return (
-    <div className="-mx-4 -mt-8 md:-mx-8 md:-mt-10">
+    <div className="-mx-4 -mt-8 md:-mx-6 md:-mt-10">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-panel/80 px-4 py-2.5 backdrop-blur md:px-6">
         <Btn variant="subtle" size="sm" icon={ArrowLeft} onClick={() => navigate('/dashboard/flows')} aria-label="All flows" />

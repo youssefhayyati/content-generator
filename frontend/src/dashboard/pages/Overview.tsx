@@ -61,7 +61,6 @@ export default function Overview() {
   return (
     <div>
       <PageHeader
-        eyebrow="Overview"
         title={
           <>
             {greeting()}, <Serif>{firstName(user.name)}.</Serif>
@@ -617,7 +616,7 @@ function WeekCard({ post }: { post: Post }) {
   const { navigate } = useRouter()
   const state = postState(post)
   const cover = coverOf(post)
-  const words = <span className="line-clamp-3 px-2 pr-6 pt-2 text-[11px] leading-snug text-muted">{titleOf(post)}</span>
+  const words = <span className="line-clamp-3 px-2 pt-2 text-[11px] leading-snug text-muted">{titleOf(post)}</span>
   return (
     <motion.button
       type="button"
@@ -628,16 +627,14 @@ function WeekCard({ post }: { post: Post }) {
       transition={{ duration: 0.4, ease }}
       className="group block w-full overflow-hidden rounded-md border border-line bg-panel-2 text-left transition-colors hover:border-line-2"
     >
-      <span className="relative block">
-        {cover ? <Img src={cover} fallback={words} className="aspect-[4/3] w-full object-cover" /> : words}
-        {post.platforms[0] && (
-          <span className="absolute right-1 top-1 grid size-[18px] place-items-center rounded bg-black/60 text-white backdrop-blur">
-            <PlatformIcon id={post.platforms[0]} className="size-2.5" />
-          </span>
-        )}
-      </span>
+      <span className="block">{cover ? <Img src={cover} fallback={words} className="aspect-[4/3] w-full object-cover" /> : words}</span>
+      {/* The platform mark, in its state's colour, leads the time: the title above keeps the card's full width. */}
       <span className="flex items-center gap-1.5 px-2 py-1.5">
-        <span className={cn('size-1.5 shrink-0 rounded-full', STATE[state].dot)} />
+        {post.platforms[0] ? (
+          <PlatformIcon id={post.platforms[0]} className={cn('size-2.5', STATE[state].text)} />
+        ) : (
+          <span className={cn('size-1.5 shrink-0 rounded-full', STATE[state].dot)} />
+        )}
         <span className="truncate whitespace-nowrap text-[10.5px] tabular-nums text-fg">{shortTime.format(new Date(post.scheduled_at!))}</span>
       </span>
     </motion.button>

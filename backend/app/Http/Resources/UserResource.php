@@ -28,6 +28,8 @@ class UserResource extends JsonResource
             'preferences' => [
                 'platforms' => $this->preferences['platforms'] ?? [],
                 'formats' => $this->preferences['formats'] ?? [],
+                'onboarding' => $this->preferences['onboarding'] ?? 'done',
+                'studio' => $this->preferences['studio'] ?? null,
             ],
             'has_password' => $this->hasPassword(),
             'publishing_paused' => $this->publishingPaused(),

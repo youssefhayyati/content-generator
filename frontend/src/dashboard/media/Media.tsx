@@ -8,7 +8,7 @@ import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Player } from '../sound/Player'
 import { useToast } from '../toast'
-import { Btn, EmptyState, Modal, Segmented, Skeleton } from '../ui'
+import { Btn, EmptyState, Modal, Segmented, Skeleton, Viewer, viewerMedia } from '../ui'
 
 export const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm']
 export const AUDIO_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/webm', 'audio/ogg', 'audio/flac', 'audio/x-flac']
@@ -222,50 +222,59 @@ export function AssetModal({ asset, onClose }: { asset: Asset | null; onClose: (
     }
   }
 
+  // Pictures and videos open nearly full page; a sound keeps the small dialog with its player.
+  const audio = asset?.kind === 'audio'
+  const details = asset && (
+    <div className="flex flex-1 flex-col">
+      <dl className="space-y-2.5 text-[12.5px]">
+        {(
+          [
+            ...(asset.kind === 'audio' ? [] : [['Shape', fmtShape(asset)]]),
+            ...(asset.kind !== 'image' ? [['Length', asset.duration ? fmtSeconds(asset.duration) : 'Unknown']] : []),
+            ...(asset.sound?.voice_name ? [['Voice', `${asset.sound.voice_name} · ${asset.sound.lang?.toUpperCase() ?? ''}`]] : []),
+            ...(asset.sound?.label ? [['Music', `${asset.sound.label} · ${asset.sound.key ?? ''} · ${Math.round(asset.sound.bpm ?? 0)} bpm`]] : []),
+            ['Size', fmtBytes(asset.size)],
+            ['Type', asset.mime],
+            ['From', { upload: 'Uploaded', generated: 'Generated with AI', screenshot: 'Phone screenshot', intake: 'Campaign intake' }[asset.source]],
+            ['Added', fmtRelative(asset.created_at)],
+          ] as Array<[string, string]>
+        ).map(([k, v]) => (
+          <div key={k}>
+            <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">{k}</dt>
+            <dd className="mt-0.5 text-fg">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <Btn variant="danger" icon={Trash2} onClick={remove} loading={deleting} className="mt-auto self-start">
+        Delete
+      </Btn>
+    </div>
+  )
+
   return (
-    <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'Media'} className="max-w-2xl">
-      {asset && (
-        <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_200px]">
-          {asset.kind === 'audio' ? (
+    <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'Media'} full={!audio} className={audio ? 'max-w-2xl' : undefined}>
+      {asset &&
+        (audio ? (
+          <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_200px]">
             <div className="rounded-lg border border-line bg-panel-2 p-4">
               <Player asset={asset} />
               <SoundActions asset={asset} onClose={onClose} />
             </div>
-          ) : (
-            <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
-              {asset.kind === 'video' ? (
-                <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className="max-h-[60vh] w-full" />
-              ) : (
-                <img src={asset.url} alt={asset.name ?? ''} className="max-h-[60vh] w-full object-contain" />
-              )}
-            </div>
-          )}
-          <div className="flex flex-col">
-            <dl className="space-y-2.5 text-[12.5px]">
-              {(
-                [
-                  ...(asset.kind === 'audio' ? [] : [['Shape', fmtShape(asset)]]),
-                  ...(asset.kind !== 'image' ? [['Length', asset.duration ? fmtSeconds(asset.duration) : 'Unknown']] : []),
-                  ...(asset.sound?.voice_name ? [['Voice', `${asset.sound.voice_name} · ${asset.sound.lang?.toUpperCase() ?? ''}`]] : []),
-                  ...(asset.sound?.label ? [['Music', `${asset.sound.label} · ${asset.sound.key ?? ''} · ${Math.round(asset.sound.bpm ?? 0)} bpm`]] : []),
-                  ['Size', fmtBytes(asset.size)],
-                  ['Type', asset.mime],
-                  ['From', { upload: 'Uploaded', generated: 'Generated with AI', screenshot: 'Phone screenshot', intake: 'Campaign intake' }[asset.source]],
-                  ['Added', fmtRelative(asset.created_at)],
-                ] as Array<[string, string]>
-              ).map(([k, v]) => (
-                <div key={k}>
-                  <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">{k}</dt>
-                  <dd className="mt-0.5 text-fg">{v}</dd>
-                </div>
-              ))}
-            </dl>
-            <Btn variant="danger" icon={Trash2} onClick={remove} loading={deleting} className="mt-auto self-start">
-              Delete
-            </Btn>
+            {details}
           </div>
-        </div>
-      )}
+        ) : (
+          <Viewer
+            media={
+              asset.kind === 'video' ? (
+                <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className={viewerMedia} />
+              ) : (
+                <img src={asset.url} alt={asset.name ?? ''} className={viewerMedia} />
+              )
+            }
+          >
+            {details}
+          </Viewer>
+        ))}
     </Modal>
   )
 }

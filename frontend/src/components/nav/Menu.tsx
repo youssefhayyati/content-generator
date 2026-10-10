@@ -5,7 +5,7 @@ import { useLenis } from 'lenis/react'
 import { cn } from '../../lib/cn'
 import { ease, easeInOut } from '../../lib/motion'
 import { formatTime, useClock } from '../../lib/useClock'
-import { Link } from '../../lib/router'
+import { Link, queueSection, useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import { NAV } from './links'
 
@@ -27,13 +27,19 @@ export function Menu({
 }) {
   const lenis = useLenis()
   const { user } = useSession()
+  const { path, navigate } = useRouter()
   const [hovered, setHovered] = useState<number | null>(null)
 
-  // Lenis ignores scrollTo while stopped, so restart it before jumping.
+  // Lenis ignores scrollTo while stopped, so restart it before jumping. Away from home, go there first.
   const go = (e: MouseEvent<HTMLAnchorElement>, href: string) => {
     e.preventDefault()
     onClose()
-    if (lenis) {
+    // A page of its own (the showcase) rather than a section of this one.
+    if (href.startsWith('/')) navigate(href)
+    else if (path !== '/') {
+      queueSection(href)
+      navigate('/')
+    } else if (lenis) {
       lenis.start()
       lenis.scrollTo(href, { offset: -80 })
     } else {

@@ -8,12 +8,13 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type PostFormat, type Provider, type User } from '../../lib/api'
 import { authApi, authErrorMessage, browserTimezone, oauthUrl } from '../../lib/auth'
 import { cn } from '../../lib/cn'
+import { useCursorChoice } from '../../lib/cursor'
 import { useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import { PLATFORM_ORDER, useInvalidate } from '../data'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
-import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Stagger } from '../ui'
+import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Stagger, Toggle } from '../ui'
 
 const FORMATS: Array<{ id: PostFormat; label: string; icon: typeof Type }> = [
   { id: 'text', label: 'Text', icon: Type },
@@ -33,7 +34,6 @@ export default function Settings() {
   return (
     <div>
       <PageHeader
-        eyebrow="Settings"
         title={
           <>
             Your <Serif>account.</Serif>
@@ -277,9 +277,17 @@ function Defaults() {
 /* ------------------------------------------------------------------ */
 
 function Appearance() {
+  const [cursor, setCursor] = useCursorChoice()
   return (
-    <Section title="Appearance" body="The palette for the studio and the site. It changes right away and is remembered on this device.">
+    <Section title="Appearance" body="The palette and the cursor, for the studio and the site. Both change right away and are remembered on this device.">
       <PalettePicker />
+      <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
+        <div>
+          <p className="text-[13px] font-medium">Custom cursor</p>
+          <p className="text-[11.5px] text-dim">A crisper pointer in the palette's colour, here and on the site. Turn it off to use your system cursor.</p>
+        </div>
+        <Toggle on={cursor} onChange={setCursor} label="Custom cursor" />
+      </div>
     </Section>
   )
 }
@@ -418,10 +426,11 @@ function SignInMethods() {
               </div>
               <button
                 type="button"
-                disabled={busy !== null}
+                // Nothing to connect to until the server has this provider's credentials.
+                disabled={busy !== null || (!linked && !!ready && !ready[p.id])}
                 onClick={() => (linked ? disconnect(p.id) : connect(p.id))}
                 className={cn(
-                  'flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] transition-colors disabled:opacity-60',
+                  'flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] transition-colors disabled:pointer-events-none disabled:opacity-40',
                   linked ? 'border-line text-muted hover:border-fail/40 hover:text-fail' : 'border-white/25 text-fg hover:bg-white/5',
                 )}
               >

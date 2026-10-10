@@ -15,7 +15,14 @@ export type User = {
   email_verified: boolean
   avatar_url: string | null
   timezone: string | null
-  preferences: { platforms: PlatformId[]; formats: PostFormat[] }
+  preferences: {
+    platforms: PlatformId[]
+    formats: PostFormat[]
+    /** 'pending' from sign-up until the welcome is finished or skipped. */
+    onboarding: 'pending' | 'done'
+    /** The studio's name, from onboarding; null means "{first name}'s studio". */
+    studio: string | null
+  }
   has_password: boolean
   /** The stop button: while true, nothing publishes automatically. */
   publishing_paused: boolean

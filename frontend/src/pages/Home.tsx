@@ -11,6 +11,7 @@ import { Features } from '../components/Features'
 import { FinalCTA } from '../components/FinalCTA'
 import { Footer } from '../components/Footer'
 import { Hero } from '../components/Hero'
+import { MadeWith } from '../components/MadeWith'
 import { MultiPlatform } from '../components/MultiPlatform'
 import { Navbar } from '../components/Navbar'
 import { Problem } from '../components/Problem'
@@ -22,7 +23,7 @@ import { Workflow } from '../components/Workflow'
 import { PaperChapter } from '../components/ui/Plate'
 import { Preloader } from '../components/ui/Preloader'
 import { Thread } from '../components/ui/Thread'
-import { isInitialRoute, useDocumentTitle, useEntryDelay } from '../lib/router'
+import { isInitialRoute, takeSection, useDocumentTitle, useEntryDelay } from '../lib/router'
 
 export default function Home() {
   useDocumentTitle('FlowAI — Create once. Publish everywhere.')
@@ -45,6 +46,13 @@ export default function Home() {
     if (!lenis) return
     if (ready) lenis.start()
     else lenis.stop()
+  }, [lenis, ready])
+
+  // Arrived from a section link on another page: jump straight to that section.
+  useEffect(() => {
+    if (!lenis || !ready) return
+    const s = takeSection()
+    if (s) lenis.scrollTo(s, { offset: -80, immediate: true, force: true })
   }, [lenis, ready])
 
   return (
@@ -70,6 +78,7 @@ export default function Home() {
             <Features />
           </PaperChapter>
           <UseCases />
+          <MadeWith />
           <Security />
           <FinalCTA />
         </main>

@@ -5,6 +5,7 @@ import {
   Cpu,
   ChartColumn,
   Flame,
+  GalleryVerticalEnd,
   FolderOpen,
   Inbox,
   LayoutGrid,
@@ -40,7 +41,7 @@ export type NavGroup = { label: string | null; items: NavItem[] }
 
 export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
 
-/** The studio's pages, in the order the sidebar shows them. Page numbers follow this order. */
+/** The studio's pages, in the order the sidebar shows them. */
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: null,
@@ -59,6 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
       { path: '/dashboard/create', label: 'Composer', icon: PenLine },
       { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
+      { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
     ],
   },
   {
@@ -96,6 +98,3 @@ export const NAV_GROUPS: NavGroup[] = [
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
 export const pageLabel = (path: string) => NAV.find((n) => n.path === path)?.label ?? 'Overview'
-
-/** "04" for the fourth page in the sidebar: the number in each page's header. */
-export const pageIndex = (path: string) => String(Math.max(1, NAV.findIndex((n) => n.path === path) + 1)).padStart(2, '0')

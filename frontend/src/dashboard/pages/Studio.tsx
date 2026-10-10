@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUpRight, CalendarClock, Check, FileText, FolderKanban, ImagePlus, PenLine, Plus, Sparkles, Wand2, X } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, Check, FileText, FolderKanban, ImagePlus, LayoutTemplate, PenLine, Plus, Sparkles, Wand2, X } from 'lucide-react'
 import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import { api, type Asset, type Generation, type ModelInfo, type Project, type Registry } from '../../lib/api'
@@ -15,6 +15,8 @@ import { CanvasView } from '../studio/Canvas'
 import { GenerationCard, ModelPicker, useGenerations } from '../studio/parts'
 import { messageFor, retryGeneration, runMedia, runText } from '../studio/run'
 import { useToast } from '../toast'
+import { Examples } from '../Examples'
+import { promptOf } from '../../showcase/cases'
 import { useUser } from '../Shell'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../ui'
 
@@ -49,7 +51,6 @@ function StudioHome() {
   return (
     <div>
       <PageHeader
-        eyebrow="Creative Lab"
         title={
           <>
             Make <Serif>anything.</Serif>
@@ -114,11 +115,18 @@ const CREATIVE_STARTS = {
 
 function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'video'; models: ModelInfo[]; defaultText: string }) {
   const incomingPrompt = useQueryParam('prompt')
+  const incomingRatio = useQueryParam('ratio')
+  const incomingModel = useQueryParam('model')
   const toast = useToast()
   const usable = models.filter((m) => m.kind === kind)
-  const [model, setModel] = useState<string | null>(kind === 'text' ? defaultText : (usable.find((m) => m.available)?.id ?? usable[0]?.id ?? null))
+  // A showcase case asks for the model it was made with, when this studio can run it.
+  const usableModel = (id: string | null) => usable.find((m) => m.id === id && m.available)?.id
+  const [model, setModel] = useState<string | null>(
+    kind === 'text' ? defaultText : (usableModel(incomingModel) ?? usable.find((m) => m.available)?.id ?? usable[0]?.id ?? null),
+  )
   const [prompt, setPrompt] = useState(incomingPrompt ?? '')
-  const [ratio, setRatio] = useState(kind === 'video' ? '9:16' : '4:5')
+  const [ratio, setRatio] = useState(incomingRatio ?? (kind === 'video' ? '9:16' : '4:5'))
+  const [examples, setExamples] = useState(false)
   const [duration, setDuration] = useState(kind === 'video' ? 8 : 5)
   const [resolution, setResolution] = useState<string | null>(null)
   const [audio, setAudio] = useState(true)
@@ -251,9 +259,18 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
             </div>
           )}
 
-          <label className="block">
-            <Label>{kind === 'video' ? 'Motion' : 'Prompt'}</Label>
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <Label>{kind === 'video' ? 'Motion' : 'Prompt'}</Label>
+              {kind !== 'text' && (
+                <button type="button" onClick={() => setExamples(true)} className="flex items-center gap-1 text-[11.5px] text-dim transition-colors hover:text-fg">
+                  <LayoutTemplate className="size-3" strokeWidth={1.75} />
+                  Examples
+                </button>
+              )}
+            </div>
             <textarea
+              aria-label={kind === 'video' ? 'Motion' : 'Prompt'}
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value)
@@ -270,7 +287,25 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
               }
               className={cn(inputClass, 'mt-2 h-auto resize-none py-2.5 leading-snug')}
             />
-          </label>
+            {kind !== 'text' && (
+              <Examples
+                open={examples}
+                onClose={() => setExamples(false)}
+                only={(c) => !!promptOf(c) && !!c.video === (kind === 'video')}
+                action="Use this prompt"
+                describe={(c) => promptOf(c)?.prompt ?? c.brief}
+                onUse={(c) => {
+                  const p = promptOf(c)
+                  if (!p) return
+                  setPrompt(p.prompt)
+                  setRatio(p.ratio)
+                  setModel((m) => usableModel(p.model) ?? m)
+                  setError(null)
+                  setExamples(false)
+                }}
+              />
+            )}
+          </div>
 
           {kind !== 'text' && caps.aspect_ratios?.length !== 0 && (
             <div>

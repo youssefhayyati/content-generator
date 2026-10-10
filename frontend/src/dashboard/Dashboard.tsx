@@ -7,6 +7,7 @@ import { useSession } from '../lib/session'
 import { AssistantDock } from './assistant/Dock'
 import { AssistantProvider } from './assistant/store'
 import { DataProvider } from './data'
+import { Onboarding } from './onboarding/Onboarding'
 import Accounts from './pages/Accounts'
 import Analytics from './pages/Analytics'
 import Assistant from './pages/Assistant'
@@ -27,6 +28,7 @@ import Phones from './pages/Phones'
 import Publishing from './pages/Publishing'
 import Reposts from './pages/Reposts'
 import Settings from './pages/Settings'
+import Showcase from './pages/Showcase'
 import Studio from './pages/Studio'
 import { pageLabel } from './nav'
 import { Shell } from './Shell'
@@ -42,6 +44,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/studio': Studio,
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
+  '/dashboard/showcase': Showcase,
   '/dashboard/library': Library,
   '/dashboard/inspire': Inspire,
   '/dashboard/calendar': Calendar,
@@ -80,6 +83,8 @@ export default function Dashboard() {
             <Pages />
           </Shell>
           <AssistantDock />
+          {/* A new account's first minute, over the studio it is setting up. */}
+          <AnimatePresence>{user.preferences.onboarding === 'pending' && <Onboarding key="onboarding" />}</AnimatePresence>
         </AssistantProvider>
       </ToastProvider>
     </DataProvider>

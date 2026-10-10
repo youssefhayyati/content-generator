@@ -13,7 +13,18 @@ import { Btn, Label, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../
 
 type Evals = { tasks: Record<string, string>; results: Record<string, Record<string, { score: number; detail: string | null; output: string | null; at: string }>> }
 
-const PROVIDER_NAME: Record<string, string> = { anthropic: 'Anthropic', gateway: 'Model gateway', groq: 'Groq', openrouter: 'OpenRouter', ollama_cloud: 'Ollama Cloud', ollama: 'Ollama', higgsfield: 'Higgsfield' }
+const PROVIDER_NAME: Record<string, string> = {
+  anthropic: 'Anthropic',
+  gateway: 'Model gateway',
+  groq: 'Groq',
+  openrouter: 'OpenRouter',
+  ollama_cloud: 'Ollama Cloud',
+  ollama: 'Ollama',
+  higgsfield: 'Higgsfield',
+  google: 'Google Gemini',
+  voicestudio: 'VoiceStudio',
+  sound: 'FlowAI Sound',
+}
 
 /** /dashboard/models: the registry of local and cloud models, connectors, evals and recipes. */
 export default function Models() {
@@ -23,7 +34,6 @@ export default function Models() {
   return (
     <div>
       <PageHeader
-        eyebrow="Models"
         title={
           <>
             Every model, <Serif>one list.</Serif>
@@ -47,21 +57,24 @@ export default function Models() {
               title="Registry"
               sub={`${registry.models.filter((m) => m.available).length} of ${registry.models.length} models can run`}
               actions={
-                <Segmented
-                  id="model-kind"
-                  label="Kind"
-                  value={kind}
-                  onChange={setKind}
-                  options={[
-                    { value: 'all', label: 'All' },
-                    { value: 'text', label: 'Text' },
-                    { value: 'image', label: 'Image' },
-                    { value: 'video', label: 'Video' },
-                    { value: 'voice', label: 'Voice' },
-                    { value: 'music', label: 'Music' },
-                    { value: 'listen', label: 'Listen' },
-                  ]}
-                />
+                // Seven kinds don't fit a phone: they scroll sideways there.
+                <div className="no-scrollbar min-w-0 overflow-x-auto">
+                  <Segmented
+                    id="model-kind"
+                    label="Kind"
+                    value={kind}
+                    onChange={setKind}
+                    options={[
+                      { value: 'all', label: 'All' },
+                      { value: 'text', label: 'Text' },
+                      { value: 'image', label: 'Image' },
+                      { value: 'video', label: 'Video' },
+                      { value: 'voice', label: 'Voice' },
+                      { value: 'music', label: 'Music' },
+                      { value: 'listen', label: 'Listen' },
+                    ]}
+                  />
+                </div>
               }
               bodyClassName="p-0"
             >
@@ -107,7 +120,7 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
           {p.local ? <HardDrive className="size-4" strokeWidth={1.75} /> : <PlugZap className="size-4" strokeWidth={1.75} />}
         </span>
         <div className="min-w-0">
-          <p className="text-[13.5px] font-medium">{PROVIDER_NAME[p.id]}</p>
+          <p className="text-[13.5px] font-medium">{PROVIDER_NAME[p.id] ?? p.id}</p>
           <p className="font-mono text-[10.5px] text-dim">
             {p.local ? 'Local' : 'Cloud'} · {p.reach}
           </p>
