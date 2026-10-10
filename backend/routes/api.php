@@ -5,6 +5,7 @@ use App\Http\Controllers\AccountVoiceController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AssetController;
+use App\Http\Controllers\AssistantController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\NewPasswordController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\SocialAccountController;
 use App\Http\Controllers\SoundController;
 use App\Http\Controllers\SpecController;
 use App\Http\Controllers\StormGuardController;
+use App\Http\Controllers\TrendController;
 use App\Http\Controllers\WritingController;
 use Illuminate\Support\Facades\Route;
 
@@ -67,6 +69,12 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    // Inspire. Every search bills the Apify account, so the rate limit is tight.
+    Route::get('trends', [TrendController::class, 'index'])->middleware('throttle:20,1');
+    // Saved searches come from our own database, so they are not rate limited.
+    Route::get('trends/searches', [TrendController::class, 'searches']);
+    Route::post('trends/derive-prompt', [TrendController::class, 'derivePrompt'])->middleware('throttle:20,1');
+
     Route::get('inspirations/discover', [InspirationController::class, 'discover'])->middleware('throttle:30,1');
     Route::get('inspirations', [InspirationController::class, 'index']);
     Route::post('inspirations', [InspirationController::class, 'store']);
@@ -76,6 +84,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('user', [ProfileController::class, 'destroy']);
     Route::put('user/password', PasswordController::class);
     Route::delete('user/social/{provider}', [SocialAccountController::class, 'destroy']);
+
+    // The voice assistant's session: a token it works with as this user (drafts only).
+    Route::post('assistant/session', [AssistantController::class, 'session']);
 
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);

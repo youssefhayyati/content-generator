@@ -5,14 +5,18 @@ namespace App\Http\Requests;
 use App\Enums\Platform;
 use App\Enums\PostFormat;
 use App\Enums\PostStatus;
+use App\Http\Controllers\AssistantController;
 use App\Models\Account;
 use App\Services\Publishing\PlatformSpecs;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class SavePostRequest extends FormRequest
 {
+    private const ASSISTANT_DRAFTS = 'The assistant saves drafts; scheduling needs your approval on the Assistant page.';
+
     /**
      * Get the validation rules that apply to the request.
      *
@@ -22,6 +26,9 @@ class SavePostRequest extends FormRequest
     {
         // Picking a time by hand means it has to be in the future; the queue picks its own.
         $scheduling = $this->input('status') === PostStatus::Scheduled->value && ! $this->boolean('queue');
+        // Any status but draft counts as the person's approval (PostController::fill), so the voice
+        // assistant saves drafts only; the person schedules them on the Assistant page.
+        $assistant = $this->byAssistant();
 
         return [
             'title' => ['nullable', 'string', 'max:120'],
@@ -30,13 +37,13 @@ class SavePostRequest extends FormRequest
             'platforms' => ['required', 'array', 'min:1'],
             'platforms.*' => ['distinct', Rule::enum(Platform::class)],
             // Publishing, submitted and failed come from publishing runs, not from the composer.
-            'status' => ['required', Rule::in(array_map(fn (PostStatus $s) => $s->value, PostStatus::chosenByHand()))],
+            'status' => ['required', Rule::in($assistant ? [PostStatus::Draft->value] : array_map(fn (PostStatus $s) => $s->value, PostStatus::chosenByHand()))],
             'account_id' => ['nullable', Rule::exists('accounts', 'id')->where('user_id', $this->user()->id)],
             'placement' => ['nullable', 'string', 'max:20'],
             'asset_ids' => ['nullable', 'array', 'max:35'],
             'asset_ids.*' => ['integer', 'distinct', Rule::exists('assets', 'id')->where('user_id', $this->user()->id)],
-            'queue' => ['sometimes', 'boolean'],
-            'scheduled_at' => $scheduling ? ['required', 'date', 'after:now'] : ['nullable', 'date'],
+            'queue' => $assistant ? ['prohibited'] : ['sometimes', 'boolean'],
+            'scheduled_at' => $assistant ? ['prohibited'] : ($scheduling ? ['required', 'date', 'after:now'] : ['nullable', 'date']),
         ];
     }
 
@@ -50,6 +57,7 @@ class SavePostRequest extends FormRequest
             'platforms.min' => 'Pick at least one platform.',
             'scheduled_at.required' => 'Pick a date and time to publish.',
             'scheduled_at.after' => 'That time has already passed. Pick one in the future.',
+            ...($this->byAssistant() ? array_fill_keys(['status.in', 'queue.prohibited', 'scheduled_at.prohibited'], self::ASSISTANT_DRAFTS) : []),
         ];
     }
 
@@ -91,6 +99,14 @@ class SavePostRequest extends FormRequest
                 }
             },
         ];
+    }
+
+    /** Sent by the voice assistant, with the token the Assistant page gave it (AssistantController). */
+    public function byAssistant(): bool
+    {
+        $token = $this->user()->currentAccessToken();
+
+        return $token instanceof PersonalAccessToken && $token->can(AssistantController::ABILITY);
     }
 
     public function account(): ?Account

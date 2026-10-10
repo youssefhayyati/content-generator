@@ -4,9 +4,12 @@ import { authErrorMessage } from '../lib/auth'
 import { ease } from '../lib/motion'
 import { useDocumentTitle, useRouter } from '../lib/router'
 import { useSession } from '../lib/session'
+import { AssistantDock } from './assistant/Dock'
+import { AssistantProvider } from './assistant/store'
 import { DataProvider } from './data'
 import Accounts from './pages/Accounts'
 import Analytics from './pages/Analytics'
+import Assistant from './pages/Assistant'
 import Automations from './pages/Automations'
 import Calendar from './pages/Calendar'
 import Campaigns from './pages/Campaigns'
@@ -14,6 +17,7 @@ import Comments from './pages/Comments'
 import Create from './pages/Create'
 import Flows from './pages/Flows'
 import Inbox from './pages/Inbox'
+import Inspire from './pages/Inspire'
 import Investigations from './pages/Investigations'
 import Library from './pages/Library'
 import LiveWall from './pages/Live'
@@ -34,10 +38,12 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/inbox': Inbox,
   '/dashboard/live': LiveWall,
   '/dashboard/accounts': Accounts,
+  '/dashboard/assistant': Assistant,
   '/dashboard/studio': Studio,
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
   '/dashboard/library': Library,
+  '/dashboard/inspire': Inspire,
   '/dashboard/calendar': Calendar,
   '/dashboard/automations': Automations,
   '/dashboard/flows': Flows,
@@ -67,10 +73,14 @@ export default function Dashboard() {
   return (
     <DataProvider>
       <ToastProvider>
-        <Shell>
-          <Arrivals />
-          <Pages />
-        </Shell>
+        {/* Above the pages, so a conversation with the assistant carries on from page to page. */}
+        <AssistantProvider>
+          <Shell>
+            <Arrivals />
+            <Pages />
+          </Shell>
+          <AssistantDock />
+        </AssistantProvider>
       </ToastProvider>
     </DataProvider>
   )

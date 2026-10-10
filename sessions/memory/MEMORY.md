@@ -1,0 +1,3 @@
+- [FlowAI edits](flowai-read-only.md) — content-generator/ was read-only; since 2026-10-10 agent-integration edits there are OK
+- [Browser testing](browser-testing.md) — Playwright via Docker image + TCP forward to WSL; fake mic WAV; never pkill -f vite
+- [FlowAI formatting](flowai-no-prettier.md) — no Prettier config, hand-formatted; never prettier --write existing files

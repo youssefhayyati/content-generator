@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureAgentToken;
+use App\Http\Middleware\LimitAssistantToken;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,6 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // The automation service signs its calls with the studio's agent token instead.
         $middleware->alias(['agent' => EnsureAgentToken::class]);
+
+        // The voice assistant works with a token of the person who opened it: only what its tools need.
+        $middleware->api(append: [LimitAssistantToken::class]);
 
         // There are no Laravel login pages; send stray browsers to the React one.
         $middleware->redirectGuestsTo(fn () => config('app.frontend_url').'/login');

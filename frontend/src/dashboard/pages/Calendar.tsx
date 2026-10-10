@@ -308,7 +308,7 @@ export default function Calendar() {
 
 /* ------------------------------------------------------------------ */
 
-function WeekGrid({
+export function WeekGrid({
   days,
   posts,
   ready,
@@ -317,6 +317,7 @@ function WeekGrid({
   onSelect,
   onCreate,
   onMove,
+  drop,
 }: {
   days: Date[]
   posts: Post[]
@@ -327,6 +328,8 @@ function WeekGrid({
   onSelect: (id: number) => void
   onCreate: (at: Date) => void
   onMove: (post: Post, at: Date) => void
+  /** Something else that can be dragged onto a slot (the assistant's drafts): its drag type, and what to do with it. */
+  drop?: { type: string; onDrop: (at: Date, value: string) => void }
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const firstColumn = useRef<HTMLDivElement>(null)
@@ -410,6 +413,20 @@ function WeekGrid({
                   setGhost(slotAt(di, e))
                 }}
                 onPointerLeave={() => setGhost(null)}
+                onDragOver={(e) => {
+                  if (!drop || !e.dataTransfer.types.includes(drop.type)) return
+                  e.preventDefault()
+                  setGhost(slotAt(di, e))
+                }}
+                onDragLeave={() => setGhost(null)}
+                onDrop={(e) => {
+                  if (!drop || !e.dataTransfer.types.includes(drop.type)) return
+                  e.preventDefault()
+                  setGhost(null)
+                  const at = new Date(d)
+                  at.setHours(0, slotAt(di, e).minutes, 0, 0)
+                  drop.onDrop(at, e.dataTransfer.getData(drop.type))
+                }}
                 onClick={(e) => {
                   if (e.target !== e.currentTarget) return
                   const { minutes } = slotAt(di, e)
@@ -518,7 +535,7 @@ function WeekGrid({
 }
 
 /** Phones get a list per day instead of the grid. */
-function Agenda({ days, posts, now, onSelect }: { days: Date[]; posts: Post[]; now: Date; onSelect: (id: number) => void }) {
+export function Agenda({ days, posts, now, onSelect }: { days: Date[]; posts: Post[]; now: Date; onSelect: (id: number) => void }) {
   return (
     <div className="divide-y divide-line md:hidden">
       {days.map((d) => {

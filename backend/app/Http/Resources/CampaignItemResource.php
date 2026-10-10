@@ -59,6 +59,8 @@ class CampaignItemResource extends JsonResource
                 'mode' => $v->mode,
                 'caption' => $v->caption,
                 'placement' => $v->placement,
+                // Its own media for this account; null: it shares the item's.
+                'assets' => $v->asset_ids !== null ? $v->assets()->map->summary() : null,
                 'checks' => $v->checks,
                 'qa' => $v->qa,
                 'status' => $v->status,

@@ -106,6 +106,57 @@ The Sound service keeps one model in memory at a time and unloads when idle (abo
 rest, under 1 GB at its busiest). Without it, everything else works and the Sound tab says how
 to start it: `docker compose up -d sound`.
 
+## The assistant
+
+**Assistant** (`/dashboard/assistant`) is a voice agent you talk to, or type to. It makes Instagram and X
+posts as drafts you watch take shape, changes them when you ask ("make the headline gold", "now
+the same for X"), saves them as FlowAI drafts and books them once you approve. Everything it makes
+can also be changed by hand on the page:
+- **Draft:** the post as the platform shows it. Click a text to select it ("make this bigger"),
+  double-click to rewrite it, drag slides to reorder them, drop a picture on a slide. The caption,
+  styles and placement are in the panel beside it. Fonts come by style (modern, poster, elegant,
+  handwritten, playful, retro, mono), each previewed in your words. A text's colours start with the picture's own,
+  and the ones that would be hard to read where it sits are marked, next to looks that read well.
+- **Part of a picture:** **Paint to change part of it**, paint over something, then remove it,
+  replace it, change it or improve it, or just say "remove this". Only the painted part changes.
+- **Video with voice:** a draft's pictures, one or several, become a reel. They slowly zoom and
+  pan while the assistant's voice reads a line over each, with captions, music from FlowAI Sound
+  and an end card ("Order now"). It's kept as its own draft, which can be made again.
+- **Media:** the conversation's numbered pictures and your gallery.
+- **Calendar:** your week. Drop a draft on a slot to book it there, or click an empty slot to ask for
+  a post at that time.
+
+The conversation stays open while you visit other pages, with a small dock to come back.
+
+**Conversations are kept**, so you can run one per campaign or per client:
+- **The list:** the icon at the top of the conversation lists them all, newest first. Start a
+  new one, open, rename, delete or search them there.
+- **Picking one up again:** each keeps its drafts, pictures and history. After a reload, or
+  coming back days later, you're back where you were. A picture still being made lands in its
+  own conversation, even after you've switched.
+- **Open a campaign** (on the Assistant page, or **Open in the assistant** on a campaign) brings
+  a campaign's posts in as drafts, one for each account's version. Change them by voice ("make
+  every caption shorter") or by hand, then save. Saving changes the campaign itself. A changed
+  version goes back to gate 6B, and you approve it right there; its booked times take the new
+  version.
+
+**The voice** is yours to pick, under the message box: any voice ready on the voice server, or one
+of its catalog of over a thousand, searched by words like “british”, “deep” or “narration”, with ▶
+to hear it first. Every sentence is said in that voice, in all your conversations, and it stays
+picked after a reload.
+
+It is its own service (`assistant/`, Python, needs an NVIDIA GPU) and starts only when asked:
+
+```sh
+cp assistant/.env.example assistant/.env      # once: OLLAMA_API_KEY at least
+docker compose --profile assistant up -d      # no GPU: --profile assistant-cpu, with TTS_URL set
+```
+
+The first start downloads its speech models (about 6 GB). The Vite proxy serves it at
+`/assistant/`. It works as whoever opens the page: the page gets it a token
+(`POST /api/assistant/session`) that can save drafts but not schedule. Approving on the page books
+the post with your own session.
+
 ## Real phones
 
 Same loop with a physical Android phone: log a **test** account into the app on the phone,
@@ -138,7 +189,7 @@ Keys go in `backend/.env`, then `docker compose restart api`:
 ## Everyday commands
 
 ```sh
-docker compose exec api php artisan test --testsuite=Feature   # backend tests (166)
+docker compose exec api php artisan test --testsuite=Feature   # backend tests (185)
 docker compose exec api vendor/bin/pint         # PHP style
 npm run build                                   # in frontend/: type-check + build
 docker compose logs -f worker                   # queue log (agents, media, publishing)
@@ -152,5 +203,6 @@ docker compose exec api php artisan migrate     # after adding a migration
 - `publishing-agent/` — the phone-driving worker (`agent.py`, Python)
 - `publishing-studio/` — the device layer it uses (adb + simulator, Instagram/X recipes, named targets)
 - `sound/` — FlowAI Sound: voices, listening and the composer (Python, CPU)
+- `assistant/` — the voice assistant behind the Assistant page (Python, GPU; copied from the gamechange repo, where it's developed)
 - `demo/` — the one-command full cycle
 - `deploy/` — production stack for the VPS (nginx + PHP-FPM + Postgres)

@@ -1,8 +1,10 @@
 import {
+  AudioWaveform,
   CalendarClock,
   CalendarDays,
   Cpu,
   ChartColumn,
+  Flame,
   FolderOpen,
   Inbox,
   LayoutGrid,
@@ -47,6 +49,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Create',
     items: [
+      { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
       { path: '/dashboard/create', label: 'Composer', icon: PenLine },
@@ -64,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Plan',
     items: [
+      { path: '/dashboard/inspire', label: 'Inspire', icon: Flame },
       { path: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays, count: (o) => o.counts.scheduled },
       { path: '/dashboard/library', label: 'Gallery', icon: FolderOpen, count: (o) => o.counts.total },
       { path: '/dashboard/automations', label: 'Automations', icon: CalendarClock },
