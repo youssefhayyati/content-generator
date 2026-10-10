@@ -326,6 +326,8 @@ function Composer({ onVoice }: { onVoice: () => void }) {
   const d = a.focus.draft ? a.drafts[a.focus.draft] : undefined
   const text = d && a.focus.text ? d.slides.flatMap((s) => s.texts).find((t) => t.id === a.focus.text) : undefined
   const selected = d && a.focus.text ? `Text ${a.focus.text}${text ? ` “${text.words}”` : ''}` : d && a.focus.slide ? `Slide ${a.focus.slide} of draft ${d.id}` : null
+  // The post a request changes when it doesn't name one: the one on screen
+  const onScreen = a.current ? a.drafts[a.current] : undefined
 
   // Grow with what's typed, up to a few lines.
   useLayoutEffect(() => {
@@ -366,6 +368,13 @@ function Composer({ onVoice }: { onVoice: () => void }) {
           </motion.div>
         )}
       </AnimatePresence>
+      {!selected && onScreen && a.tab === 'draft' && (
+        <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-dim">
+          <span className="w-0 min-w-0 flex-1 truncate">
+            Changes go to <span className="text-muted">{onScreen.title || `Draft ${onScreen.id}`}</span> · {onScreen.label}
+          </span>
+        </p>
+      )}
       <div className="flex items-end gap-2 rounded-lg border border-line-2 bg-white/[0.02] p-1.5 transition-[border-color,box-shadow] focus-within:border-accent-soft/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_18%,transparent)]">
         <button type="button" onClick={() => file.current?.click()} aria-label="Attach a picture or video" className="grid size-8 shrink-0 place-items-center rounded-md text-dim hover:bg-white/[0.05] hover:text-fg">
           <Paperclip className="size-4" strokeWidth={1.75} />

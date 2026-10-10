@@ -34,9 +34,13 @@ export type Slide = {
   /** Seconds, for a video. */
   duration?: number
 }
-/** How a video draft was made (make_video): from which draft, what the voice says over each picture… */
+/** How a draft's video was made (make_video): what the voice says over each picture… */
 export type VideoRecipe = {
+  /** The draft whose pictures it was made of: this one, or another for videos made before they went in place of the pictures. */
   from: number
+  /** Those pictures, by number (one line each), and their shape. */
+  pictures?: Array<number | null>
+  shape?: [number, number]
   lines: string[]
   cta: string
   cta_line: string
@@ -51,6 +55,18 @@ export type VideoRecipe = {
   voice?: Voice | null
 }
 export type Check = { key: string; status: 'pass' | 'warn' | 'fail'; label: string; detail: string }
+/** One version of a draft. Versions are a tree: changing an earlier one starts a branch from it. */
+export type Version = {
+  version: number
+  /** The version it was changed from; null for the first. */
+  parent: number | null
+  /** What changed, in a few words. */
+  label: string
+  /** Epoch seconds; null for versions kept before they had times. */
+  at: number | null
+  /** Its first slide as drawn. */
+  thumb: { url: string; kind: 'image' | 'video' } | null
+}
 export type Draft = {
   id: number
   version: number
@@ -66,10 +82,14 @@ export type Draft = {
   placements: string[]
   max_slides: number
   slides: Slide[]
-  /** A video made from another draft's pictures: how. */
+  /** A video made from pictures, in their place: how. */
   video: VideoRecipe | null
-  /** The video drafts made from this one. */
+  /** On a version with pictures: how its video was made last time. */
+  last_video: VideoRecipe | null
+  /** Separate video drafts made from this one (before videos went in place of the pictures). */
   videos: number[]
+  /** Every version kept, oldest first; `version` is the one on screen. */
+  versions: Version[]
   check: { ok: boolean; label: string; checks: Check[] }
 }
 /** A draft's post in FlowAI. */
@@ -291,6 +311,8 @@ export function describe(name: string, a: Record<string, unknown>): string {
       return `Removing text ${a.text_id}`
     case 'undo_draft':
       return 'Undoing the last change'
+    case 'draft_versions':
+      return a.version != null ? `Going back to version ${a.version}` : 'Looking at the history'
     case 'show_draft':
       return 'Showing the draft'
     case 'generate_media':
@@ -315,6 +337,14 @@ export function describe(name: string, a: Record<string, unknown>): string {
       return 'Looking through the gallery'
     case 'use_assets':
       return 'Bringing in pictures from the gallery'
+    case 'post_on_phone':
+      return 'Posting from the phone'
+    case 'post_feedback':
+      return 'Checking how the post is doing'
+    case 'phone_task':
+      return `Phone: ${a.instruction}`
+    case 'answer_phone':
+      return a.approve === false ? 'Telling the phone no' : 'Answering the phone'
     case 'get_current_time':
       return 'Checking the time'
     default:
@@ -476,7 +506,13 @@ function onEvent(s: State, m: AssistantEvent): State {
       return { ...s, jobs }
     }
     case 'draft': {
-      const d = { ...(m as unknown as Draft), slides: (m as unknown as Draft).slides.map((sl) => ({ ...sl, url: assistantUrl(sl.url) })) }
+      const raw = m as unknown as Draft
+      const d = {
+        ...raw,
+        slides: raw.slides.map((sl) => ({ ...sl, url: assistantUrl(sl.url) })),
+        versions: (raw.versions ?? []).map((v) => ({ ...v, thumb: v.thumb && { ...v.thumb, url: assistantUrl(v.thumb.url) } })),
+        last_video: raw.last_video ?? null,
+      }
       const isNew = !s.drafts[d.id]
       // Quiet: news about a draft in the background (its video list), not one to show
       if (m.quiet && !isNew) return { ...s, drafts: { ...s.drafts, [d.id]: d } }
@@ -492,6 +528,10 @@ function onEvent(s: State, m: AssistantEvent): State {
     }
     case 'browser_task':
       return push(s, { kind: 'note', text: `Website task ${m.status}${m.text ? `: ${m.text}` : ''}`, tone: 'info' })
+    case 'phone_task': {
+      const what = m.kind === 'post' ? 'Posting from the phone' : m.kind === 'feedback' ? 'Feedback check' : 'Phone task'
+      return push(s, { kind: 'note', text: `${what} ${m.status}${m.text ? `: ${m.text}` : ''}`, tone: m.status === 'failed' ? 'error' : 'info' })
+    }
     default:
       return s
   }

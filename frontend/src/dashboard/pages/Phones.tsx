@@ -209,9 +209,11 @@ function AutomationService() {
             The automation service
           </h2>
           <p className="mt-1 max-w-2xl text-[12px] leading-snug text-dim">
-            The Python agent drives real phones against this API: it asks for the next job on its phone, reports steps and
+            The assistant drives real phones against this API: it asks for the next job on its phone, reports steps and
             screenshots as it goes, and finishes — with proof, a failure, or honestly uncertain. Every call is signed with
-            this token as <span className="font-mono text-[11px]">Authorization: Bearer …</span>.
+            this token as <span className="font-mono text-[11px]">Authorization: Bearer …</span>: put it in the
+            assistant’s <span className="font-mono text-[11px]">FLOWAI_AGENT_TOKEN</span>, and give the phone the device ID
+            the phone service uses (the team phone is <span className="font-mono text-[11px]">heracles-phone</span>).
           </p>
         </div>
         <div className="grid gap-5 px-5 py-4 lg:grid-cols-2">

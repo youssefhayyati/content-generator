@@ -13,7 +13,8 @@ import { describe, VoiceRow } from './Voices'
  * video has a voice of its own: one that suits the post unless the person picks another (session.py,
  * cast_voice), kept for when it's made again. Its music is a song written for it from a description
  * (ACE-Step, assistant/backend/music.py), the post's own unless the person describes another, or one
- * of FlowAI Sound's moods. It's made into a draft of its own; making it again changes that same draft.
+ * of FlowAI Sound's moods. The video takes the place of the post's pictures in the same draft (they
+ * stay in its history); making it again changes that same draft.
  */
 
 const SONG = { value: 'song', label: 'A song written for it' }
@@ -73,26 +74,47 @@ function formFrom(recipe: VideoRecipe | null | undefined, n: number, platform: s
   }
 }
 
-/** The Video section of a draft: make its pictures into a video, or make its video again. */
+type Picture = { url: string | null; kind: 'image' | 'video' }
+
+/** The pictures a draft's video is (or would be) made of, one voiceover line each, and their shape. */
+function picturesOf(d: Draft, a: ReturnType<typeof useAssistant>): { pictures: Picture[]; shape: [number, number] } | null {
+  if (!d.video) return { pictures: d.slides.map((s) => ({ url: s.url, kind: s.kind })), shape: d.size }
+  if (d.video.pictures) {
+    return {
+      pictures: d.video.pictures.map((n) => {
+        const p = a.pictures.find((x) => x.id === n)
+        return { url: p?.url ?? null, kind: p?.kind ?? 'image' }
+      }),
+      shape: d.video.shape ?? d.size,
+    }
+  }
+  // Made before videos went in place of the pictures: they're in the draft it was made from
+  const source = a.drafts[d.video.from]
+  return source && source.id !== d.id ? { pictures: source.slides.map((s) => ({ url: s.url, kind: s.kind })), shape: source.size } : null
+}
+
+/** The Video section of a draft: make its pictures into a video in its place, or make its video again. */
 export function VideoMaker({ d }: { d: Draft }) {
   const a = useAssistant()
-  // A video draft is made from another draft's pictures; a picture draft may have videos already
-  const source = d.video ? a.drafts[d.video.from] : d
-  const made = d.video ? d : d.videos.length ? a.drafts[d.videos[d.videos.length - 1]] : undefined
-  const recipe = made?.video
-  const n = source?.slides.length ?? 0
+  const source = picturesOf(d, a)
+  // How it was made, to make it again: its own video, the one made from these pictures last time, or
+  // (from before videos went in place of the pictures) a separate video draft
+  const older = !d.video && d.videos.length ? a.drafts[d.videos[d.videos.length - 1]] : undefined
+  const recipe = d.video ?? d.last_video ?? older?.video ?? null
+  const n = source?.pictures.length ?? 0
   const [form, setForm] = useState<Form>(() => formFrom(recipe, n, d.platform, a.songs))
-  const key = `${source?.id}-${made?.id}-${made?.version}-${n}-${a.songs}`
+  const key = `${d.id}-${d.version}-${older?.version}-${n}-${a.songs}`
   useEffect(() => setForm(formFrom(recipe, n, d.platform, a.songs)), [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const job = Object.values(a.jobs).find((j) => source && j.label === `Making the video of draft ${source.id}`)
-  const pictures = source?.slides.filter((s) => s.kind === 'image').length ?? 0
-  const hasVideoSlide = source?.slides.some((s) => s.kind === 'video')
+  const making = new Set([`Making the video of draft ${d.id}`, ...(d.video ? [`Making the video of draft ${d.video.from}`] : [])])
+  const job = Object.values(a.jobs).find((j) => making.has(j.label))
+  const pictures = source?.pictures.filter((s) => s.kind === 'image').length ?? 0
+  const hasVideoSlide = !d.video && d.slides.some((s) => s.kind === 'video')
   const written = form.lines.some((l) => l.trim())
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }))
 
   if (!source) {
-    return <p className="text-[12px] text-dim">The draft this video was made from is gone, so it can’t be made again.</p>
+    return <p className="text-[12px] text-dim">The pictures this video was made from are gone, so it can’t be made again. Go back to a version with pictures in the history.</p>
   }
   if (!d.video && (hasVideoSlide || !pictures)) {
     return (
@@ -121,29 +143,23 @@ export function VideoMaker({ d }: { d: Draft }) {
     })
   const writeForMe = () =>
     void a.say(
-      `Write a short voiceover for draft ${source.id}, one line per picture, with a call to action at the end, and make it into a video${form.music === 'song' ? (described ? ` with this music: ${described}` : ' with a song that suits the post') : form.music !== 'none' ? ` with ${form.music} music` : ' without music'}, ${form.voice ? `read by the voice ${form.voice.name} (voice ${form.voice.id})` : 'read by a voice that suits the post'}.`,
+      `Write a short voiceover for draft ${d.id}, one line per picture, with a call to action at the end, and make it into a video${form.music === 'song' ? (described ? ` with this music: ${described}` : ' with a song that suits the post') : form.music !== 'none' ? ` with ${form.music} music` : ' without music'}, ${form.voice ? `read by the voice ${form.voice.name} (voice ${form.voice.id})` : 'read by a voice that suits the post'}.`,
     )
 
   return (
     <div className="space-y-3.5">
       <p className="text-[12px] leading-relaxed text-muted">
         {d.video ? (
-          <>
-            Made from{' '}
-            <button type="button" className="text-fg underline decoration-white/25 underline-offset-2 hover:decoration-white/60" onClick={() => a.setCurrent(source.id)}>
-              draft {source.id}
-            </button>
-            ’s pictures. Change the words, music or end card and make it again.
-          </>
+          'Made from this post’s pictures (they’re in its history). Change the words, music or end card and make it again.'
         ) : (
           <>
-            The pictures move while a voice that suits the post reads a line over each, with captions and music.
-            {made && (
+            The pictures move while a voice that suits the post reads a line over each, with captions and music. The video takes their place in this post; they stay in its history.
+            {older && (
               <>
                 {' '}
-                Its video is{' '}
-                <button type="button" className="text-fg underline decoration-white/25 underline-offset-2 hover:decoration-white/60" onClick={() => a.setCurrent(made.id)}>
-                  draft {made.id}
+                An earlier video of it is{' '}
+                <button type="button" className="text-fg underline decoration-white/25 underline-offset-2 hover:decoration-white/60" onClick={() => a.setCurrent(older.id)}>
+                  draft {older.id}
                 </button>
                 .
               </>
@@ -154,11 +170,11 @@ export function VideoMaker({ d }: { d: Draft }) {
 
       <div className="space-y-2">
         {form.lines.map((line, i) => {
-          const s = source.slides[i]
+          const s = source.pictures[i]
           return (
             <div key={i} className="flex items-start gap-2.5">
-              <span className="relative mt-0.5 h-12 shrink-0 overflow-hidden rounded-md bg-[#1c1c1c]" style={{ aspectRatio: `${source.size[0]} / ${source.size[1]}` }}>
-                {s?.kind === 'image' && <img src={s.url} alt="" className="size-full object-cover" />}
+              <span className="relative mt-0.5 h-12 shrink-0 overflow-hidden rounded-md bg-[#1c1c1c]" style={{ aspectRatio: `${source.shape[0]} / ${source.shape[1]}` }}>
+                {s?.kind === 'image' && s.url && <img src={s.url} alt="" className="size-full object-cover" />}
                 <span className="absolute bottom-0.5 left-0.5 rounded bg-black/65 px-1 font-mono text-[9px] text-white">{i + 1}</span>
               </span>
               <textarea
@@ -178,7 +194,7 @@ export function VideoMaker({ d }: { d: Draft }) {
         })}
       </div>
 
-      <VideoVoice source={source} lines={form.lines} voice={form.voice} made={!!recipe?.voice} onChange={(voice) => set({ voice })} />
+      <VideoVoice draft={d.id} lines={form.lines} voice={form.voice} made={!!recipe?.voice} onChange={(voice) => set({ voice })} />
 
       <div>
         <Label className="mb-1.5">End card</Label>
@@ -284,7 +300,7 @@ export function VideoMaker({ d }: { d: Draft }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <Btn size="sm" variant="primary" icon={Clapperboard} onClick={make} disabled={!written || a.conn !== 'online' || (!!job && job.status !== 'failed')}>
-          {made ? 'Make it again' : 'Make the video'}
+          {d.video ? 'Make it again' : 'Make the video'}
         </Btn>
         {!d.video && (
           <Btn size="sm" variant="subtle" icon={Sparkles} onClick={writeForMe} disabled={a.conn !== 'online'}>
@@ -301,7 +317,7 @@ export function VideoMaker({ d }: { d: Draft }) {
  * change. Changing it finds the voices that fit a description, or without one, those that suit the
  * post best; the new one is used when the video is made (again).
  */
-function VideoVoice({ source, lines, voice, made, onChange }: { source: Draft; lines: string[]; voice: Voice | null; made: boolean; onChange: (v: Voice | null) => void }) {
+function VideoVoice({ draft, lines, voice, made, onChange }: { draft: number; lines: string[]; voice: Voice | null; made: boolean; onChange: (v: Voice | null) => void }) {
   const a = useAssistant()
   const speaking = useVoiceState(a.link) === 'speaking'
   const [open, setOpen] = useState(false)
@@ -313,11 +329,11 @@ function VideoVoice({ source, lines, voice, made, onChange }: { source: Draft; l
   // Without words: the voices that suit the post as it is now (its lines too); with words, as you type
   useEffect(() => {
     if (!open || !online) return
-    const t = window.setTimeout(() => find(source.id, q.trim(), lang, q.trim() ? undefined : lines.map((l) => l.trim())), q.trim() ? 300 : 0)
+    const t = window.setTimeout(() => find(draft, q.trim(), lang, q.trim() ? undefined : lines.map((l) => l.trim())), q.trim() ? 300 : 0)
     return () => window.clearTimeout(t)
-  }, [open, online, q, lang, source.id, find]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, online, q, lang, draft, find]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const list = a.videoVoices?.draft === source.id ? a.videoVoices : null
+  const list = a.videoVoices?.draft === draft ? a.videoVoices : null
   const searching = !list || list.q !== q.trim() || list.lang !== lang
   const chosen = (v: Voice) => !!voice && (v.id === voice.id || (!!v.catalog && v.id === voice.archetype))
   const pick = (v: Voice) => {

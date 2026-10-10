@@ -3,29 +3,35 @@
 A draft mirrors a FlowAI post (content-generator/backend/app/Models/Post.php): one platform and
 placement, a caption, and media in order. Each piece of media is a slide: a picture or video
 from this conversation (a MediaSession number) with texts drawn on top. Texts are drawn here
-with Pillow, never by the image model, so they are crisp, spelled right and easy to change.
+with Pillow, never by the image model, so they are crisp, spelled right and easy to change; on a
+video they are drawn on every frame (reel.burn).
 
 Every change makes a new version: it is rendered, checked against the platform's specs
-(platforms.py) and sent to the web UI. undo steps back through earlier versions. Rendered
-files are kept in MEDIA_DIR next to the pictures, served at /media.
+(platforms.py) and sent to the web UI. Versions are a tree: going back to an earlier one
+(checkout, or undo for its parent) and changing it starts a branch, and every version stays there
+to go back to. Rendered files are kept in MEDIA_DIR next to the pictures, served at /media.
+A change without a draft number is to the draft on screen (shown).
 
 Each slide also comes with the colours of its picture (for texts that match it), and each text with
 how readable it is where it sits; a text that is hard to read is a warning in the draft's check.
 Part of a slide's picture can be changed alone: the user paints over it on the page (a mask) and
 edit_area sends just that part to the editing model (retouch.py). And a draft can become a video
-with a voice over its pictures (make_video, reel.py), kept as a draft of its own; the voice is the
-video's own, one that suits it, and the user can change it.
+with a voice over its pictures (make_video, reel.py): the video takes the pictures' place in the same
+draft, and they are kept with it to make it again; the voice is the video's own, one that suits it,
+and the user can change it.
 """
 
 import asyncio
 import base64
 import colorsys
 import copy
+import hashlib
 import html
 import io
 import logging
 import random
 import re
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
@@ -45,7 +51,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-MAX_HISTORY = 30  # versions kept for undo, per draft
+MAX_VERSIONS = 40  # versions kept to go back to, per draft
 MAX_TEXT = 300
 POSITIONS = ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"]
 SIZES = {"small": 0.045, "medium": 0.065, "large": 0.09, "huge": 0.13}  # of the picture's shorter side
@@ -115,10 +121,61 @@ def _state_out(state: dict) -> dict:
     return {**state, "slides": [{"media": s.media, "texts": [asdict(t) for t in s.texts]} for s in state["slides"]]}
 
 
+def _slides_out(slides: list["Slide"]) -> list[dict]:
+    return [{"media": s.media, "texts": [asdict(t) for t in s.texts]} for s in slides]
+
+
+def _slides_in(data: list[dict]) -> list["Slide"]:
+    return [Slide(s.get("media"), [Text(**t) for t in s.get("texts", [])]) for s in data or []]
+
+
 def _state_in(data: dict) -> dict:
     state = {k: data[k] for k in Draft.EDITABLE if k in data}
-    state["slides"] = [Slide(s.get("media"), [Text(**t) for t in s.get("texts", [])]) for s in data.get("slides", [])]
+    state["slides"] = _slides_in(data.get("slides", []))
     return state
+
+
+def _changed(before: dict, after: dict) -> str:
+    """What a change did, in a few words, for the draft's history."""
+    if after.get("video") != before.get("video"):
+        if not after.get("video"):
+            return "Back to pictures"
+        return "Video made again" if before.get("video") else "Made into a video"
+    said = []
+    for k, label in (("placement", "Placement"), ("aspect", "Shape"), ("title", "Title"), ("caption", "Caption"),
+                     ("background", "Background")):
+        if before.get(k) != after.get(k):
+            said.append(f"Now a {after[k]}" if k == "placement" else label)
+    b, a = before.get("slides", []), after.get("slides", [])
+    if [s.media for s in b] != [s.media for s in a]:
+        if len(a) != len(b):
+            said.append("Slide added" if len(a) > len(b) else "Slide removed")
+        elif sorted(map(str, (s.media for s in a))) == sorted(map(str, (s.media for s in b))):
+            said.append("Slides reordered")
+        else:
+            n = [i for i, (x, y) in enumerate(zip(b, a), 1) if x.media != y.media]
+            said.append(f"New picture on slide {n[0]}" if len(n) == 1 else "Pictures changed")
+    old = {t.id: t for s in b for t in s.texts}
+    new = {t.id: t for s in a for t in s.texts}
+    for i in sorted(new.keys() - old.keys()):
+        said.append(f"Added “{_short(new[i].text)}”")
+    for i in sorted(old.keys() - new.keys()):
+        said.append(f"Removed “{_short(old[i].text)}”")
+    for i in sorted(old.keys() & new.keys()):
+        if old[i].text != new[i].text:
+            said.append(f"“{_short(new[i].text)}”")
+        elif old[i] != new[i]:
+            said.append(f"Restyled “{_short(new[i].text)}”")
+    if not said and [len(s.texts) for s in b] != [len(s.texts) for s in a]:
+        said.append("Text moved")
+    if not said:
+        return "Redrawn"
+    return " · ".join(said[:3]) + (f" +{len(said) - 3}" if len(said) > 3 else "")
+
+
+def _short(text: str, most: int = 28) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= most else text[:most - 1].rstrip() + "…"
 
 
 @dataclass
@@ -154,9 +211,14 @@ class Draft:
     background: str = BACKGROUND
     slides: list[Slide] = field(default_factory=list)
     text_count: int = 0
-    video: dict | None = None  # a video made with make_video: how (its lines, end card, music...) and from which draft
-    version: int = 0
-    history: list[dict] = field(default_factory=list)  # earlier states, newest last
+    # A video made with make_video: how (its lines, end card, music...), and the pictures it was made of
+    # (source: their slides, placement and shape) to make it again
+    video: dict | None = None
+    version: int = 0  # the version on screen; going back to an earlier one makes it that one again
+    # Every version kept, by number: {"parent": the version it was changed from (None for the first),
+    # "state": as state() gives it, "label": what changed, "at": when (epoch seconds), "thumb": its
+    # first slide as drawn}. Changing a version that isn't the newest starts a branch from it.
+    versions: dict[int, dict] = field(default_factory=dict)
     files: list[tuple[Path, File]] = field(default_factory=list)  # one per slide, as rendered
     boxes: list[list[dict]] = field(default_factory=list)  # per slide: where each text was drawn
     palettes: list[list[str]] = field(default_factory=list)  # per slide: its picture's colours
@@ -170,6 +232,18 @@ class Draft:
     def restore(self, state: dict):
         for k, v in copy.deepcopy(state).items():
             setattr(self, k, v)
+
+    @property
+    def parent(self) -> int | None:
+        return (self.versions.get(self.version) or {}).get("parent")
+
+    def line(self) -> list[int]:
+        """The versions the one on screen came from, oldest first, itself last."""
+        out, n = [], self.version
+        while n in self.versions and n not in out:
+            out.append(n)
+            n = self.versions[n].get("parent")
+        return out[::-1]
 
     @property
     def size(self) -> tuple[int, int]:
@@ -205,6 +279,9 @@ class StudioSession:
         self.send = send  # to the web UI; must not raise
         self.drafts: dict[int, Draft] = {}
         self.count = 0
+        # The draft on screen: the page shows the one it was last sent (unless quietly) or the one the
+        # user picked (session.py passes that on). A change without a draft number goes to it.
+        self.shown: int | None = None
         self.lock = asyncio.Lock()  # one change at a time, tools and finished generations alike
         # The area the user painted over on a slide (one at a time): draft, slide, the PNG, the draft's
         # size then, and where it is in words. seq goes up with every change, so the LLM is told once.
@@ -243,7 +320,7 @@ class StudioSession:
 
         self.count += 1
         draft = Draft(self.count, platform, platforms.DEFAULT_PLACEMENT[platform])
-        result = await self._apply(draft, fill, record=False)
+        result = await self._apply(draft, fill)
         if "error" in result:
             self.count -= 1
             return result
@@ -310,23 +387,48 @@ class StudioSession:
             if slide in (None, ""):
                 d.slides.append(Slide())
             target = d.slides[-1] if slide in (None, "") else self._slide(d, slide)
-            if item.kind == "video" and target.texts:
-                raise StudioError("text can't be drawn on videos yet; remove that slide's texts first")
             target.media = item.id
         return await self._change(ref, change)
 
     async def undo(self, ref=None) -> dict:
+        """Back to the version this one was changed from."""
         try:
             d = self.get(ref)
         except StudioError as exc:
             return {"error": str(exc)}
-        if not d.history:
+        if d.parent not in d.versions:
             return {"error": f"draft {d.id} has no earlier version"}
-        state = d.history[-1]
-        result = await self._apply(d, lambda d: d.restore(state), record=False)
-        if "error" not in result:
-            d.history.pop()
-        return result
+        return await self.checkout(d.id, d.parent)
+
+    async def checkout(self, ref=None, version=None) -> dict:
+        """The draft as it was at another version, which is then the one on screen: changing it starts
+        a branch from it, and the versions after it stay there to go back to."""
+        try:
+            d = self.get(ref)
+            n = _number(version)
+            if n not in d.versions:
+                raise StudioError(f"draft {d.id} has no version {version}; its versions are "
+                                  f"{', '.join(map(str, sorted(d.versions)))}")
+        except StudioError as exc:
+            return {"error": str(exc)}
+        if n == d.version:
+            await self.send(**self._event(d))
+            return self.summary(d)
+        state = d.versions[n]["state"]
+        return await self._apply(d, lambda d: d.restore(state), to=n)
+
+    def history(self, ref=None) -> dict:
+        """A draft's versions, for the assistant: which one is on screen and what each changed."""
+        try:
+            d = self.get(ref)
+        except StudioError as exc:
+            return {"error": str(exc)}
+        line = set(d.line())
+        return {"draft": d.id, "on_screen": d.version, "versions": [
+            {"version": n, "changed": v.get("label", ""), **({"from": v["parent"]} if v.get("parent") else {}),
+             **({"branch": "another branch"} if n not in line and n > d.version else {}),
+             **({"on_screen": True} if n == d.version else {})}
+            for n, v in sorted(d.versions.items())]}
 
     async def show(self, ref=None) -> dict:
         if ref in (None, "") and len(self.drafts) != 1:
@@ -338,6 +440,7 @@ class StudioSession:
             d = self.get(ref)
         except StudioError as exc:
             return {"error": str(exc)}
+        self.shown = d.id
         await self.send(**self._event(d))
         return self.summary(d)
 
@@ -368,12 +471,11 @@ class StudioSession:
         item = next((i for i in items if i.kind in ("image", "video")), None)
         if not d or not item:
             return ""
-        result = await self._apply(d, lambda d: setattr(self._slide(d, n), "media", item.id))
+        result = await self._apply(d, lambda d: setattr(self._slide(d, n), "media", item.id), quiet=True)
         if "error" in result:
             return f"It could not go into draft {d.id}: {result['error']}"
-        note = f"It is now slide {n} of draft {d.id} (version {d.version}), shown on screen."
-        if item.kind == "video" and d.slides[n - 1].texts:
-            note += " The texts on that slide are not drawn on the video."
+        note = f"It is now slide {n} of draft {d.id} (version {d.version})" + \
+            (", shown on screen." if self.shown == d.id else "; the user is looking at another draft.")
         if result["problems"] != "none":
             note += f" Platform check: {'; '.join(result['problems'])}."
         return note
@@ -473,16 +575,33 @@ class StudioSession:
 
     # --- a video with a voice over it (reel.py) -------------------------------------------
 
-    def video_drafts(self, ref=None) -> tuple[Draft, Draft | None]:
-        """The draft with a video's pictures and the video's own draft (None before it's made), from
-        either one."""
+    def video_drafts(self, ref=None) -> tuple[Draft, Draft]:
+        """The pictures a draft's video is made of (as a draft) and the draft it goes in: the draft
+        itself, whose pictures it replaces. A draft that is a video already is made again from the
+        pictures it keeps (video["source"]); one from before that, from the draft named in "from"."""
         d = self.get(ref)
-        if d.video:  # the video draft itself: made again from its pictures' draft
-            source = self.drafts.get(d.video.get("from"))
-            if not source:
-                raise StudioError(f"draft {d.video.get('from')}, which this video was made from, is gone")
-            return source, d
-        return d, next((x for x in reversed(self.drafts.values()) if x.video and x.video.get("from") == d.id), None)
+        if not d.video:
+            return d, d
+        src = d.video.get("source")
+        if src:
+            pictures = Draft(d.id, d.platform, src.get("placement") or d.placement, src.get("aspect"), d.title,
+                             d.caption, d.background, _slides_in(src.get("slides")))
+            pictures.palettes = src.get("palettes") or []
+            return pictures, d
+        source = self.drafts.get(d.video.get("from"))
+        if not source or source is d:
+            raise StudioError(f"the pictures draft {d.id}'s video was made from are gone; go back to an earlier "
+                              "version with pictures and make it again")
+        return source, d
+
+    @staticmethod
+    def recipe_of(d: Draft) -> dict:
+        """How the draft's video is made: its own, or, on a version with pictures, the newest one made
+        from them before (so going back to the pictures and making it again keeps the words and voice)."""
+        if d.video:
+            return dict(d.video)
+        made = [v["state"]["video"] for _, v in sorted(d.versions.items()) if v["state"].get("video")]
+        return {k: v for k, v in made[-1].items() if k != "source"} if made else {}
 
     async def make_video(self, ref=None, lines=None, cta=None, cta_line=None, music=None, captions=None,
                          motion=None, placement=None, color=None, *, voice: dict, speak, compose=None,
@@ -494,11 +613,14 @@ class StudioSession:
         post, described) or mood (FlowAI Sound's composer)."""
         try:
             source, target = self.video_drafts(ref)
-            recipe = self._recipe(source, dict(target.video) if target else {}, lines, cta, cta_line, music,
+            recipe = self._recipe(source, self.recipe_of(target), lines, cta, cta_line, music,
                                   captions, motion, placement, color, moods, compose is not None, songs, song)
         except StudioError as exc:
             return {"error": str(exc)}
         recipe["voice"] = {k: voice.get(k) for k in ("id", "name", "description", "language", "archetype")}
+        # The pictures it's made of stay with it: to make it again, and to go back to them
+        recipe["source"] = {"placement": source.placement, "aspect": source.aspect,
+                            "slides": _slides_out(source.slides), "palettes": source.palettes}
 
         platform, where = source.platform, recipe["placement"]
         spec = platforms.spec(platform, where)
@@ -538,13 +660,15 @@ class StudioSession:
             return data, f"video-draft{source.id}.mp4", meta
 
         async def placed(items: list["MediaItem"]) -> str:
-            return await self._place_video(source.id, target.id if target else None, recipe, items[0])
+            return await self._place_video(target.id, recipe, items[0])
 
         said = sum(len(x) for x in recipe["lines"])
-        reply = self.media.render(f"Making the video of draft {source.id}", " / ".join(filter(None, recipe["lines"])),
+        reply = self.media.render(f"Making the video of draft {target.id}", " / ".join(filter(None, recipe["lines"])),
                                   work, then=placed)
         if "error" not in reply:
-            reply.update(source=source.id, into=f"draft {target.id}, made again" if target else "a new draft",
+            reply.update(source=target.id,
+                         into=f"draft {target.id}, made again" if target.video else
+                              f"draft {target.id}: the video takes the place of its pictures (kept in its history)",
                          post=platforms.label(platform, where), size=f"{size[0]}x{size[1]}",
                          voice=f"{voice['name']} ({voice['description']})" if voice.get("description") else voice["name"],
                          music=f"a song: {recipe['song']}" if recipe["music"] == "song" else recipe["music"] or "none",
@@ -622,6 +746,7 @@ class StudioSession:
         recipe.setdefault("cta", "")
         recipe.setdefault("cta_line", "")
         recipe["from"] = source.id
+        recipe.pop("source", None)  # set again by make_video, from the pictures used this time
         return recipe
 
     def _accent(self, d: Draft) -> str:
@@ -635,33 +760,26 @@ class StudioSession:
                 return colours[2]
         return "#ffffff"
 
-    async def _place_video(self, source_id: int, target_id: int | None, recipe: dict, item: "MediaItem") -> str:
-        """A finished video into its draft: the one made before, or a new one."""
-        source, target = self.drafts.get(source_id), self.drafts.get(target_id) if target_id else None
+    async def _place_video(self, target_id: int, recipe: dict, item: "MediaItem") -> str:
+        """A finished video into its draft, in place of its pictures (or of the video made before)."""
+        target = self.drafts.get(target_id)
+        if not target:
+            return f"Draft {target_id} is gone, so the video is only in the pictures, as number {item.id}."
         meta = item.meta or {}
         aspect = f"{meta['width']}:{meta['height']}" if meta.get("width") else None
+        again = bool(target.video)
 
         def fill(d: Draft):
+            # Texts put on the video before stay on it; the pictures' own are in the video already
+            kept = d.slides[0].texts if d.video and d.slides else []
             d.placement, d.aspect, d.video = recipe["placement"], aspect, recipe
-            d.slides = [Slide(item.id)]
-        if target:
-            result = await self._apply(target, fill)
-        else:
-            self.count += 1
-            target = Draft(self.count, source.platform if source else "instagram", recipe["placement"])
-            if source:
-                target.title = f"{source.title or f'Draft {source.id}'} · video"[:120]
-                target.caption, target.background = source.caption, source.background
-            result = await self._apply(target, fill, record=False)
-            if "error" in result:
-                self.count -= 1
-            else:
-                self.drafts[target.id] = target
+            d.slides = [Slide(item.id, kept)]
+        result = await self._apply(target, fill, quiet=True)
         if "error" in result:
-            return f"It could not go into a draft: {result['error']}"
-        if source:  # it lists its videos; quiet: the page stays on the video
-            await self.send(**self._event(source), quiet=True)
-        note = f"It is draft {target.id}, {target.a_label} of {meta.get('duration', '?')} seconds (version {target.version})."
+            return f"It could not go into draft {target.id}: {result['error']}"
+        note = f"It is now draft {target.id}, {target.a_label} of {meta.get('duration', '?')} seconds " \
+               f"(version {target.version}" + ("" if again else f"; its pictures are version {target.parent}") + ")" + \
+               ("." if self.shown == target.id else "; the user is looking at another draft.")
         if result["problems"] != "none":
             note += f" Platform check: {'; '.join(result['problems'])}."
         return note
@@ -669,10 +787,14 @@ class StudioSession:
     # --- changes --------------------------------------------------------------------
 
     def get(self, ref=None) -> Draft:
+        """A draft by number; without one, the draft on screen ("latest" is the newest)."""
         if not self.drafts:
             raise StudioError("there are no drafts yet; make one with create_draft")
-        if ref in (None, "") or str(ref).strip().lower() in ("latest", "last", "this", "it", "current"):
+        said = str(ref).strip().lower() if ref not in (None, "") else ""
+        if said in ("latest", "last", "newest"):
             return self.drafts[max(self.drafts)]
+        if said in ("", "this", "it", "current", "selected"):
+            return self.drafts.get(self.shown) or self.drafts[max(self.drafts)]
         n = _number(ref)
         if n not in self.drafts:
             raise StudioError(f"there is no draft {ref}; the drafts are {', '.join(map(str, self.drafts))}")
@@ -720,8 +842,6 @@ class StudioSession:
 
     def _add_text(self, d: Draft, text, slide=None, **style):
         target = self._slide(d, slide)
-        if target.media is not None and self._item(target.media).kind == "video":
-            raise StudioError("text can't be drawn on videos yet; put it in the caption or on a picture slide")
         d.text_count += 1
         t = Text(d.text_count, _words(text))
         self._style(t, **style)
@@ -785,16 +905,20 @@ class StudioSession:
             return {"error": str(exc)}
         return await self._apply(d, change)
 
-    async def _apply(self, d: Draft, change: Callable[[Draft], None], record: bool = True, redraw: bool = False) -> dict:
-        """Change, check, render and show a draft; on any problem it stays as it was. redraw: the same
-        version drawn again (its files were lost, or it predates something the page now shows), which
-        isn't a change: a draft saved to FlowAI stays saved."""
+    async def _apply(self, d: Draft, change: Callable[[Draft], None], redraw: bool = False, to: int | None = None,
+                     quiet: bool = False) -> dict:
+        """Change, check, render and show a draft; on any problem it stays as it was. A change is a new
+        version, a branch from the one on screen. to: back to that existing version (checkout). redraw:
+        the same version drawn again (its files were lost, or it predates something the page now
+        shows), which isn't a change: a draft saved to FlowAI stays saved. quiet: done in the background
+        (a picture or video that finished): the page doesn't bring it up unless it's on screen."""
         async with self.lock:
             before = d.state()
+            number = to if to is not None else d.version if redraw else max([d.version, *d.versions]) + 1
             try:
                 change(d)
                 self._validate(d)
-                files, boxes, palettes = await asyncio.to_thread(self._render, d, d.version + (0 if redraw else 1))
+                files, boxes, palettes = await asyncio.to_thread(self._render, d, number)
             except StudioError as exc:
                 d.restore(before)
                 return {"error": str(exc)}
@@ -802,10 +926,16 @@ class StudioSession:
                 log.exception("draft %d could not be rendered", d.id)
                 d.restore(before)
                 return {"error": f"the draft could not be drawn: {exc}"}
-            if record and d.version and not redraw:
-                d.history = [*d.history, before][-MAX_HISTORY:]
-            d.version += 0 if redraw else 1
+            if to is None and not redraw:
+                d.versions[number] = {"parent": d.version if d.version in d.versions else None, "state": d.state(),
+                                      "label": _changed(before, d.state()) if d.version else "Started",
+                                      "at": round(time.time())}
+                self._prune(d, number)
+            d.version = number
             d.files, d.boxes, d.palettes = files, boxes, palettes
+            if d.version in d.versions:
+                d.versions[d.version]["thumb"] = {"url": f"media/{files[0][0].name}", "kind": files[0][1].kind} \
+                    if files else None
             d.check = platforms.check(d.platform, d.placement, d.caption, [f for _, f in files])
             hard = [b for slide in boxes for b in slide if b.get("readability", 99) < HARD_TO_READ]
             if hard:  # ours too: FlowAI doesn't look at the pictures
@@ -819,15 +949,29 @@ class StudioSession:
                 d.check["ok"] = False
                 d.check["checks"].append({"key": "placeholder", "status": "fail", "label": "Placeholder",
                                           "detail": f"{', '.join(holes)} still to be filled in."})
-        await self.send(**self._event(d))
+        quiet = quiet and self.shown != d.id
+        if not quiet:
+            self.shown = d.id
+        await self.send(**self._event(d), **({"quiet": True} if quiet else {}))
         return self.summary(d)
+
+    @staticmethod
+    def _prune(d: Draft, keep: int):
+        """The oldest versions go past MAX_VERSIONS, never the one on screen or the one it came from."""
+        spare = sorted(n for n in d.versions if n not in (keep, d.version))
+        for n in spare[:max(0, len(d.versions) - MAX_VERSIONS)]:
+            del d.versions[n]
+        for v in d.versions.values():
+            if v.get("parent") not in d.versions:
+                v["parent"] = None
 
     # --- kept with the conversation (backend/conversations.py) -------------------------
 
     def dump(self) -> dict:
         return {"count": self.count, "drafts": [
             {"id": d.id, "version": d.version, **_state_out(d.state()),
-             "history": [_state_out(h) for h in d.history],
+             "versions": [{"version": n, **{k: v for k, v in x.items() if k != "state"}, "state": _state_out(x["state"])}
+                          for n, x in d.versions.items()],
              "files": [{"file": path.name, **asdict(f)} for path, f in d.files],
              "boxes": d.boxes, "palettes": d.palettes, "check": d.check}
             for d in self.drafts.values()]}
@@ -839,12 +983,21 @@ class StudioSession:
             d.restore(_state_in(raw))
             d.version, d.check, d.boxes = raw.get("version", 0), raw.get("check", {}), raw.get("boxes", [])
             d.palettes = raw.get("palettes", [])
-            d.history = [_state_in(h) for h in raw.get("history", [])]
+            for v in raw.get("versions", []):
+                v = dict(v)
+                d.versions[int(v.pop("version"))] = {**v, "state": _state_in(v["state"])}
+            if not d.versions:  # kept before versions were a tree: its undo steps, oldest first, as one line
+                states = [*(_state_in(h) for h in raw.get("history", [])), d.state()]
+                first = d.version - len(states) + 1
+                for i, state in enumerate(states):
+                    d.versions[first + i] = {"parent": first + i - 1 if i else None, "state": state,
+                                             "label": "Earlier version" if i < len(states) - 1 else "Latest",
+                                             "at": None}
             d.files = [(self.dir / Path(f.pop("file")).name, File(**f)) for f in map(dict, raw.get("files", []))]
             self.drafts[d.id] = d
             # MEDIA_DIR lost them, or they were drawn before slides had colours: draw them again
             if not all(path.is_file() for path, _ in d.files) or len(d.palettes) != len(d.slides):
-                await self._apply(d, lambda d: None, record=False, redraw=True)
+                await self._apply(d, lambda d: None, redraw=True, quiet=True)
 
     # --- output ---------------------------------------------------------------------
 
@@ -868,7 +1021,8 @@ class StudioSession:
         video = {"made_from": f"draft {d.video['from']}", **{k: d.video[k] for k in ("lines", "cta", "cta_line",
                  "music", "song", "captions", "motion") if d.video.get(k) not in (None, "")},
                  **({"voice": d.video["voice"]["name"]} if d.video.get("voice") else {})} if d.video else None
-        return {"draft": d.id, "version": d.version, "post": d.label, "size": f"{w}x{h}", "title": d.title,
+        return {"draft": d.id, "version": d.version, **({"changed_from_version": d.parent} if d.parent else {}),
+                "post": d.label, "size": f"{w}x{h}", "title": d.title,
                 **({"video": video} if video else {}),
                 "caption": d.caption,
                 "caption_length": f"{len(d.caption)} of {s['caption']}" if s["caption"] else "this placement has no caption",
@@ -889,8 +1043,20 @@ class StudioSession:
                             "palette": colours, **({"duration": f.duration} if f.duration else {})}
                            for (path, f), slide, boxes, colours in zip(d.files, d.slides, d.boxes,
                                                                        [*d.palettes, *[[]] * len(d.slides)])],
-                "video": {k: v for k, v in d.video.items()} if d.video else None,
-                "videos": [x.id for x in self.drafts.values() if x.video and x.video.get("from") == d.id],
+                # The pictures it's made of, by number, and their shape: one line of the voiceover each
+                "video": {**{k: v for k, v in d.video.items() if k != "source"},
+                          **({"pictures": [s.get("media") for s in d.video["source"].get("slides", [])],
+                              "shape": list(platforms.canvas_size(
+                                  d.platform, d.video["source"].get("placement") or d.placement,
+                                  platforms.parse_aspect(d.video["source"]["aspect"])
+                                  if d.video["source"].get("aspect") else None))}
+                             if d.video.get("source") else {})} if d.video else None,
+                # On a version with pictures: how its video was made last time, to make it again the same way
+                "last_video": None if d.video else (self.recipe_of(d) or None),
+                # Before videos went into their own draft's place: the separate video drafts made from this one
+                "videos": [x.id for x in self.drafts.values() if x.video and x.video.get("from") == d.id and x is not d],
+                "versions": [{"version": n, "parent": v.get("parent"), "label": v.get("label", ""), "at": v.get("at"),
+                              "thumb": v.get("thumb")} for n, v in sorted(d.versions.items())],
                 "check": d.check}
 
     def fonts(self) -> dict[str, "Font"]:
@@ -907,11 +1073,10 @@ class StudioSession:
         for i, slide in enumerate(d.slides, 1):
             item = self._item(slide.media) if slide.media is not None else None
             if item and item.kind == "video":
-                meta = item.meta or {}
-                out.append((item.path, File("video", meta.get("width"), meta.get("height"), item.path.stat().st_size,
-                                            meta.get("duration"))))
-                layout.append([])
-                palettes.append([])
+                path, file, boxes, colours = self._render_video(d, item, slide, fonts, safe)
+                out.append((path, file))
+                layout.append(boxes)
+                palettes.append(colours)
                 continue
             img = Image.new("RGB", size, _color(d.background))
             if item:
@@ -932,6 +1097,41 @@ class StudioSession:
             palettes.append(picture_colours(plain) if item else [])
         return out, layout, palettes
 
+    def _render_video(self, d: Draft, item: "MediaItem", slide: Slide, fonts: dict, safe
+                      ) -> tuple[Path, File, list[dict], list[str]]:
+        """A video slide: as it is without texts; with texts, fitted to the draft and drawn on every
+        frame. Its texts are checked against a frame a third of the way in, which also gives its
+        colours. What's drawn is kept by what went into it, so changing the caption doesn't draw the
+        video again."""
+        meta = item.meta if (item.meta or {}).get("width") else _probe(item.path)
+        size = d.size
+        try:
+            frame = _still(item.path, size, float(meta.get("duration") or 0) / 3)
+        except Exception as exc:
+            if slide.texts:
+                raise StudioError(f"texts can't be drawn on video {item.id}: its frames couldn't be read") from exc
+            log.warning("no frame of video %s: %s", item.id, exc)
+            frame = None
+        colours = picture_colours(frame) if frame else []
+        if not slide.texts:
+            return item.path, File("video", meta.get("width"), meta.get("height"), item.path.stat().st_size,
+                                   meta.get("duration")), [], colours
+        _, boxes = self._draw_texts(frame, slide, fonts, safe)
+        for t in slide.texts:
+            b = boxes[t.id]
+            x, y, w, h = b["box"]
+            b["bg"] = _behind(frame, (x * size[0], y * size[1], (x + w) * size[0], (y + h) * size[1]))
+            b["readability"] = round(readability(t, b["bg"]), 2)
+        fonts_used = sorted({str(fonts[t.font].path) if t.font in fonts else t.font for t in slide.texts})
+        key = hashlib.sha1(repr((item.path.name, size, safe, [asdict(t) for t in slide.texts], fonts_used)).encode())
+        path = self.dir / f"{self.prefix}draft{d.id}-video-{key.hexdigest()[:12]}.mp4"
+        if not path.is_file():
+            overlay = reel.layer(size, lambda img: self._draw_texts(img, slide, fonts, safe)[0])
+            reel.burn(item.path, overlay, path)
+        w, h = size[0] // 2 * 2, size[1] // 2 * 2
+        return path, File("video", w, h, path.stat().st_size, meta.get("duration")), \
+            [boxes[t.id] for t in slide.texts], colours
+
     def _draw_texts(self, img: Image.Image, slide: Slide, fonts: dict, safe) -> tuple[Image.Image, dict[int, dict]]:
         """A slide's texts drawn on img, and where each one is (fractions of the slide, for the page)."""
         size = img.size
@@ -948,6 +1148,30 @@ class StudioSession:
                                    round(w / size[0], 4), round(h / size[1], 4)],
                            **{k: getattr(t, k) for k in LOOK}}
         return img, boxes
+
+
+@lru_cache(maxsize=256)
+def _probed(path: str, mtime: float) -> dict:
+    try:
+        return reel.probe(Path(path))
+    except Exception as exc:
+        log.warning("could not read %s: %s", path, exc)
+        return {}
+
+
+def _probe(path: Path) -> dict:
+    """A video's width, height and duration, read once per file."""
+    return _probed(str(path), path.stat().st_mtime)
+
+
+@lru_cache(maxsize=64)
+def _stilled(path: str, mtime: float, size: tuple[int, int], at: float) -> Image.Image:
+    return reel.still(Path(path), size, at)
+
+
+def _still(path: Path, size: tuple[int, int], at: float) -> Image.Image:
+    """A frame of a video at the draft's size, read once per file, size and moment."""
+    return _stilled(str(path), path.stat().st_mtime, tuple(size), round(at, 1)).copy()
 
 
 # --- colours and readability ------------------------------------------------------------

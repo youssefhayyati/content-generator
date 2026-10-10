@@ -165,7 +165,8 @@ class Publisher
             'run_id' => $run->uuid,
             'goal' => $run->goal,
             'account' => ['platform' => $account->platform->value, 'handle' => $account->handle, 'app' => $app],
-            'post' => ['caption' => $run->post->body, 'format' => $run->post->format->value, 'placement' => $run->post->placement],
+            // id and title: so the agent can say which post it published (and check on it afterwards)
+            'post' => ['id' => $run->post_id, 'title' => $run->post->title, 'caption' => $run->post->body, 'format' => $run->post->format->value, 'placement' => $run->post->placement],
             'media' => $run->post->assets->map(fn (Asset $a) => ['id' => $a->id, 'kind' => $a->kind, 'mime' => $a->mime, 'url' => "/api/agent/assets/{$a->id}/file"])->values()->all(),
             // R7: the budget the run must stay within, so the agent doesn't have to guess.
             'limits' => ['step_budget' => (int) config('publishing.step_budget'), 'hard_timeout_seconds' => (int) config('publishing.hard_timeout_seconds')],

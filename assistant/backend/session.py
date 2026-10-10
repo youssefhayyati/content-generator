@@ -6,6 +6,7 @@ Wire protocol
     json:   {"type": "text", "text": "..."}   typed user message
             {"type": "interrupt"}              stop the assistant
             {"type": "cancel_task"}            stop the running browser task
+            {"type": "cancel_phone"}           stop what the team's phone is doing
             {"type": "upload", "name": "...", "data": "data:image/png;base64,..."}
                                                attach an image/video/audio file
             {"type": "upload", "name": "x.json", "workflow": {...}}
@@ -33,6 +34,7 @@ Wire protocol
             {"type": "action", "name": ..., ...}
                                                a button on the page, done without the LLM:
               undo, save {"draft": 1}
+              checkout {"draft": 1, "version": 3}   back to an earlier version (changing it branches)
               open_post {"post": 12}
               edit {"draft": 1, "title" | "caption" | "placement": "..."}
               edit_text {"draft": 1, "text": 2, "words": "...", "position", "size", "color", ...}
@@ -76,6 +78,9 @@ Wire protocol
     json:   ready | vad | transcript | assistant_delta | assistant_done |
             tool_call | tool_result | interrupt | error |
             browser_task (started/done/failed/cancelled) | browser_step |
+            phone_task (a job on the team's phone, kind post/feedback/task: started/awaiting approval/done/
+                        failed/cancelled) | phone_step (one thing it did, with its screenshot) |
+            phone_post (a draft posted from the phone: status, when, and its latest feedback numbers) |
             media_job (generate/install: started/running/done/failed/cancelled) |
             media (a generated or attached file, served at media/..., next to the page) |
             draft (a post draft's new version: its slides as files, where its texts are and how
@@ -122,6 +127,7 @@ from .flowai import FlowAIClient, FlowAISession
 from .llm import LLM
 from .media import MediaSession
 from .music import SongWriter
+from .phone import PhoneClient, PhoneSession
 from .skills import catalogue, load_skills
 from .studio import LOOK, StudioError, StudioSession, fonts_event, fonts_prompt
 from .tts import SAMPLE_RATE as TTS_RATE
@@ -155,6 +161,7 @@ class Models:
     browser_llm: LLM | None = None
     comfy: ComfyClient | None = None
     music: SongWriter | None = None  # songs written for videos (ACE-Step), when MUSIC_URL is set
+    phone: PhoneClient | None = None  # the team's phone, posting drafts from its apps, when PHONE_API_URL is set
     conversations: ConversationStore | None = None  # set once comfy is
 
 
@@ -207,6 +214,10 @@ class VoiceSession:
     @property
     def studio(self) -> StudioSession:
         return self.conv.studio
+
+    @property
+    def phone(self) -> PhoneSession:
+        return self.conv.phone
 
     @property
     def owner(self) -> str | None:
@@ -264,7 +275,11 @@ class VoiceSession:
         prompt += (
             "\n\nYou are also the content studio of a social media agency: you make posts for Instagram and X "
             "as drafts the user sees on screen, and change them when asked. A draft has a number, a caption, and "
-            "slides (one picture or video each) with texts drawn on top. Make a new post with one create_draft "
+            "slides (one picture or video each) with texts drawn on top. The user sees one draft at a time; a "
+            "tool without a draft number changes that one, the draft on screen. An edit always changes the draft "
+            "it is about, in place: never make a new draft (create_draft, from_draft) to change one. Every change "
+            "is a new version of it, kept in its history. Make a new draft only when the user asks for a new or "
+            "another post. Make a new post with one create_draft "
             "call that has everything: title, caption, texts"
             + (", and pictures (one prompt per slide: each is made in the draft's shape and goes in by itself "
                "when ready, so don't wait or check on it; you'll be told). To change what is in a slide's "
@@ -277,8 +292,10 @@ class VoiceSession:
                ". Pictures come from files the user attaches"
                + (" or from the FlowAI gallery (use_assets)" if self.flowai else "")
                + ", since making new ones is off")
-            + ". Words on a picture always go through texts or add_text, never through the image model. Change "
-            "the caption with update_draft and texts with edit_text or remove_text; to go back, use undo_draft. "
+            + ". Words on a picture or video always go through texts or add_text, never through the image model; "
+            "on a video they show the whole time. Change the caption with update_draft and texts with edit_text or "
+            "remove_text. To go back, use undo_draft (one step) or draft_versions to see every version and go to "
+            "one; changing an earlier version starts a branch from it, and the others stay. "
             "Fonts, by style: pick ones that fit the brand and the post's mood (an elegant serif for luxury, "
             "handwriting for something personal, a condensed poster font for a sale), at most two per post, "
             "e.g. a display headline with a plain modern line under it:\n" + fonts_prompt(ROOT / settings.fonts_dir)
@@ -291,8 +308,10 @@ class VoiceSession:
             "then the call to action in cta_line. The video has a voice of its own, not the one you speak in: "
             "describe in voice the one that suits the post and its audience (gender, age, pitch, accent, how it "
             "is said), or pass the voice the user asked for; find_voices lists the ones that fit a description. "
-            "Say which voice it is, so the user can ask for another. It is made in the background into its "
-            "own draft; asking again (other words, music, button, voice) makes that same video again. "
+            "Say which voice it is, so the user can ask for another. It is made in the background and takes the "
+            "place of the draft's pictures in that same draft (they stay in its history); asking again, other "
+            "words, music, button or voice, makes the video again in the same draft. Texts can then be added on "
+            "the video itself with add_text. "
             + ("Its music is a song written for it: leave music out and the first video gets one that suits the "
                "post. To change it, describe the music in music (genre, instruments, mood and energy, tempo in "
                "bpm, no vocals), or pass 'song' for a new one written for the post; a mood of the composer's only "
@@ -311,6 +330,31 @@ class VoiceSession:
         )
         if self.flowai:
             prompt += self.flowai.prompt()
+        if self.m.phone:
+            minutes = settings.phone_feedback_after_minutes
+            prompt += (
+                "\n\nYou can publish drafts for real from the team's Android phone, which has the Instagram and X "
+                "apps: post_on_phone puts the draft's pictures or video on the phone and has the phone's own agent "
+                "post it with its caption. Publishing is public and can't be undone, so call it only when the user "
+                "has just said to post that draft now; if they only said they like it, ask first. It takes a few "
+                "minutes in the background: say one short sentence, and never say it's posted until you are told. "
+                "The phone can only type plain letters, so emoji and special symbols are left out of the caption: "
+                "when the reply says what was left out, tell the user in a few words. post_feedback reads how a "
+                "post is doing (likes, comments, shares, saves, views, the latest comments) and what changed since "
+                "the last check"
+                + (f"; a check also runs by itself {minutes:g} minutes after posting" if minutes > 0 else "")
+                + ". Sum it up in a sentence or two and, when the comments suggest one, give an idea for the next "
+                "post. "
+                + ("Posts scheduled in FlowAI (schedule_post, once approved) are published from this same phone by "
+                   "themselves when their time comes, and checked the same way: phone_status lists the latest, and "
+                   "post_feedback with flowai_post checks one. So to post later, schedule it; to post now, "
+                   "post_on_phone. " if self.m.phone.publisher else "")
+                + "phone_task does anything else on the phone (it can follow a phone skill), phone_status says "
+                "what it's doing, answer_phone passes on the user's answer when the phone asks something or waits "
+                "for their OK, and cancel_phone_task stops it. If the phone says an app isn't installed or logged "
+                "in, tell the user: they log in on the phone themselves. Phone skills:\n"
+                + catalogue(self.phone.skills())
+            )
         # The date, not the time, so the prompt stays the same all day (the time is a tool call away)
         today = datetime.now(self.flowai.tz if self.flowai else None)
         prompt += f"\n\nToday is {today:%A} {today.day} {today:%B %Y}."
@@ -382,6 +426,8 @@ class VoiceSession:
                 await self.interrupt()
             case "cancel_task":
                 await self.cancel_browser_task()
+            case "cancel_phone":
+                self.spawn(self.phone.cancel())
             case "upload":
                 await self.on_upload(msg)
             case "hello":
@@ -396,6 +442,8 @@ class VoiceSession:
                 self.spawn(self.load_voice())
             case "focus":
                 self.conv.focus = {k: msg[k] for k in ("draft", "slide", "text") if msg.get(k) not in (None, "")}
+                if self.conv.focus.get("draft") in self.studio.drafts:  # the page shows it: changes go to it
+                    self.studio.shown = self.conv.focus["draft"]
             case "mask":
                 if problem := self.studio.set_mask(msg.get("draft"), msg.get("slide"), msg.get("data")):
                     await self.send(type="error", message=problem[:1].upper() + problem[1:] + ".")
@@ -443,6 +491,10 @@ class VoiceSession:
             result = await self.studio.undo(draft)
             done = f"pressed Undo on draft {result.get('draft')}: it is now as it was before its last change " \
                    f"(version {result.get('version')})"
+        elif name == "checkout":
+            result = await self.studio.checkout(draft, msg.get("version"))
+            done = f"went back to version {result.get('version')} of draft {result.get('draft')} in its history; " \
+                   "changing it now starts a new branch from there, and the later versions stay to go back to"
         elif name == "save" and self.flowai:
             result = await self.flowai.save(draft)
             done = f"pressed Save: {result.get('saved')}"
@@ -668,10 +720,11 @@ class VoiceSession:
         songs, song = self.m.music, ""
         try:
             source, target = self.studio.video_drafts(draft)
-            before = (target.video or {}).get("voice") if target else None
+            made = self.studio.recipe_of(target)
+            before = made.get("voice")
             # A song suited to the post: for the first video, or when a new one is asked for
             if songs and (str(asked.get("music") or "").strip().lower() == "song"
-                          or (asked.get("music") is None and not target)):
+                          or (asked.get("music") is None and not made)):
                 song = (await self.cast(source, asked.get("lines")))["music"]
             if voice not in (None, ""):
                 chosen = await self.video_voice(str(voice))
@@ -919,6 +972,7 @@ class VoiceSession:
         exclude = (set() if self.m.browser else tools.BROWSER_TOOLS) | \
                   (set() if self.m.comfy else tools.MEDIA_TOOLS) | \
                   (set() if self.flowai else tools.FLOWAI_TOOLS) | \
+                  (set() if self.m.phone else tools.PHONE_TOOLS) | \
                   ({"load_skill"} if self.skills_inline else set())
         try:
             for _ in range(settings.llm_max_tool_rounds):

@@ -73,6 +73,18 @@ function onEvent(msg) {
     case "browser_step":
       onBrowserStep(msg);
       break;
+    case "phone_task":
+      onPhoneTask(msg);
+      break;
+    case "phone_step":
+      onBrowserStep(msg);
+      break;
+    case "phone_post": {
+      const n = msg.last_check || {};
+      const nums = ["likes", "comments", "shares", "saves", "views"].filter((k) => n[k] != null).map((k) => `${n[k]} ${k}`);
+      add("tool", `📱 post ${msg.post} (${msg.what}, draft ${msg.draft}): ${msg.status}${nums.length ? " · " + nums.join(", ") : ""}`);
+      break;
+    }
     case "media_job":
       onMediaJob(msg);
       break;
@@ -262,7 +274,10 @@ $("file").onchange = async () => {
 acceptFiles(upload);
 // ---------- Browser agent panel ----------
 
+let panel = "browser"; // whose steps the task panel shows: the browser's or the phone's
+
 function onBrowserTask(msg) {
+  panel = "browser";
   $("browser").hidden = false;
   const status = $("bstatus");
   status.className = "badge " + (msg.status === "started" ? "running" : msg.status);
@@ -288,7 +303,24 @@ function onBrowserStep(msg) {
   }
 }
 
-$("bcancel").onclick = () => link.send({ type: "cancel_task" });
+// A job on the team's phone, in the same panel: posting a draft, reading its feedback, or another task
+function onPhoneTask(msg) {
+  panel = "phone";
+  $("browser").hidden = false;
+  const running = msg.status === "started" || msg.status === "awaiting approval";
+  const status = $("bstatus");
+  status.className = "badge " + (running ? "running" : msg.status);
+  status.textContent = msg.status === "started" ? "running" : msg.status;
+  $("bcancel").hidden = !running;
+  if (msg.status === "started") {
+    $("btask").textContent = `📱 #${msg.id} ${msg.text}`;
+    $("steps").innerHTML = "";
+    $("bshot").hidden = true;
+  }
+  add("tool", `📱 phone ${msg.kind} #${msg.id} ${msg.status}${msg.text ? ": " + msg.text : ""}`);
+}
+
+$("bcancel").onclick = () => link.send({ type: panel === "phone" ? "cancel_phone" : "cancel_task" });
 
 // ---------- Microphone ----------
 

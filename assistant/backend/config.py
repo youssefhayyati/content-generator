@@ -93,6 +93,24 @@ class Settings(BaseSettings):
     flowai_email: str = ""
     flowai_password: str = ""
 
+    # The team's Android phone (backend/phone.py): the hackathon Phone API, whose agent posts drafts from the
+    # phone's Instagram and X apps and reads back how they do
+    phone_api_url: str = ""  # e.g. https://172.26.0.32/hack/v1; empty = off
+    phone_api_key: str = ""  # the team key (hk_...)
+    phone_verify_tls: bool = False  # the hackathon server's certificate is self-signed
+    phone_mode: Literal["flash", "pro"] = "flash"  # the phone's agent for feedback and other tasks
+    phone_post_mode: Literal["flash", "pro"] = "pro"  # for posting: pro also checks independently that it went up
+    phone_max_steps: int = 40  # the team's limit
+    phone_skills_dir: str = "skills/phone"  # how to post and check posts in each app
+    phone_feedback_after_minutes: float = 60  # check a post's numbers this long after it went up; 0 = only when asked
+    # Publish the posts FlowAI schedules from this phone when their time comes (backend/publisher.py): FlowAI's
+    # agent API, with FLOWAI_URL, signed with the user's agent token (FlowAI's Phones page; empty = fetched by
+    # signing in with FLOWAI_EMAIL and FLOWAI_PASSWORD)
+    phone_publish: bool = True
+    flowai_agent_token: str = ""
+    phone_device_ref: str = ""  # the device ID the phone has in FlowAI; empty = the phone API's own (heracles-phone)
+    phone_publish_poll_seconds: float = 15  # how often FlowAI is asked for a post to publish
+
     # VAD / turn taking
     vad_threshold: float = 0.5
     vad_min_silence_ms: int = 600

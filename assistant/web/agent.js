@@ -162,6 +162,10 @@ function onEvent(msg) {
     case "browser_task":
       note(`Website task ${msg.status}${msg.text ? ": " + msg.text : ""}`, "act");
       break;
+    case "phone_task":
+      note(`Phone ${msg.kind === "post" ? "posting" : msg.kind === "feedback" ? "feedback check" : "task"} `
+        + `${msg.status}${msg.text ? ": " + msg.text : ""}`, "act");
+      break;
   }
 }
 
@@ -187,6 +191,10 @@ function describe(name, a) {
     case "find_assets": return "Looking through the gallery";
     case "use_assets": return "Bringing in pictures from the gallery";
     case "browser_task": return `Website task: ${a.instruction}`;
+    case "post_on_phone": return "Posting from the phone";
+    case "post_feedback": return "Checking how the post is doing";
+    case "phone_task": return `Phone: ${a.instruction}`;
+    case "answer_phone": return a.approve === false ? "Telling the phone no" : "Answering the phone";
     case "get_current_time": return "Checking the time";
     default: return name.replaceAll("_", " ");
   }

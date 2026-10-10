@@ -365,6 +365,70 @@ each skill's name and description and loads the steps with `load_skill`, like th
 skills. Copy `skills/content/_template.md` to add one (a brand's rules, a recurring format, a
 client's house style). Edits apply on the next turn, without a restart.
 
+## Posting from the team's phone
+
+With `PHONE_API_URL` and `PHONE_API_KEY` set (the hackathon Phone API and the team key), the assistant
+publishes drafts for real from the Instagram and X apps on the team's Android phone, and reads back how
+they do. The phone has an agent of its own; `backend/phone.py` makes its job easy and checks on it:
+
+1. **The media goes first.** The draft's slides, as rendered (texts drawn on), are uploaded to the
+   phone last slide first, a second apart, so the app's gallery shows them newest first in slide order:
+   the agent just picks the first N.
+2. **The caption is made typable.** The phone's input board types printable ASCII only, with no line
+   breaks: accents become plain letters, curly quotes straight ones, and emoji are left out (the
+   assistant says which). The agent gets the caption as numbered lines to type, with enter between them.
+3. **A phone skill is the goal.** `skills/phone/post-<platform>-<placement>.md` (or `post-<platform>.md`)
+   says where to tap in that app, step by step, with the draft's details filled in (`{{caption}}`,
+   `{{count}}`, ... see `skills/phone/_template.md`). Edits apply to the next post, without a restart.
+4. **It is followed live.** Every step and its screenshot show in the task panel of the test console;
+   if the phone asks for an OK (an approval) or a question, the assistant asks you and passes your
+   answer on (`answer_phone`). Posting runs in the phone's `pro` mode, which checks independently that
+   the post went up.
+
+**Feedback.** `post_feedback` opens the post in the app (by its caption's first words) and returns its
+likes, comments, shares, saves, views and latest comments as JSON (`feedback-<platform>.md`); every
+check is kept with the post, so the next one says what changed. One runs by itself
+`PHONE_FEEDBACK_AFTER_MINUTES` after posting (60 by default; it keeps the conversation in memory until
+then, and a restart re-plans it when the conversation is opened again).
+
+What you can say: "post draft two on Instagram now", "how is my last post doing?", "what's the phone
+doing?", "check which accounts the phone is logged in to" (the `check-accounts` skill), "stop the phone".
+Publishing is public, so the assistant only posts when you have said to post that draft now.
+
+Before the first post, Instagram (com.instagram.android) and X (com.twitter.android) must be installed
+and logged in on the phone: do that yourself (the console at https://172.26.0.32/team shows the phone
+live); the agent never types passwords. One task runs on the phone at a time, from any conversation.
+
+### FlowAI's scheduled posts
+
+The assistant is also FlowAI's automation service (`backend/publisher.py`): when an approved post's
+time comes, FlowAI books a run on the phone, and the assistant picks it up
+(`GET /api/agent/next-job`) and posts it **the same way, with the same phone skills** as
+`post_on_phone`: the post's media from FlowAI onto the phone, the caption made typable,
+`post-<platform>-<placement>.md` as the goal. Change how posting works in one place, the skill,
+and both paths follow.
+
+- Every action of the phone's agent is a step on FlowAI's run record (within its 40-step budget);
+  a tap meant to share the post is recorded as `tap:post-button`.
+- The run ends **confirmed** with the phone's last screenshot as proof, **failed** if it never got as
+  far as sharing (FlowAI tries again after 5, 15 and 30 minutes), or **uncertain** if it may be up
+  (FlowAI's Inbox asks a person to look), so a post never goes up twice. A run seen again after a
+  restart is ended uncertain for the same reason (runs taken are kept in `data/phone/published.json`).
+- If the phone asks for an OK while publishing, it is given: the post was approved in FlowAI.
+- Its numbers are checked like a draft's: `PHONE_FEEDBACK_AFTER_MINUTES` later, and whenever you ask
+  ("how is FlowAI post 12 doing?": `post_feedback` with `flowai_post`). `phone_status` lists the latest.
+
+Setting it up, once:
+1. In FlowAI's **Phones** page, add a phone: *Automation service*, device ID `heracles-phone`.
+2. On each Instagram and X account, pick that phone and turn automation on.
+3. Copy the token from the Phones page into `FLOWAI_AGENT_TOKEN` in `.env` (or leave it empty and set
+   `FLOWAI_EMAIL` and `FLOWAI_PASSWORD`: the assistant fetches it), and restart the assistant.
+   `/health` says whether it's publishing.
+
+Then schedule as usual (`schedule_post`, the Composer, a campaign): the post publishes itself from the
+phone at its time. While the phone is busy with something the assistant asked for, a due post waits;
+if it waits over 10 minutes FlowAI counts it as failed and tries again later.
+
 ## The agent page and FlowAI
 
 `web/index.html` is the agent's own page, in FlowAI's dashboard style. FlowAI has its own version,
@@ -526,9 +590,12 @@ backend/
   music.py     songs written for videos by ACE-Step (MUSIC_URL)
   platforms.py Instagram and X specs and the pre-export check (mirrors FlowAI's)
   flowai.py    FlowAI: accounts and voice, saving, finding, opening and scheduling posts, campaigns
+  phone.py     the team's phone (hackathon Phone API): posting from its apps, feedback checks
+  publisher.py FlowAI's automation service: publishes scheduled posts from the phone, with the same skills
   conversations.py  conversations kept on disk: list, reopen, switch, delete
 skills/        browser agent skills (markdown)
   content/     content skills: how to make each kind of post
+  phone/       phone skills: how to post and read feedback in the Instagram and X apps
 fonts/         fonts for text on pictures, by style (fonts.yaml), with their licences
 comfyui/       RunPod kit (manager.py, setup scripts, workflow bundles) + descriptions.yaml
 media/         generated and attached files (served at media/, next to the page)

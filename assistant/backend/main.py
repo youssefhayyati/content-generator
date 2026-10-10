@@ -15,6 +15,8 @@ from .config import ROOT, settings
 from .conversations import ConversationStore
 from .llm import LLM
 from .music import SongWriter
+from .phone import PhoneClient, PhoneError
+from .publisher import FlowAIAgentError, Publisher, agent_token
 from .session import Models, VoiceSession
 from .tts import SAMPLE_RATE as TTS_RATE
 from .tts import TTSEngine
@@ -27,6 +29,43 @@ log = logging.getLogger("voice-agent")
 
 MEDIA_DIR = ROOT / settings.media_dir
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def check_phone(phone: PhoneClient):
+    try:
+        s = await phone.status()
+        log.info("Phone %s: %s%s", s.get("device_id"), "online" if s.get("online") else "OFFLINE",
+                 "" if s.get("ble_linked") else ", input board not linked")
+    except PhoneError as exc:
+        log.warning("Phone API at %s: %s (phone tools will report errors until it answers)", phone.base_url, exc)
+
+
+async def start_publisher(app: FastAPI, phone: PhoneClient):
+    """Publishing FlowAI's scheduled posts from the phone, once FlowAI and the phone answer."""
+    warned = False
+    while True:
+        try:
+            token = settings.flowai_agent_token
+            if not token:
+                if not (settings.flowai_email and settings.flowai_password):
+                    log.info("FlowAI's scheduled posts aren't published from the phone: set FLOWAI_AGENT_TOKEN "
+                             "(FlowAI's Phones page) or FLOWAI_EMAIL and FLOWAI_PASSWORD")
+                    return
+                token = await agent_token(settings.flowai_url, settings.flowai_dashboard_url,
+                                          settings.flowai_email, settings.flowai_password)
+            ref = settings.phone_device_ref or (await phone.status())["device_id"]
+            publisher = Publisher(phone, settings.flowai_url, token, ref, ROOT / settings.data_dir / "phone",
+                                  ROOT / settings.phone_skills_dir, settings.phone_publish_poll_seconds,
+                                  settings.phone_post_mode, settings.phone_mode, settings.phone_max_steps,
+                                  settings.phone_feedback_after_minutes)
+            publisher.start()
+            app.state.publisher = publisher
+            return
+        except (FlowAIAgentError, PhoneError) as exc:
+            if not warned:
+                log.warning("Publishing from the phone waits: %s (trying again every 30 s)", exc)
+                warned = True
+        await asyncio.sleep(30)
 
 
 async def check_comfy(comfy: ComfyClient):
@@ -86,15 +125,29 @@ async def lifespan(app: FastAPI):
         app.state.comfy_check = asyncio.create_task(check_comfy(comfy))  # don't hold up startup
     else:
         log.info("COMFYUI_URL is not set: picture/video generation is off")
+    if settings.phone_api_url:
+        phone = PhoneClient(settings.phone_api_url, settings.phone_api_key, settings.phone_verify_tls)
+        app.state.models.phone = phone
+        app.state.phone_check = asyncio.create_task(check_phone(phone))
+        if settings.phone_publish and settings.flowai_url:
+            app.state.publisher_start = asyncio.create_task(start_publisher(app, phone))
+    else:
+        log.info("PHONE_API_URL is not set: posting from the phone is off")
     app.state.models.conversations = ConversationStore(
         ROOT / settings.data_dir / "conversations", app.state.models.comfy, MEDIA_DIR, ROOT / settings.fonts_dir,
-        settings.comfyui_timeout_minutes * 60)
+        settings.comfyui_timeout_minutes * 60, app.state.models.phone)
     log.info("Ready")
     yield
     if app.state.models.browser:
         await app.state.models.browser.close()
     if app.state.models.comfy:
         await app.state.models.comfy.close()
+    if publisher := getattr(app.state, "publisher", None):
+        await publisher.close()
+    elif start := getattr(app.state, "publisher_start", None):
+        start.cancel()
+    if app.state.models.phone:
+        await app.state.models.phone.close()
 
 
 app = FastAPI(title="Voice Agent", lifespan=lifespan)
@@ -105,7 +158,18 @@ def health():
     comfy = app.state.models.comfy
     return {"ok": True, "llm": settings.llm_model, "asr_mode": settings.asr_mode,
             "tts": "voicestudio" if settings.tts_url else "local", "flowai": settings.flowai_url or "off",
+            "phone": phone_health(),
             "comfyui": "off" if not comfy else (comfy.error or f"ok, {len(comfy.workflows)} workflows")}
+
+
+def phone_health() -> str:
+    if not app.state.models.phone:
+        return "off"
+    publisher = getattr(app.state, "publisher", None)
+    if not publisher:
+        return "on (FlowAI's scheduled posts aren't published from it)"
+    return f"on, publishing FlowAI's scheduled posts as {publisher.device_ref}" + \
+        (f" (waiting: {publisher.error})" if publisher.error else "")
 
 
 @app.websocket("/ws")

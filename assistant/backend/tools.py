@@ -8,7 +8,8 @@ Website actions are not listed here one by one: the assistant delegates a whole 
 the browser agent (backend/browser_agent.py), which has its own tools and skills. Pictures
 and videos are made by ComfyUI workflows on the RunPod pod (backend/media.py). Posts for
 Instagram and X are drafts (backend/studio.py), made by following a content skill
-(skills/content/*.md), and saved to FlowAI through its API (backend/flowai.py).
+(skills/content/*.md), and saved to FlowAI through its API (backend/flowai.py). They are published
+from the team's phone (backend/phone.py), whose own agent follows a phone skill (skills/phone/*.md).
 """
 
 import asyncio
@@ -217,7 +218,7 @@ async def add_media_workflow(name: str, session, description: str = "", template
 
 # --- Post drafts for Instagram and X (backend/studio.py) -------------------------
 
-_DRAFT = {"type": "integer", "description": "Draft number (default: the latest)"}
+_DRAFT = {"type": "integer", "description": "Draft number (default: the draft on the user's screen)"}
 _LOOK = {
     "position": {"type": "string", "enum": POSITIONS, "description": "Where on the picture (default bottom)"},
     "size": {"type": "string", "description": f"{', '.join(SIZES)}, or a size in pixels (default large); "
@@ -242,7 +243,7 @@ _POST = {
 }
 
 STUDIO_TOOLS = {"create_draft", "update_draft", "add_text", "edit_text", "remove_text", "undo_draft",
-                "show_draft", "load_skill", "make_video", "find_voices"}
+                "draft_versions", "show_draft", "load_skill", "make_video", "find_voices"}
 
 
 @tool(
@@ -264,8 +265,9 @@ def load_skill(name: str):
 
 @tool(
     "create_draft",
-    "Make a post draft for Instagram or X, in one go: caption, the words on its slides and the pictures to make. "
-    "It is drawn and shown on the user's screen after every change, with the platform's checks.",
+    "Make a new post draft for Instagram or X, in one go: caption, the words on its slides and the pictures to "
+    "make. It is drawn and shown on the user's screen after every change, with the platform's checks. Only for a "
+    "new post the user asked for: to change a draft, change that draft.",
     {
         "type": "object",
         "properties": {
@@ -280,8 +282,9 @@ def load_skill(name: str):
                          "description": "One picture prompt per slide, slide 1 first: each is made in the draft's "
                                         "shape and goes in by itself when ready"},
             "workflow": {"type": "string", "description": "Workflow for the pictures (default: text to image)"},
-            "from_draft": {"type": "integer", "description": "Copy this draft's pictures, texts and caption, e.g. "
-                                                             "to adapt an Instagram post for X"},
+            "from_draft": {"type": "integer", "description": "Copy this draft's pictures, texts and caption into "
+                                                             "a second post, e.g. to adapt an Instagram post for X "
+                                                             "when the user wants both"},
         },
         "required": ["platform"],
     },
@@ -307,8 +310,8 @@ async def update_draft(session, draft: int | None = None, placement: str | None 
 
 @tool(
     "add_text",
-    "Put text on a slide of a draft: a headline, an offer, a call to action. It is drawn crisply and wrapped "
-    "to fit; never ask the image model for words.",
+    "Put text on a slide of a draft, a picture or a video: a headline, an offer, a call to action. It is drawn "
+    "crisply and wrapped to fit (on a video, over the whole video); never ask the image model for words.",
     {
         "type": "object",
         "properties": {
@@ -368,6 +371,20 @@ async def undo_draft(session, draft: int | None = None):
 
 
 @tool(
+    "draft_versions",
+    "A draft's history: every version, what each changed and which one is on screen. With version, the draft goes "
+    "back to that version; a change after that starts a new branch from it, and the other versions stay there "
+    "to come back to.",
+    {"type": "object", "properties": {"draft": _DRAFT,
+                                      "version": {"type": "integer", "description": "Go back to this version"}}},
+)
+async def draft_versions(session, draft: int | None = None, version: int | None = None):
+    if version in (None, ""):
+        return session.studio.history(draft)
+    return await session.studio.checkout(draft, version)
+
+
+@tool(
     "edit_area",
     "Change only the area of a slide's picture that the user painted over on screen; the rest of the picture "
     "stays exactly as it is. Use it whenever an area is painted and the user says what to do with it.",
@@ -395,13 +412,14 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
     "make_video",
     "Make a draft's pictures (one or several) into a short video: a voice that suits the video reads a line per "
     "picture while each picture slowly zooms or pans, with captions, music and an end card with a call to "
-    "action. It goes into a draft of its own (an Instagram reel or an X post), made in the background; asked "
-    "again, of either draft, that same video is made again with the changes. The reply says which voice reads it.",
+    "action. It is made in the background and takes the place of the pictures in the same draft (as an Instagram "
+    "reel or an X post); the pictures stay in the draft's history. Asked again, the video is made again in that "
+    "draft with the changes. The reply says which voice reads it.",
     {
         "type": "object",
         "properties": {
-            "draft": {"type": "integer", "description": "The draft with the pictures, or the video's own draft to "
-                                                        "make it again (default: the latest)"},
+            "draft": {"type": "integer", "description": "The draft to make into a video, or whose video to make "
+                                                        "again (default: the draft on the user's screen)"},
             "lines": {"type": "array", "items": {"type": "string"},
                       "description": "What the voice says over each picture: exactly one entry per picture, in "
                                      "order (a one-picture post has one entry). An entry can be one to three short "
@@ -601,3 +619,82 @@ async def use_assets(assets: list, session):
 )
 async def schedule_post(when: str, session, draft: int | None = None):
     return await session.flowai.schedule(draft, when)
+
+
+# --- The team's phone: posting from its Instagram and X apps (backend/phone.py) ----
+
+PHONE_TOOLS = {"post_on_phone", "post_feedback", "phone_task", "phone_status", "answer_phone", "cancel_phone_task"}
+
+
+@tool(
+    "post_on_phone",
+    "Publish a draft for real, from the Instagram or X app on the team's phone: its pictures or video go to the "
+    "phone, then the phone posts it with its caption. Publishing is public and can't be undone: only when the user "
+    "has just said to post this draft now (not save or schedule it). It runs in the background for a few minutes; "
+    "you are told when it's up.",
+    {"type": "object", "properties": {"draft": _DRAFT}},
+)
+async def post_on_phone(session, draft: int | None = None):
+    return await session.phone.post(draft)
+
+
+@tool(
+    "post_feedback",
+    "Check how a post published from the phone is doing: likes, comments, shares, saves, views and the latest "
+    "comments, and what changed since the last check. It runs on the phone in the background; you are told.",
+    {
+        "type": "object",
+        "properties": {
+            "post": {"type": "integer", "description": "Phone post number from this conversation (default: the latest)"},
+            "flowai_post": {"type": "integer", "description": "Or a FlowAI post that went up by itself at its "
+                                                              "scheduled time (phone_status lists them)"},
+        },
+    },
+)
+async def post_feedback(session, post: int | None = None, flowai_post: int | None = None):
+    return await session.phone.feedback(post, flowai_post)
+
+
+@tool(
+    "phone_task",
+    "Do something else on the team's Android phone (it has the Instagram and X apps): e.g. check which accounts "
+    "are logged in, reply to a comment, read the notifications. Give a complete, self-contained instruction. It "
+    "runs in the background and you are told the result.",
+    {
+        "type": "object",
+        "properties": {
+            "instruction": {"type": "string", "description": "What to do on the phone, in plain language"},
+            "skill": {"type": "string", "description": "A phone skill to follow, from the list in your instructions"},
+        },
+        "required": ["instruction"],
+    },
+)
+async def phone_task(instruction: str, session, skill: str | None = None):
+    return await session.phone.task(instruction, skill)
+
+
+@tool("phone_status", "What the phone is doing, what it last said, and the posts made from it (here and FlowAI's "
+                      "scheduled ones) with their numbers.")
+def phone_status(session):
+    return session.phone.status()
+
+
+@tool(
+    "answer_phone",
+    "Answer the phone when it asks something or waits for the user's OK: approve true/false for an approval "
+    "(only as the user said), or text to tell it more, or to correct what it just did.",
+    {
+        "type": "object",
+        "properties": {
+            "approve": {"type": "boolean", "description": "The user's answer to what the phone wants to do"},
+            "text": {"type": "string", "description": "What to tell the phone"},
+        },
+    },
+)
+async def answer_phone(session, approve: bool | None = None, text: str | None = None):
+    return await session.phone.answer(text, approve)
+
+
+@tool("cancel_phone_task", "Stop what the phone is doing.")
+async def cancel_phone_task(session):
+    return await session.phone.cancel()
