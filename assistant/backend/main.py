@@ -14,6 +14,11 @@ from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import ConversationStore
 from .llm import LLM
+from .lipsync import LipSync
+from .music import SongWriter
+from .phone import PhoneClient, PhoneError
+from .phone_direct import DirectDriver, VisionModel
+from .publisher import FlowAIAgentError, Publisher, agent_token
 from .session import Models, VoiceSession
 from .tts import SAMPLE_RATE as TTS_RATE
 from .tts import TTSEngine
@@ -26,6 +31,58 @@ log = logging.getLogger("voice-agent")
 
 MEDIA_DIR = ROOT / settings.media_dir
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def check_phone(phone: PhoneClient):
+    try:
+        s = await phone.status()
+        phone.device = settings.phone_device_ref or s.get("device_id") or ""
+        if phone.driver:
+            await phone.driver.ready()
+        log.info("Phone %s: %s%s", s.get("device_id"), "online" if s.get("online") else "OFFLINE",
+                 "" if s.get("ble_linked") else ", input board not linked")
+    except PhoneError as exc:
+        log.warning("Phone API at %s: %s (phone tools will report errors until it answers)", phone.base_url, exc)
+
+
+async def start_publisher(app: FastAPI, phone: PhoneClient):
+    """Publishing FlowAI's scheduled posts from the phone, once FlowAI and the phone answer."""
+    warned = False
+    while True:
+        try:
+            token = settings.flowai_agent_token
+            if not token:
+                if not (settings.flowai_email and settings.flowai_password):
+                    log.info("FlowAI's scheduled posts aren't published from the phone: set FLOWAI_AGENT_TOKEN "
+                             "(FlowAI's Phones page) or FLOWAI_EMAIL and FLOWAI_PASSWORD")
+                    return
+                token = await agent_token(settings.flowai_url, settings.flowai_dashboard_url,
+                                          settings.flowai_email, settings.flowai_password)
+            ref = settings.phone_device_ref or (await phone.status())["device_id"]
+            phone.device = ref
+            publisher = Publisher(phone, settings.flowai_url, token, ref, ROOT / settings.data_dir / "phone",
+                                  ROOT / settings.phone_skills_dir, settings.phone_publish_poll_seconds,
+                                  settings.phone_post_mode, settings.phone_mode, settings.phone_max_steps,
+                                  settings.phone_feedback_after_minutes, MEDIA_DIR / "phone")
+            publisher.start()
+            app.state.publisher = publisher
+            return
+        except (FlowAIAgentError, PhoneError) as exc:
+            if not warned:
+                log.warning("Publishing from the phone waits: %s (trying again every 30 s)", exc)
+                warned = True
+        await asyncio.sleep(30)
+
+
+async def check_lipsync(lipsync: LipSync):
+    """Keeps /health's answer about dubbing fresh, and says in the log when it changes."""
+    said = None
+    while True:
+        status = await asyncio.to_thread(lipsync.check)
+        if status != said:
+            log.info("Lip sync at %s: %s", lipsync.url, status)
+            said = status
+        await asyncio.sleep(60)
 
 
 async def check_comfy(comfy: ComfyClient):
@@ -76,21 +133,55 @@ async def lifespan(app: FastAPI):
             log.error("Browser failed to start, website tools disabled: %s", str(exc).splitlines()[0])
             log.error("If Chromium is missing system libraries, run: sudo .venv/bin/playwright install-deps chromium")
             await browser.close()
+    if settings.music_url:
+        app.state.models.music = SongWriter(settings.music_url, settings.music_api_key, settings.music_timeout_seconds)
+        log.info("Songs for videos: ACE-Step at %s", settings.music_url)
+    if settings.lipsync_url:
+        lipsync = LipSync(settings.lipsync_url, settings.lipsync_api_key, settings.lipsync_timeout_minutes * 60)
+        app.state.models.lipsync = lipsync
+        app.state.lipsync_check = asyncio.create_task(check_lipsync(lipsync))
     if settings.comfyui_url:
         comfy = ComfyClient(settings.comfyui_url, settings.comfyui_api_key, ROOT / settings.comfyui_descriptions)
         app.state.models.comfy = comfy
         app.state.comfy_check = asyncio.create_task(check_comfy(comfy))  # don't hold up startup
     else:
         log.info("COMFYUI_URL is not set: picture/video generation is off")
+    if settings.phone_api_url:
+        phone = PhoneClient(settings.phone_api_url, settings.phone_api_key, settings.phone_verify_tls)
+        phone.prefer, phone.agent_retry_s = settings.phone_driver, settings.phone_agent_retry_minutes * 60
+        # Our own agent, there for the switch on the Assistant page (used only when PHONE_DRIVER or the switch says)
+        if settings.ollama_api_key or "ollama.com" not in settings.ollama_host:
+            phone.driver = DirectDriver(phone, VisionModel(settings.ollama_host, settings.ollama_api_key,
+                                                           settings.phone_vision_model), settings.phone_verify_posts)
+        elif settings.phone_driver != "agent":
+            log.warning("PHONE_DRIVER=%s needs OLLAMA_API_KEY for our own agent: the phone's agent drives it",
+                        settings.phone_driver)
+            phone.prefer = "agent"
+        phone.load_choice(ROOT / settings.data_dir / "phone" / "driver.json")  # the switch's last position
+        log.info("The phone is driven by %s", phone.driven_by())
+        app.state.models.phone = phone
+        app.state.phone_check = asyncio.create_task(check_phone(phone))
+        if settings.phone_publish and settings.flowai_url:
+            app.state.publisher_start = asyncio.create_task(start_publisher(app, phone))
+    else:
+        log.info("PHONE_API_URL is not set: posting from the phone is off")
     app.state.models.conversations = ConversationStore(
         ROOT / settings.data_dir / "conversations", app.state.models.comfy, MEDIA_DIR, ROOT / settings.fonts_dir,
-        settings.comfyui_timeout_minutes * 60)
+        settings.comfyui_timeout_minutes * 60, app.state.models.phone)
     log.info("Ready")
     yield
+    if check := getattr(app.state, "lipsync_check", None):
+        check.cancel()
     if app.state.models.browser:
         await app.state.models.browser.close()
     if app.state.models.comfy:
         await app.state.models.comfy.close()
+    if publisher := getattr(app.state, "publisher", None):
+        await publisher.close()
+    elif start := getattr(app.state, "publisher_start", None):
+        start.cancel()
+    if app.state.models.phone:
+        await app.state.models.phone.close()
 
 
 app = FastAPI(title="Voice Agent", lifespan=lifespan)
@@ -101,7 +192,21 @@ def health():
     comfy = app.state.models.comfy
     return {"ok": True, "llm": settings.llm_model, "asr_mode": settings.asr_mode,
             "tts": "voicestudio" if settings.tts_url else "local", "flowai": settings.flowai_url or "off",
-            "comfyui": "off" if not comfy else (comfy.error or f"ok, {len(comfy.workflows)} workflows")}
+            "phone": phone_health(),
+            "comfyui": "off" if not comfy else (comfy.error or f"ok, {len(comfy.workflows)} workflows"),
+            "lipsync": app.state.models.lipsync.status if app.state.models.lipsync else "off"}
+
+
+def phone_health() -> str:
+    if not app.state.models.phone:
+        return "off"
+    phone = app.state.models.phone
+    driver = phone.driven_by()
+    publisher = getattr(app.state, "publisher", None)
+    if not publisher:
+        return f"on, driven by {driver} (FlowAI's scheduled posts aren't published from it)"
+    return f"on, driven by {driver}, publishing FlowAI's scheduled posts as {publisher.device_ref}" + \
+        (f" (waiting: {publisher.error})" if publisher.error else "")
 
 
 @app.websocket("/ws")

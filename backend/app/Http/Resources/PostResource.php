@@ -37,6 +37,16 @@ class PostResource extends JsonResource
             'approved_at' => $this->approved_at?->toIso8601ZuluString(),
             'post_url' => $this->post_url,
             'error' => $this->error,
+            // The latest publishing run, when loaded: its outcome and the screenshot it ended on, as proof
+            'run' => $this->whenLoaded('latestRun', fn () => $this->latestRun ? [
+                'id' => $this->latestRun->id,
+                'outcome' => $this->latestRun->status,
+                'attempt' => $this->latestRun->attempt,
+                'ended_at' => $this->latestRun->ended_at?->toIso8601ZuluString(),
+                'note' => $this->latestRun->evidence['note'] ?? $this->latestRun->error,
+                'steps' => count($this->latestRun->steps ?? []),
+                'screenshot_url' => $this->latestRun->screenshot_id ? "/api/assets/{$this->latestRun->screenshot_id}/file" : null,
+            ] : null),
             'scheduled_at' => $this->scheduled_at?->toIso8601ZuluString(),
             'published_at' => $this->published_at?->toIso8601ZuluString(),
             'created_at' => $this->created_at?->toIso8601ZuluString(),

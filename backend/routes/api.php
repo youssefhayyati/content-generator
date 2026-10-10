@@ -122,6 +122,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('publishing/agent-token/rotate', [PublishingController::class, 'rotateToken']);
     Route::post('posts/{post}/retry', [PublishingController::class, 'retry']);
     Route::post('posts/{post}/confirm-live', [PublishingController::class, 'confirm']);
+    // The voice assistant posted it from the phone, on the person's word: the run, with its proof.
+    Route::post('posts/{post}/phone-run', [PublishingController::class, 'phoneRun']);
 
     // Platform specs and the pre-export check.
     Route::get('platform-specs', [SpecController::class, 'index']);

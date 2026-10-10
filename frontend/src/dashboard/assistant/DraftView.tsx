@@ -10,6 +10,7 @@ import {
   CircleCheck,
   CloudUpload,
   ExternalLink,
+  Film,
   Heart,
   ImagePlus,
   Megaphone,
@@ -34,10 +35,12 @@ import { fromInputs, toInputs } from '../data'
 import { useUser } from '../Shell'
 import { Avatar, Btn, EmptyState, inputClass, Label, Menu, Segmented } from '../ui'
 import { FontPicker } from './Fonts'
+import { History } from './History'
 import { PICTURE_DRAG, ASSET_DRAG, MediaChooser } from './MediaView'
 import { TextColours } from './Palette'
 import { MaskBar, MaskCanvas, MaskProvider } from './Retouch'
 import { useAssistant, type Draft, type Linked, type Slide, type TextBox } from './store'
+import { DraftPhonePost, PostFromPhone } from './PhoneProof'
 import { VideoMaker } from './VideoMaker'
 
 const POSITIONS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']
@@ -107,17 +110,17 @@ export function DraftView() {
               x.id === d.id ? 'border-line-2 bg-white/[0.06]' : 'border-line hover:border-line-2',
             )}
           >
-            <span className="relative size-8 shrink-0 overflow-hidden rounded-md bg-white/[0.05]">
+            <span className="relative grid size-8 shrink-0 place-items-center overflow-hidden rounded-md bg-white/[0.05] text-dim">
               {x.slides[0]?.kind === 'image' && <img src={x.slides[0].url} alt="" className="size-full object-cover" />}
-              <PlatformIcon id={x.platform} className="absolute bottom-0.5 right-0.5 size-2.5 text-white drop-shadow" />
+              {x.slides[0]?.kind === 'video' && <video src={x.slides[0].url} muted preload="metadata" className="size-full object-cover" />}
+              {x.slides[0]?.kind === 'video' ? <Film className="absolute bottom-0.5 right-0.5 size-2.5 text-white drop-shadow" /> : <PlatformIcon id={x.platform} className="absolute bottom-0.5 right-0.5 size-2.5 text-white drop-shadow" />}
             </span>
             <span className="min-w-0">
               <span className="block max-w-[16ch] truncate text-[12px] font-medium">{x.title || `Draft ${x.id}`}</span>
               <span className="flex items-center gap-1 font-mono text-[10px] text-dim">
                 {a.linked[x.id] && <Megaphone className={cn('size-2.5 shrink-0', a.linked[x.id].version === x.version ? 'text-accent-soft' : 'text-warn')} />}
-                {a.linked[x.id]?.handle ? `@${a.linked[x.id].handle}` : x.label} · v{x.version}
-                {a.saved[x.id] && (a.saved[x.id].version === x.version ? ` · post ${a.saved[x.id].post}` : ' · unsaved')}
-                {a.linked[x.id] && a.linked[x.id].version !== x.version && ' · unsaved'}
+                {a.linked[x.id]?.handle ? `@${a.linked[x.id].handle}` : x.label}
+                {(a.saved[x.id] || a.linked[x.id]) && (a.linked[x.id] ?? a.saved[x.id]).version !== x.version && <span className="text-warn">· unsaved</span>}
               </span>
             </span>
           </button>
@@ -474,6 +477,7 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
   const fresh = linked ? linked.version === d.version : saved && saved.version === d.version
   const failing = (d.check.checks ?? []).some((c) => c.status === 'fail')
   const slide = d.slides[index]
+  const earlier = d.versions.find((v) => v.version === d.version)?.parent
 
   return (
     <div className="min-w-0 space-y-4">
@@ -507,7 +511,7 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Btn size="sm" icon={Undo2} disabled={d.version < 2} onClick={() => a.action('undo', { draft: d.id })}>
+          <Btn size="sm" icon={Undo2} disabled={earlier == null} title={earlier != null ? `Back to version ${earlier}` : undefined} onClick={() => a.action('undo', { draft: d.id })}>
             Undo
           </Btn>
           {!fresh && (
@@ -528,7 +532,14 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
           )}
         </div>
         {!a.accounts.length && <p className="mt-2 text-[11.5px] text-dim">Add an Instagram or X account under Accounts to save drafts to FlowAI.</p>}
+        {!a.phoneDriver && <DraftPhonePost draft={d.id} />}
       </Section>
+
+      {a.phoneDriver && (
+        <Section title="From the phone" aside={<span className="font-mono text-[10.5px] text-dim">applies to every phone post</span>}>
+          <PostFromPhone d={d} />
+        </Section>
+      )}
 
       {d.caption_limit > 0 && (
         <Section title={d.platform === 'x' ? 'Post text' : 'Caption'}>
@@ -547,15 +558,19 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
         <SlideStrip key={`${d.id}-${d.placement}`} d={d} index={index} onShow={onShow} />
       </Section>
 
-      <Section title={slide ? `Texts on slide ${index + 1}` : 'Texts'}>
+      <Section title={slide?.kind === 'video' ? (d.slides.length > 1 ? `Texts on video ${index + 1}` : 'Texts on the video') : slide ? `Texts on slide ${index + 1}` : 'Texts'}>
         <Texts d={d} index={index} />
       </Section>
 
       {!d.video && d.slides.length > 0 && (
-        <Section title="Video with voice" aside={<span className="font-mono text-[10.5px] text-dim">{d.videos.length ? `${d.videos.length} made` : 'for reels and stories'}</span>}>
+        <Section title="Video with voice" aside={<span className="font-mono text-[10.5px] text-dim">turns this post into a reel</span>}>
           <VideoMaker d={d} />
         </Section>
       )}
+
+      <Section title="History" aside={<span className="font-mono text-[10.5px] text-dim">v{d.version} on screen · {d.versions.length} kept</span>}>
+        <History d={d} />
+      </Section>
     </div>
   )
 }
@@ -765,12 +780,12 @@ function Texts({ d, index }: { d: Draft; index: number }) {
           })}
         </div>
       ) : (
-        <p className="text-[12px] text-dim">{d.video ? `The words on this video come from draft ${d.video.from}: change them there, then make it again.` : isVideo ? 'Texts can’t be drawn on videos yet: use the caption.' : 'No texts on this slide.'}</p>
+        <p className="text-[12px] text-dim">{isVideo ? 'No texts on the video yet. A text added here shows over the whole video.' : 'No texts on this slide.'}</p>
       )}
 
       <AnimatePresence mode="wait">{selected && <TextEditor key={selected.id} d={d} t={selected} palette={slide?.palette ?? []} />}</AnimatePresence>
 
-      {!isVideo && slide && (
+      {slide && (
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -780,7 +795,7 @@ function Texts({ d, index }: { d: Draft; index: number }) {
             setAdding('')
           }}
         >
-          <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="Add a text to this slide" className={cn(inputClass, 'h-8 text-[12.5px]')} />
+          <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder={isVideo ? 'Add a text over the video' : 'Add a text to this slide'} className={cn(inputClass, 'h-8 text-[12.5px]')} />
           <Btn size="sm" type="submit" icon={Type} disabled={!adding.trim()} className="h-8">
             Add
           </Btn>

@@ -21,9 +21,15 @@ page), the client signs in the way the dashboard does: Sanctum's session cookie,
 The connection's FlowAISession knows the user and their accounts; the drafts' links (Saved,
 Linked, Approval) belong to the conversation on screen (backend/conversations.py), and attach()
 switches to another one's.
+
+A draft posted from the team's phone (backend/phone.py) goes on FlowAI's record like a scheduled post
+does: it's saved as a post while the phone posts it, then the run is added with the screenshot the
+phone ended on (POST /api/posts/{post}/phone-run), which publishes the post at the time it went up,
+so the calendar and the Publishing page show it with its proof.
 """
 
 import asyncio
+import json
 import logging
 import mimetypes
 import re
@@ -41,6 +47,7 @@ from .studio import Draft, StudioError, _number, _numbers
 
 if TYPE_CHECKING:
     from .conversations import Conversation
+    from .phone import PhonePost
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +59,7 @@ STAGES = {"brief": "brief being written", "planning": "being planned", "plan_rev
           "content_review": "posts waiting for approval (gate 6B)", "scheduled": "scheduled"}
 BRIEF_CHARS = 2500  # of the campaign's brief, in the prompt
 QUEUE_WORDS = ("queue", "slot")  # "when" meaning the account's next free posting time
+OUTCOMES = {"posted": "confirmed", "unsure": "uncertain", "failed": "failed"}  # a phone post's, as FlowAI's run
 
 
 class FlowAIError(Exception):
@@ -272,6 +280,14 @@ class FlowAISession:
         self.linked: dict[int, Linked] = conv.linked  # draft id ->
         self.approvals: dict[int, Approval] = conv.approvals
         self.uploaded: set[int] = conv.uploaded  # assets this conversation uploaded: the only ones it deletes
+        conv.phone.recorder = self  # its posts from the phone go on FlowAI's record through this
+        if self.user:
+            conv.phone.flush_records()
+
+    def detach(self, conv: "Conversation"):
+        """The page closed: FlowAI isn't reachable as this user any more (its posts wait for the next one)."""
+        if conv.phone.recorder is self:
+            conv.phone.recorder = None
 
     def notify(self, text: str):
         """Something the assistant should say."""
@@ -318,6 +334,7 @@ class FlowAISession:
                                   for a in self.accounts.values()])
         if not self.error:
             await self.send_posts()
+            self.conv.phone.flush_records()
 
     def prompt(self) -> str:
         if self.error and not self.accounts:
@@ -765,6 +782,59 @@ class FlowAISession:
         self.notify(f"The user approved it on screen: post {a.post} ({d.label}) is scheduled for "
                     f"{self._local(saved.scheduled_at)}. Tell them in a few words.")
 
+    # --- posted from the phone ------------------------------------------------------
+
+    async def save_for_phone(self, post: "PhonePost") -> int:
+        """The draft being posted from the phone, as a FlowAI post (once per version): its record goes there.
+        The account is the draft's, or the platform's only one; none is fine (FlowAI's post names the platform)."""
+        if post.draft in self.linked:
+            raise FlowAIError("it's a campaign's post: its runs are FlowAI's own")
+        async with self.lock:
+            saved = self.saved.get(post.draft)
+            d = self.studio.drafts.get(post.draft)
+            if saved and saved.status in LIVE and post.flowai_post != saved.post:
+                # Up already from an earlier post of this draft: posting it again is another post, of its own
+                if not d:
+                    raise FlowAIError(f"draft {post.draft} is gone")
+                self.saved.pop(post.draft)
+                saved = None
+            elif saved and (saved.version == post.version or not d or d.version != post.version):
+                return saved.post  # saved as posted (or the draft moved on since: the saved one is the nearest)
+            if not d:
+                raise FlowAIError(f"draft {post.draft} is gone")
+            try:
+                acct = self._account(d.platform, saved.account if saved else None)
+            except StudioError:
+                acct = None
+            return (await self._save(d, acct)).post
+
+    async def record_phone(self, post: "PhonePost", shot: bytes | None, device: str = "") -> dict:
+        """The phone's run on the draft's FlowAI post, with the screenshot it ended on: confirmed, the post is
+        published at the time it went up (and shows on the calendar there); unsure, it waits for a person to
+        check; failed, the post stays as it was."""
+        outcome = OUTCOMES[post.status]
+        saved = self.saved.get(post.draft)
+        if outcome == "failed" and saved and saved.status in LIVE and post.flowai_post != saved.post:
+            # Posting it again didn't work: the post that is up stays as it is, and nothing new is up
+            return {"post": None, "status": "not recorded: nothing went up, and the draft's FlowAI post "
+                                          f"{saved.post} is up already", "url": None}
+        number = await self.save_for_phone(post)
+        if outcome == "confirmed" and not shot:
+            outcome = "uncertain"  # FlowAI wants proof
+        form = {"outcome": outcome, "note": (post.proof_note or post.detail)[:2000],
+                "steps": json.dumps(post.run.get("steps", [])), "started_at": post.run.get("started"),
+                "ended_at": post.at or post.run.get("ended"), "device_ref": device}
+        answer = await self.client.request("POST", f"/api/posts/{number}/phone-run",
+                                           data={k: v for k, v in form.items() if v},
+                                           files={"screenshot": ("phone.jpg", shot, "image/jpeg")} if shot else None)
+        p = (answer or {}).get("post") or {}
+        if (saved := self.saved.get(post.draft)) and saved.post == number:
+            saved.status, saved.scheduled_at = p.get("status", saved.status), p.get("scheduled_at")
+            if d := self.studio.drafts.get(post.draft):
+                await self._send_saved(d)
+        await self.send_posts()
+        return {"post": number, "status": p.get("status", outcome), "url": self.client.link(number)}
+
     # --- helpers --------------------------------------------------------------------
 
     def _account(self, platform: str, ref=None) -> dict:
@@ -822,9 +892,9 @@ class FlowAISession:
                 aspect = f"{a['width']}:{a['height']}"
         return numbers, aspect
 
-    async def _save(self, d: Draft, acct: dict) -> Saved:
+    async def _save(self, d: Draft, acct: dict | None) -> Saved:
         ids = await self._upload(d)
-        data = self._payload(d, acct["id"], ids)
+        data = self._payload(d, acct["id"] if acct else None, ids)
         before = self.saved.get(d.id)
         try:
             try:
@@ -840,7 +910,8 @@ class FlowAISession:
         post = post.get("data", post)
         if before:  # the slides the last save uploaded are replaced
             await self._delete([i for i in before.assets if i in self.uploaded and i not in ids])
-        saved = Saved(post["id"], acct["id"], d.version, post["status"], ids, data, post.get("scheduled_at"))
+        saved = Saved(post["id"], acct["id"] if acct else None, d.version, post["status"], ids, data,
+                      post.get("scheduled_at"))
         self.saved[d.id] = saved
         await self._send_saved(d)
         await self.send_posts()

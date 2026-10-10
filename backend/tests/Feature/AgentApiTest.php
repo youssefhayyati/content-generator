@@ -83,6 +83,7 @@ class AgentApiTest extends TestCase
         $this->assertSame('com.instagram.android', $job['account']['app']['package']);
         $this->assertContains('post-button', $job['account']['app']['targets']);
         $this->assertSame('A warm caption for the evening ritual.', $job['post']['caption']);
+        $this->assertSame($run->post_id, $job['post']['id']);
         $this->assertSame("/api/agent/assets/{$media->id}/file", $job['media'][0]['url']);
         $this->assertSame((int) config('publishing.step_budget'), $job['limits']['step_budget']);
         $this->assertSame((int) config('publishing.hard_timeout_seconds'), $job['limits']['hard_timeout_seconds']);

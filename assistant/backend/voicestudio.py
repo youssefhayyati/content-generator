@@ -12,6 +12,13 @@ is what a VoiceStudio voice profile holds. Any other voice ("alloy" and the othe
 default: a new random voice for every request. So voices are checked against the server's
 profiles, and a voice from its catalog (1,100 described voices, "archetypes") becomes a profile
 before it is used: VoiceStudio renders its sample once, and asking again returns the same profile.
+
+A video has a voice of its own (session.py, video_voice): match finds the voices that fit a
+description of it ("warm young female, upbeat, for an ad") among the ready ones and the catalog.
+
+A voice can also be cloned from a recording (clone): a profile of kind "clone", which then reads
+like any other. Dubbing a video (dub.py) clones its speaker this way, and asks for speech that
+lasts as long as the video (duration, a VoiceStudio extension of the speech API).
 """
 
 import io
@@ -31,6 +38,27 @@ OPENAI_VOICES = {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "on
                  "marin", "cedar", "default"}
 CATALOG_SHOWN = 60
 SAMPLE_SECONDS = 12  # a preview is the start of the voice's recording
+MATCHES_SHOWN = 12
+
+# Describing a voice (match): everyday words in the catalog's own (its descriptions read "female, young
+# adult, moderate pitch, american accent"; its uses are narration, advertisement, social…)
+SYNONYMS = {"man": "male", "men": "male", "guy": "male", "masculine": "male", "boy": "male",
+            "woman": "female", "women": "female", "girl": "female", "lady": "female", "feminine": "female",
+            "deep": "low", "old": "elderly", "older": "elderly", "senior": "elderly", "kid": "child",
+            "teen": "teenager", "youthful": "young", "uk": "british", "us": "american",
+            "ad": "advertisement", "ads": "advertisement", "advert": "advertisement",
+            "commercial": "advertisement", "promo": "advertisement", "promotional": "advertisement",
+            "marketing": "advertisement", "narrator": "narration", "storyteller": "narration",
+            "storytelling": "narration", "tiktok": "social", "instagram": "social", "reel": "social",
+            "explainer": "informative", "tutorial": "informative", "educational": "informative",
+            "chatty": "conversational", "casual": "conversational"}
+FILLER = {"a", "an", "the", "and", "or", "with", "for", "of", "in", "to", "voice", "voices", "pitch", "accent",
+          "tone", "sounding", "speaker", "who", "that", "is", "very", "bit", "slightly", "video"}
+USE_RANK = {"advertisement": 2, "social": 2, "narration": 2, "characters": 0, "entertainment": 0}  # others 1
+
+
+def _gender(words: list[str]) -> str | None:
+    return "female" if "female" in words else "male" if "male" in words else None
 
 
 def _first_sentence(text: str) -> str:
@@ -41,10 +69,13 @@ def _first_sentence(text: str) -> str:
 def _profile(p: dict) -> dict:
     """A profile as the page shows it."""
     tag = str(p.get("personality") or "")
+    cloned = p.get("kind") == "clone"
     return {"id": p["id"], "name": p.get("name") or p["id"],
-            "description": _first_sentence(p.get("description")) or p.get("instruct") or "",
-            "language": p.get("language") or "",
-            "archetype": tag.removeprefix("archetype:") if tag.startswith("archetype:") else None}
+            "description": _first_sentence(p.get("description")) or p.get("instruct")
+            or ("Cloned from a recording" if cloned else ""),
+            "language": "" if p.get("language") == "Auto" else p.get("language") or "",
+            "archetype": tag.removeprefix("archetype:") if tag.startswith("archetype:") else None,
+            "cloned": cloned}
 
 
 def _archetype(a: dict) -> dict:
@@ -70,6 +101,7 @@ class VoiceStudioTTS:
     voice calls below (all blocking: called in a thread)."""
 
     choosable = True  # the user can pick the voice
+    clonable = True  # and clone one from a recording
 
     def __init__(self, url: str, api_key: str, voice: str, speed: float = 1.0, model: str = "omnivoice"):
         self.http = httpx.Client(base_url=url.rstrip("/"), timeout=60,
@@ -105,16 +137,19 @@ class VoiceStudioTTS:
         return {"id": "default", "name": "VoiceStudio default", "description": "A different voice each sentence",
                 "language": "", "archetype": None}
 
-    def _speech(self, text: str, voice: str) -> np.ndarray:
-        r = self.http.post("/v1/audio/speech", json={"model": self.model, "input": text, "voice": voice,
-                                                     "speed": self.speed, "response_format": "pcm"})
+    def _speech(self, text: str, voice: str, seconds: float | None = None) -> np.ndarray:
+        body = {"model": self.model, "input": text, "voice": voice, "speed": self.speed, "response_format": "pcm"}
+        if seconds:
+            body["duration"] = round(seconds, 2)
+        r = self.http.post("/v1/audio/speech", json=body, **({"timeout": 300} if seconds else {}))
         r.raise_for_status()
         return np.frombuffer(r.content, dtype="<i2").astype(np.float32) / 32768.0
 
-    def synthesize(self, text: str, voice: str | None = None) -> np.ndarray:
+    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None) -> np.ndarray:
+        """seconds: how long the speech should last (a dub fits its video), else its natural length."""
         for attempt in (1, 2):
             try:
-                return self._speech(text, voice or self.default["id"])
+                return self._speech(text, voice or self.default["id"], seconds)
             except httpx.HTTPError as exc:
                 log.warning("VoiceStudio speech failed (attempt %d): %s", attempt, exc)
         return np.zeros(0, dtype=np.float32)  # the words still show on screen
@@ -160,10 +195,66 @@ class VoiceStudioTTS:
                 self._catalog = voices
             return self._catalog
 
+    def find(self, wanted: str) -> tuple[dict, bool] | None:
+        """A voice by its profile id or name, or its catalog id, and whether it's from the catalog."""
+        wanted = wanted.strip()
+        for p in self.profiles():
+            if wanted == p["id"] or wanted.lower() == p["name"].lower():
+                return p, False
+        v = next((v for v in self._load_catalog() if v["id"] == wanted), None)
+        return (v, True) if v else None
+
+    def match(self, description: str, lang: str = "", limit: int = MATCHES_SHOWN) -> list[dict]:
+        """The voices that best fit a description ("warm young female, upbeat, for an ad"), best first:
+        the ready ones and the catalog's, each with catalog true or false. A gender asked for is a must,
+        and so is the language when some voices have it; every other word counts towards the fit.
+        Whispering voices only when asked for."""
+        ready = self.profiles()
+        taken = {v["archetype"] for v in ready if v["archetype"]}
+        voices = [{**v, "catalog": False} for v in ready] + \
+                 [{**v, "catalog": True} for v in self._load_catalog() if v["id"] not in taken]
+        said = re.findall(r"\w+", description.lower())
+        words, very = [SYNONYMS.get(w, w) for w in said if w not in FILLER], "very" in said
+        gender = "female" if "female" in words else "male" if "male" in words else None
+        if lang and any(v["language"] == lang for v in voices):
+            voices = [v for v in voices if v["language"] == lang]
+        scored = []
+        for v in voices:
+            have = re.findall(r"\w+", f'{v["name"]} {v["description"]} {v.get("use", "")} {v["language"]}'.lower())
+            if gender and _gender(have) not in (gender, None):
+                continue
+            if "whisper" in have and "whisper" not in words:  # no one wants a whispered ad by surprise
+                continue
+            score = sum(any(h.startswith(w) for h in have) for w in words)
+            # Between equals: "low pitch" when asked for low (not "very low"), then a voice for this kind of
+            # video (narration, ads, social) before one for characters, then the featured ones
+            off = "very" in have and not very
+            scored.append((score, not off, USE_RANK.get(v.get("use"), 1), v.get("featured", False), not v["catalog"], v))
+        scored.sort(key=lambda s: s[:5], reverse=True)
+        return [s[-1] for s in scored[:limit]]
+
     def adopt(self, archetype: str) -> dict:
         """A catalog voice as a profile: rendered the first time (about 3 s), the same one after that."""
         pid = self.http.post(f"/archetypes/{archetype}/use").raise_for_status().json()["profile_id"]
         return _profile(self.http.get(f"/profiles/{pid}").raise_for_status().json())
+
+    def clone(self, name: str, wav: bytes, text: str = "") -> dict:
+        """A voice cloned from a recording (a WAV of one person speaking, best 5 to 20 seconds) as a
+        profile. text: what the recording says, which makes the clone closer."""
+        r = self.http.post("/profiles", timeout=180, files={"ref_audio": ("reference.wav", wav, "audio/wav")},
+                           data={"name": name, "kind": "clone", "ref_text": text, "language": "Auto"})
+        r.raise_for_status()
+        made = r.json()
+        if "kind" not in made:  # only its id came back
+            made = self.http.get(f"/profiles/{made['id']}").raise_for_status().json()
+        return _profile(made)
+
+    def listen(self, wav: bytes) -> str:
+        """What a recording says (the server's speech recognition, in any language)."""
+        r = self.http.post("/v1/audio/transcriptions", timeout=300, files={"file": ("speech.wav", wav, "audio/wav")},
+                           data={"model": "whisper-1", "response_format": "json"})
+        r.raise_for_status()
+        return " ".join(str(r.json().get("text") or "").split())
 
     def sample(self, voice: str | None = None, archetype: str | None = None) -> np.ndarray:
         """How a voice sounds: a profile's own recording, or a catalog voice's preview (rendered the

@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, Toggle } from '../ui'
 import { ConversationBar, ConversationList } from './Conversations'
+import { PhoneCard, PhoneLiveBar } from './PhoneProof'
 import { VoicePicker } from './Voices'
 import type { VoiceState } from './link'
 import { useAssistant, useAssistantLog, useVoiceState, type Approval, type LogItem } from './store'
@@ -54,6 +55,7 @@ export function Conversation({ className, onImport }: { className?: string; onIm
       <ConversationBar onList={() => setListing(true)} />
       <VoiceBar />
       <Log />
+      <PhoneLiveBar />
       <Approvals />
       <Composer onVoice={() => setVoicing(true)} />
       <VoicePicker open={voicing} onClose={() => setVoicing(false)} />
@@ -250,6 +252,8 @@ function Line({ item }: { item: LogItem }) {
           </span>
         </motion.p>
       )
+    case 'phone':
+      return <PhoneCard post={item.post} text={item.text} proof={item.proof} failed={item.failed} />
     case 'note':
       return (
         <motion.p {...enter} className={cn('flex items-start justify-center gap-1.5 text-center font-mono text-[10.5px] leading-snug', item.tone === 'error' ? 'text-fail' : 'text-dim')}>
@@ -326,6 +330,8 @@ function Composer({ onVoice }: { onVoice: () => void }) {
   const d = a.focus.draft ? a.drafts[a.focus.draft] : undefined
   const text = d && a.focus.text ? d.slides.flatMap((s) => s.texts).find((t) => t.id === a.focus.text) : undefined
   const selected = d && a.focus.text ? `Text ${a.focus.text}${text ? ` “${text.words}”` : ''}` : d && a.focus.slide ? `Slide ${a.focus.slide} of draft ${d.id}` : null
+  // The post a request changes when it doesn't name one: the one on screen
+  const onScreen = a.current ? a.drafts[a.current] : undefined
 
   // Grow with what's typed, up to a few lines.
   useLayoutEffect(() => {
@@ -366,6 +372,13 @@ function Composer({ onVoice }: { onVoice: () => void }) {
           </motion.div>
         )}
       </AnimatePresence>
+      {!selected && onScreen && a.tab === 'draft' && (
+        <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-dim">
+          <span className="w-0 min-w-0 flex-1 truncate">
+            Changes go to <span className="text-muted">{onScreen.title || `Draft ${onScreen.id}`}</span> · {onScreen.label}
+          </span>
+        </p>
+      )}
       <div className="flex items-end gap-2 rounded-lg border border-line-2 bg-white/[0.02] p-1.5 transition-[border-color,box-shadow] focus-within:border-accent-soft/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_18%,transparent)]">
         <button type="button" onClick={() => file.current?.click()} aria-label="Attach a picture or video" className="grid size-8 shrink-0 place-items-center rounded-md text-dim hover:bg-white/[0.05] hover:text-fg">
           <Paperclip className="size-4" strokeWidth={1.75} />
@@ -413,11 +426,18 @@ function Composer({ onVoice }: { onVoice: () => void }) {
         />
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1">
-        <label className="flex items-center gap-2 text-[11.5px] text-dim">
-          <Toggle on={a.bargeIn} onChange={a.setBargeIn} label="Talk over the assistant" />
-          <Headphones className="size-3.5" strokeWidth={1.75} />
-          Talk over it {a.bargeIn ? '(best with headphones)' : '(the mic pauses while it speaks)'}
+        <label className="flex items-center gap-2 text-[11.5px] text-dim" title={a.speech ? 'Replies are read aloud' : 'Replies are only written: just chat'}>
+          <Toggle on={a.speech} onChange={a.setSpeech} label="Speak the replies" />
+          {a.speech ? <Volume2 className="size-3.5" strokeWidth={1.75} /> : <VolumeX className="size-3.5" strokeWidth={1.75} />}
+          {a.speech ? 'Spoken replies' : 'Text only'}
         </label>
+        {a.speech && (
+          <label className="flex items-center gap-2 text-[11.5px] text-dim">
+            <Toggle on={a.bargeIn} onChange={a.setBargeIn} label="Talk over the assistant" />
+            <Headphones className="size-3.5" strokeWidth={1.75} />
+            Talk over it {a.bargeIn ? '(best with headphones)' : '(the mic pauses while it speaks)'}
+          </label>
+        )}
         <button
           type="button"
           onClick={onVoice}

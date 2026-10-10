@@ -79,6 +79,16 @@ class Settings(BaseSettings):
     # Music under videos made with make_video (backend/reel.py): FlowAI Sound's composer, e.g.
     # http://sound:8000 next to FlowAI; empty = videos have only the voice
     sound_url: str = ""
+    # Songs written for each video (backend/music.py): an ACE-Step 1.5 API, e.g. http://music:8000 next to
+    # FlowAI (content-generator/music/) or a pod's; empty = only the composer's moods
+    music_url: str = ""
+    music_api_key: str = ""  # its ACESTEP_API_KEY, when it has one
+    music_timeout_seconds: int = 300  # the first song also loads the model
+    # Lip sync for dubbed videos (backend/lipsync.py): the LatentSync API, e.g. http://lipsync:8000 next to
+    # FlowAI (content-generator/lipsync/) or a pod's; empty = dubbing is off
+    lipsync_url: str = ""
+    lipsync_api_key: str = ""  # its LIPSYNC_API_KEY, when it has one
+    lipsync_timeout_minutes: int = 30  # the first dub also downloads and loads the model
 
     # FlowAI (content-generator/): where drafts are saved as posts and scheduled (backend/flowai.py)
     flowai_url: str = ""  # its API, e.g. http://localhost:8002; empty = off
@@ -87,6 +97,36 @@ class Settings(BaseSettings):
     # Until FlowAI issues the assistant a token (FLOWAI_INTEGRATION.md, change 1), it signs in as this user
     flowai_email: str = ""
     flowai_password: str = ""
+
+    # The team's Android phone (backend/phone.py): the hackathon Phone API, whose agent posts drafts from the
+    # phone's Instagram and X apps and reads back how they do
+    phone_api_url: str = ""  # e.g. https://172.26.0.32/hack/v1; empty = off
+    phone_api_key: str = ""  # the team key (hk_...)
+    phone_verify_tls: bool = False  # the hackathon server's certificate is self-signed
+    # Who drives the phone: "agent", the Phone API's own agent (POST /tasks, on the organisers' model account),
+    # with PHONE_MODE and PHONE_POST_MODE; "direct", our own agent (backend/phone_direct.py), which looks at the
+    # screen and sends the phone's direct controls itself, with PHONE_VISION_MODEL on our Ollama account; "auto",
+    # the Phone API's agent, and ours takes a job over when that one errors or hangs (for PHONE_AGENT_RETRY_MINUTES
+    # after it had no model to think with, ours starts the jobs)
+    phone_driver: Literal["auto", "direct", "agent"] = "agent"
+    phone_agent_retry_minutes: float = 30
+    phone_vision_model: str = "kimi-k3"  # needs vision; glm-5.3-flash works too, a little slower
+    phone_verify_posts: bool = True  # direct: look once more at the screen a post ended on before calling it up
+    phone_mode: Literal["flash", "pro"] = "flash"  # the API's agent for feedback and other tasks
+    phone_post_mode: Literal["flash", "pro"] = "pro"  # for posting: pro also checks independently that it went up
+    phone_max_steps: int = 40  # the team's limit
+    phone_skills_dir: str = "skills/phone"  # how to post and check posts in each app
+    phone_feedback_after_minutes: float = 60  # check a post's numbers this long after it went up; 0 = only when asked
+    # While it posts, the phone asks an OK for plain input it can't check (Enter in a field it can't read): give it,
+    # as part of the post the user asked for. Off: the assistant asks the user each time
+    phone_auto_approve_posts: bool = True
+    # Publish the posts FlowAI schedules from this phone when their time comes (backend/publisher.py): FlowAI's
+    # agent API, with FLOWAI_URL, signed with the user's agent token (FlowAI's Phones page; empty = fetched by
+    # signing in with FLOWAI_EMAIL and FLOWAI_PASSWORD)
+    phone_publish: bool = True
+    flowai_agent_token: str = ""
+    phone_device_ref: str = ""  # the device ID the phone has in FlowAI; empty = the phone API's own (heracles-phone)
+    phone_publish_poll_seconds: float = 15  # how often FlowAI is asked for a post to publish
 
     # VAD / turn taking
     vad_threshold: float = 0.5
