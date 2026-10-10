@@ -2,6 +2,7 @@
 
 namespace App\Services\Campaigns;
 
+use App\Enums\PostStatus;
 use App\Jobs\AdaptItem;
 use App\Jobs\FinishProduction;
 use App\Jobs\ProduceCampaign;
@@ -426,6 +427,18 @@ class Pipeline
         }
         $variant->update(['status' => 'approved', 'approved_at' => now(), 'approved_by' => $user->id]);
         ActionLog::record($user, 'you', 'variant.approved', $variant, "Approved “{$variant->item->title}” for @{$variant->account->handle} (gate 6B).", 'approved');
+
+        // Times already booked take the version just approved: what goes out is what was approved.
+        foreach ($variant->posts()->whereIn('status', [PostStatus::Draft, PostStatus::Scheduled])->get() as $post) {
+            $post->update([
+                'title' => Str::limit($variant->item->title, 120, ''),
+                'body' => (string) $variant->caption,
+                'placement' => $variant->placement,
+                'approved_at' => $variant->approved_at,
+                'approved_by' => $variant->approved_by,
+            ]);
+            $post->syncAssets($variant->assets()->pluck('id')->all());
+        }
     }
 
     /** Rejected with a note: the adapter rewrites it, fixing what the note says. */
@@ -444,10 +457,16 @@ class Pipeline
         }
     }
 
-    /** Edited by a person: checked against the platform again; QA's earlier verdict no longer applies. */
-    public function edit(ItemVariant $variant, string $caption, ?string $placement): void
+    /**
+     * Edited by a person (or by the assistant for them): checked against the platform again; QA's
+     * earlier verdict no longer applies, and it waits at gate 6B again.
+     *
+     * @param  list<int>|null  $assetIds  its own media for this account; null keeps what it has
+     */
+    public function edit(ItemVariant $variant, string $caption, ?string $placement, ?array $assetIds = null): void
     {
-        $variant->update(['caption' => $caption, 'placement' => $placement ?? $variant->placement, 'qa' => ['status' => 'pass', 'issues' => [], 'edited' => true], 'status' => 'draft']);
+        $variant->update(['caption' => $caption, 'placement' => $placement ?? $variant->placement, 'qa' => ['status' => 'pass', 'issues' => [], 'edited' => true], 'status' => 'draft']
+            + ($assetIds !== null ? ['asset_ids' => $assetIds] : []));
         $this->check($variant);
     }
 

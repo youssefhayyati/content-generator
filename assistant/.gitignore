@@ -1,0 +1,11 @@
+.venv/
+.env
+voices/
+__pycache__/
+key.txt
+browser-profile/
+media/
+data/
+comfyui/pod.env
+comfyui/outputs/
+content-generator/

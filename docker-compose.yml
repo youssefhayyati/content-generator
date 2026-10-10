@@ -49,6 +49,59 @@ services:
     mem_limit: 1000m
     restart: unless-stopped
 
+  # The voice assistant (assistant/): the Assistant page talks to it at /assistant/ through the
+  # Vite proxy. Speech recognition and its voice run on an NVIDIA GPU (NVIDIA container toolkit),
+  # so it only starts when asked: docker compose --profile assistant up -d
+  # The first start downloads its speech models (about 6 GB) into assistant-models.
+  # Settings (the Ollama key, ComfyUI, VoiceStudio) are in assistant/.env, from assistant/.env.example.
+  assistant:
+    build: ./assistant
+    profiles: [assistant]
+    env_file: ./assistant/.env
+    environment: &assistant-env
+      FLOWAI_URL: http://api:8000
+      FLOWAI_DASHBOARD_URL: http://localhost:5173
+      BROWSER_ENABLED: "false"
+    ports:
+      - "${ASSISTANT_PORT:-8003}:8000"
+    volumes: &assistant-volumes
+      - assistant-models:/cache
+      - assistant-media:/app/media
+      - assistant-voices:/app/voices
+      - assistant-data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # The same without a GPU: docker compose --profile assistant-cpu up -d
+  # Recognition takes about 2 s after you stop talking; set TTS_URL (VoiceStudio) for its voice.
+  assistant-cpu:
+    build:
+      context: ./assistant
+      args:
+        TORCH: cpu
+    profiles: [assistant-cpu]
+    env_file: ./assistant/.env
+    environment:
+      <<: *assistant-env
+      ASR_DEVICE: cpu
+      ASR_DTYPE: float32
+      TTS_DEVICE: cpu
+      TTS_DTYPE: float32
+    ports:
+      - "${ASSISTANT_PORT:-8003}:8000"
+    volumes: *assistant-volumes
+    depends_on:
+      - api
+    restart: unless-stopped
+
   # Catches every email the API sends. Inbox at http://localhost:8025
   mailpit:
     image: axllent/mailpit
@@ -66,3 +119,7 @@ services:
 volumes:
   vendor:
   ollama:
+  assistant-models:
+  assistant-media:
+  assistant-voices:
+  assistant-data:

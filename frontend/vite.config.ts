@@ -12,6 +12,14 @@ declare const process: { env: Record<string, string | undefined> }
 // (The string shorthand would rewrite Host to :8000, hence the explicit objects.)
 const api = { target: process.env.API_ORIGIN ?? 'http://localhost:8000', changeOrigin: false }
 
+// The voice assistant (docker compose --profile assistant up -d) on :8003: its WebSocket, its
+// pictures and its microphone worklet, all under /assistant/.
+const assistant = {
+  target: process.env.ASSISTANT_ORIGIN ?? 'http://localhost:8003',
+  ws: true,
+  rewrite: (p: string) => p.replace(/^\/assistant/, ''),
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
@@ -20,6 +28,7 @@ export default defineConfig({
       '/api': api,
       '/sanctum': api,
       '/oauth': api,
+      '/assistant': assistant,
     },
   },
 })

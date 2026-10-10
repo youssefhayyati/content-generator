@@ -12,6 +12,7 @@ use App\Services\Campaigns\Pipeline;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -58,15 +59,17 @@ class CampaignReviewController extends Controller
         return CampaignItemResource::make($variant->item->fresh());
     }
 
-    /** A person's own edit to the caption or placement. */
+    /** A person's own edit to the caption or placement, or to the media: this account's own slides. */
     public function update(Request $request, Campaign $campaign, ItemVariant $variant, Pipeline $pipeline): CampaignItemResource
     {
         $this->authorizeVariant($campaign, $variant);
         $data = $request->validate([
             'caption' => ['required', 'string', 'max:70000'],
             'placement' => ['nullable', 'string', 'in:'.implode(',', array_keys(config("platforms.{$variant->account->platform->value}")))],
+            'asset_ids' => ['sometimes', 'array', 'min:1', 'max:10'],
+            'asset_ids.*' => ['integer', Rule::exists('assets', 'id')->where('user_id', $request->user()->id)],
         ]);
-        $pipeline->edit($variant, $data['caption'], $data['placement'] ?? null);
+        $pipeline->edit($variant, $data['caption'], $data['placement'] ?? null, isset($data['asset_ids']) ? array_map('intval', $data['asset_ids']) : null);
 
         return CampaignItemResource::make($variant->item->fresh());
     }

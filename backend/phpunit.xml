@@ -49,6 +49,8 @@
         <!-- Local services too: a dev box running Ollama or FlowAI Sound mustn't leak into tests. -->
         <env name="OLLAMA_URL" value="" force="true"/>
         <env name="SOUND_URL" value="" force="true"/>
+        <env name="VOICESTUDIO_URL" value="" force="true"/>
+        <env name="VOICESTUDIO_KEY" value="" force="true"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>

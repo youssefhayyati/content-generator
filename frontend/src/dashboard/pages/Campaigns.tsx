@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, ArrowUpRight, Copy, Download, Images, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, AudioWaveform, Copy, Download, Images, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
 import { useLenis } from 'lenis/react'
 import { Serif } from '../../components/ui/Reveal'
 import { api, type Account, type AiOptions, type Campaign, type CampaignSummary } from '../../lib/api'
@@ -134,6 +134,11 @@ function Studio({ initial }: { initial: Campaign }) {
             <Btn variant="subtle" icon={ArrowLeft} onClick={() => navigate('/dashboard/campaigns')} aria-label="All campaigns">
               <span className="hidden xl:inline">All campaigns</span>
             </Btn>
+            {campaign.items_count > 0 && (
+              <Btn icon={AudioWaveform} onClick={() => navigate(`/dashboard/assistant?campaign=${campaign.id}`)} title="Its posts as drafts you change by voice or by hand">
+                <span className="hidden sm:inline">Open in the assistant</span>
+              </Btn>
+            )}
             <Btn icon={Copy} onClick={() => copy(briefText(campaign), 'Brief')}>
               Copy brief
             </Btn>

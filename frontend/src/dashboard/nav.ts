@@ -1,4 +1,5 @@
 import {
+  AudioWaveform,
   CalendarClock,
   CalendarDays,
   Cpu,
@@ -47,6 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Create',
     items: [
+      { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
       { path: '/dashboard/create', label: 'Composer', icon: PenLine },

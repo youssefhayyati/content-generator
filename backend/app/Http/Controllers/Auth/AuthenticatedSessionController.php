@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Http\Controllers\AssistantController;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Resources\UserResource;
@@ -21,6 +22,8 @@ class AuthenticatedSessionController extends Controller
 
     public function destroy(Request $request): Response
     {
+        // Signing out ends the assistant's sessions too.
+        $request->user()?->tokens()->where('name', AssistantController::ABILITY)->delete();
         Auth::guard('web')->logout();
 
         $request->session()->invalidate();
