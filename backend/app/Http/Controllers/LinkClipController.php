@@ -16,9 +16,13 @@ use Illuminate\Validation\ValidationException;
 
 class LinkClipController extends Controller
 {
+    /** The latest clip jobs; with ?ready=1, every finished clip that has its video (the Gallery's Clips). */
     public function index(Request $request): JsonResponse
     {
-        $clips = $request->user()->linkClips()->with(['asset', 'post'])->latest()->limit(30)->get();
+        $ready = $request->boolean('ready');
+        $clips = $request->user()->linkClips()
+            ->when($ready, fn ($q) => $q->where('status', 'ready')->whereHas('asset'))
+            ->with(['asset', 'post'])->latest()->limit($ready ? 300 : 30)->get();
 
         return response()->json(['data' => $clips->map->summary()]);
     }
@@ -72,7 +76,7 @@ class LinkClipController extends Controller
     public function retry(Request $request, LinkClip $clip): JsonResponse
     {
         $this->mine($request, $clip);
-        abort_unless($clip->status === 'failed', 409, 'Only a failed clip can be tried again.');
+        abort_unless($clip->status === 'failed', 409, 'Only a failed highlight can be tried again.');
         $clips = $clip->batch_id
             ? $request->user()->linkClips()->where('batch_id', $clip->batch_id)->where('status', 'failed')->orderBy('batch_index')->get()
             : collect([$clip]);
@@ -85,7 +89,7 @@ class LinkClipController extends Controller
     public function destroy(Request $request, LinkClip $clip): Response
     {
         $this->mine($request, $clip);
-        abort_if(! in_array($clip->status, ['ready', 'failed'], true), 409, 'Wait for this clip to finish before removing it.');
+        abort_if(! in_array($clip->status, ['ready', 'failed'], true), 409, 'Wait for this highlight to finish before removing it.');
         $clip->delete();
 
         return response()->noContent();

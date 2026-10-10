@@ -151,7 +151,7 @@ class LinkClipper
     private function fail(LinkClip $clip, Throwable $error): void
     {
         report($error);
-        $clip->update(['status' => 'failed', 'error' => Str::limit($error->getMessage() ?: 'This clip could not be rendered.', 500)]);
+        $clip->update(['status' => 'failed', 'error' => Str::limit($error->getMessage() ?: 'This highlight could not be rendered.', 500)]);
     }
 
     private function finish(LinkClip $clip, Asset $asset, array $plan): void

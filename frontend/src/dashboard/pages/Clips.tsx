@@ -40,7 +40,7 @@ export default function Clips() {
       const result = await api<{ data: LinkClip[] }>('/clips')
       setClips(result.data)
     } catch (e) {
-      if (!quiet) toast(e instanceof Error ? e.message : 'Could not load clips.', 'error')
+      if (!quiet) toast(e instanceof Error ? e.message : 'Could not load highlights.', 'error')
     } finally {
       if (!quiet) setLoading(false)
     }
@@ -67,12 +67,12 @@ export default function Clips() {
       setClips((current) => [...made.data, ...current])
       setUrl('')
       setRights(false)
-      toast(`${made.data.length} clip${made.data.length === 1 ? '' : 's'} queued from one source analysis.`)
+      toast(`${made.data.length} highlight${made.data.length === 1 ? '' : 's'} queued from one source analysis.`)
     } catch (e) {
       if (e instanceof ApiError) {
         setErrors(Object.fromEntries(Object.entries(e.errors).map(([key, values]) => [key, values[0]])))
       }
-      toast(e instanceof Error ? e.message : 'Could not start the clip.', 'error')
+      toast(e instanceof Error ? e.message : 'Could not start the highlight.', 'error')
     } finally {
       setMaking(false)
     }
@@ -83,9 +83,9 @@ export default function Clips() {
       const fresh = await api<{ data: LinkClip[] }>(`/clips/${clip.id}/retry`, { method: 'POST' })
       const updates = new Map(fresh.data.map((item) => [item.id, item]))
       setClips((all) => all.map((item) => updates.get(item.id) ?? item))
-      toast(`Trying ${fresh.data.length} clip${fresh.data.length === 1 ? '' : 's'} again.`)
+      toast(`Trying ${fresh.data.length} highlight${fresh.data.length === 1 ? '' : 's'} again.`)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not retry the clip.', 'error')
+      toast(e instanceof Error ? e.message : 'Could not retry the highlight.', 'error')
     }
   }
 
@@ -94,14 +94,14 @@ export default function Clips() {
       await api(`/clips/${clip.id}`, { method: 'DELETE' })
       setClips((all) => all.filter((item) => item.id !== clip.id))
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not remove the clip.', 'error')
+      toast(e instanceof Error ? e.message : 'Could not remove the highlight.', 'error')
     }
   }
 
   return (
     <div>
       <PageHeader
-        eyebrow="Clip from link"
+        eyebrow="Highlights"
         title={<>One link. <Serif>Many vertical stories.</Serif></>}
         sub="Paste a YouTube video or an article once. FlowAI analyzes it once, selects several distinct moments or angles, then renders captioned 9:16 drafts for Reels or TikTok."
       />
@@ -125,7 +125,7 @@ export default function Clips() {
               <FieldError message={errors.url} />
             </div>
             <Btn variant="primary" icon={Scissors} loading={making} disabled={!url.trim() || !rights} onClick={() => void submit()} className="lg:min-w-36">
-              Make clip
+              Make highlights
             </Btn>
           </div>
 
@@ -139,8 +139,8 @@ export default function Clips() {
               <Segmented id="clip-seconds" label="Target length" value={seconds} onChange={setSeconds} options={[{ value: 15, label: '15s' }, { value: 30, label: '30s' }, { value: 45, label: '45s' }, { value: 60, label: '60s' }]} />
             </div>
             <div>
-              <p className="mb-1.5 text-xs text-muted">Number of clips</p>
-              <Segmented id="clip-count" label="Number of clips" value={count} onChange={setCount} options={[{ value: 1, label: '1' }, { value: 3, label: '3' }, { value: 5, label: '5' }, { value: 8, label: '8' }]} />
+              <p className="mb-1.5 text-xs text-muted">Number of highlights</p>
+              <Segmented id="clip-count" label="Number of highlights" value={count} onChange={setCount} options={[{ value: 1, label: '1' }, { value: 3, label: '3' }, { value: 5, label: '5' }, { value: 8, label: '8' }]} />
             </div>
             <label className="flex h-9 items-center gap-2 rounded-md border border-line-2 px-3 text-xs text-muted">
               <input aria-label="Caption accent" type="color" value={accent} onChange={(event) => setAccent(event.target.value)} className="size-5 cursor-pointer border-0 bg-transparent p-0" />
@@ -159,7 +159,7 @@ export default function Clips() {
       <Stagger i={1} className="mt-8">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium">Clip jobs</h2>
+            <h2 className="text-sm font-medium">Your highlights</h2>
             <p className="mt-0.5 text-xs text-dim">Rendering continues in the background.</p>
           </div>
           <Btn size="sm" variant="subtle" icon={RefreshCw} onClick={() => void load()}>Refresh</Btn>
@@ -167,7 +167,7 @@ export default function Clips() {
         {loading ? (
           <div className="h-40 animate-pulse rounded-xl border border-line bg-panel" />
         ) : clips.length === 0 ? (
-          <EmptyState icon={Clapperboard} title="No clips yet" body="Paste a source above. The finished video will appear here and in your Gallery as a draft." />
+          <EmptyState icon={Clapperboard} title="No highlights yet" body="Paste a source above. The finished video will appear here and in your Gallery as a draft." />
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             {clips.map((clip) => <ClipCard key={clip.id} clip={clip} onRetry={() => void retry(clip)} onRemove={() => void remove(clip)} />)}

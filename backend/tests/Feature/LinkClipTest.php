@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\CreateLinkClip;
+use App\Models\Asset;
 use App\Models\LinkClip;
 use App\Models\User;
 use App\Services\Clips\ClipPlanner;
@@ -67,6 +68,23 @@ class LinkClipTest extends TestCase
         $this->spa()->actingAs($other)->getJson("/api/clips/{$clip->id}")->assertNotFound();
         $this->spa()->actingAs($other)->deleteJson("/api/clips/{$clip->id}")->assertNotFound();
         $this->spa()->actingAs($mine)->getJson("/api/clips/{$clip->id}")->assertOk()->assertJsonPath('error', 'No text.');
+    }
+
+    public function test_the_gallery_lists_only_finished_clips_with_a_video(): void
+    {
+        $user = User::factory()->create();
+        $settings = ['platform' => 'tiktok', 'seconds' => 30];
+        $done = $user->linkClips()->create([
+            'source_url' => 'https://example.com/a', 'source_type' => 'article', 'status' => 'ready', 'title' => 'Done', 'settings' => $settings,
+            'asset_id' => Asset::factory()->create(['user_id' => $user->id])->id,
+        ]);
+        $user->linkClips()->create(['source_url' => 'https://example.com/b', 'source_type' => 'article', 'status' => 'rendering', 'settings' => $settings]);
+        $user->linkClips()->create(['source_url' => 'https://example.com/c', 'source_type' => 'article', 'status' => 'failed', 'settings' => $settings]);
+        $user->linkClips()->create(['source_url' => 'https://example.com/d', 'source_type' => 'article', 'status' => 'ready', 'settings' => $settings]); // its video is gone
+
+        $this->spa()->actingAs($user)->getJson('/api/clips?ready=1')->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $done->id);
+        $this->spa()->actingAs($user)->getJson('/api/clips')->assertOk()->assertJsonCount(4, 'data');
+        $this->spa()->actingAs(User::factory()->create())->getJson('/api/clips?ready=1')->assertOk()->assertJsonCount(0, 'data');
     }
 
     public function test_an_article_is_read_once_and_becomes_several_vertical_drafts_without_a_cloud_model(): void
