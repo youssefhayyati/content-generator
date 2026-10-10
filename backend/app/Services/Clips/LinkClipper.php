@@ -13,10 +13,12 @@ use App\Services\Sound\AudioTools;
 use App\Services\Sound\Listener;
 use App\Services\Sound\ReelRenderer;
 use App\Services\Sound\SoundClient;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /** The complete source-link → vertical video → draft workflow. */
 class LinkClipper
@@ -40,41 +42,51 @@ class LinkClipper
 
     private function youtube(LinkClip $clip): void
     {
-        $clip->update(['status' => 'downloading', 'error' => null]);
+        $targets = $this->targets($clip);
+        $targets->each->update(['status' => 'downloading', 'error' => null]);
         $source = $this->youtube->download($clip->source_url);
-        $rendered = null;
         try {
-            $clip->update(['status' => 'analyzing', 'title' => $source['title']]);
+            $targets->each->update(['status' => 'analyzing', 'title' => $source['title']]);
             $heard = $this->listener->file($source['path'], maxSeconds: YouTubeDownloader::MAX_SOURCE_SECONDS);
             $wanted = (int) ($clip->settings['seconds'] ?? 30);
-            $plan = $this->planner->video($clip, $heard, $source['duration'], $wanted, $source['title']);
-            $seconds = max(3, $plan['end'] - $plan['start']);
-            $words = $this->inside($heard, $plan['start'], $plan['end']);
+            $plans = $this->planner->videos($clip, $heard, $source['duration'], $wanted, $source['title'], $targets->count());
 
-            $clip->update(['status' => 'rendering', 'analysis' => [...$plan, 'source_title' => $source['title'], 'author' => $source['author']]]);
-            $rendered = $this->clips->render($source['path'], $plan['start'], $seconds, $words, $plan['title'], (string) ($clip->settings['accent'] ?? '#a5b4fc'));
-            $asset = $this->assets->fromPath($clip->user, $rendered, 'video/mp4', $plan['title'].'.mp4', 'generated', [
-                'generator' => 'link-clip',
-                'source_url' => $clip->source_url,
-                'source_title' => $source['title'],
-                'source_author' => $source['author'],
-                'clip_start' => $plan['start'],
-                'clip_end' => $plan['end'],
-                'words' => $words,
-            ]);
-            $this->finish($clip, $asset, $plan);
+            foreach ($targets as $index => $target) {
+                $rendered = null;
+                try {
+                    $plan = $plans[$index] ?? $plans[0];
+                    $seconds = max(3, $plan['end'] - $plan['start']);
+                    $words = $this->inside($heard, $plan['start'], $plan['end']);
+                    $target->update(['status' => 'rendering', 'analysis' => [...$plan, 'source_title' => $source['title'], 'author' => $source['author']]]);
+                    $rendered = $this->clips->render($source['path'], $plan['start'], $seconds, $words, $plan['title'], (string) ($target->settings['accent'] ?? '#a5b4fc'));
+                    $asset = $this->assets->fromPath($target->user, $rendered, 'video/mp4', $plan['title'].'.mp4', 'generated', [
+                        'generator' => 'link-clip',
+                        'source_url' => $target->source_url,
+                        'source_title' => $source['title'],
+                        'source_author' => $source['author'],
+                        'clip_start' => $plan['start'],
+                        'clip_end' => $plan['end'],
+                        'words' => $words,
+                    ]);
+                    $this->finish($target, $asset, $plan);
+                } catch (Throwable $e) {
+                    $this->fail($target, $e);
+                } finally {
+                    @unlink((string) $rendered);
+                }
+            }
         } finally {
-            @unlink((string) $rendered);
             File::deleteDirectory($source['cleanup']);
         }
     }
 
     private function article(LinkClip $clip): void
     {
-        $clip->update(['status' => 'reading', 'error' => null]);
+        $targets = $this->targets($clip);
+        $targets->each->update(['status' => 'reading', 'error' => null]);
         $article = $this->articles->read($clip->source_url);
-        $clip->update(['status' => 'writing', 'title' => $article['title']]);
-        $plan = $this->planner->article($clip, $article, (int) ($clip->settings['seconds'] ?? 30));
+        $targets->each->update(['status' => 'writing', 'title' => $article['title']]);
+        $plans = $this->planner->articles($clip, $article, (int) ($clip->settings['seconds'] ?? 30), $targets->count());
 
         if (! $this->sound->up()) {
             throw new RuntimeException('FlowAI Sound is needed to narrate an article reel. Start the sound service and try again.');
@@ -83,40 +95,63 @@ class LinkClipper
         if (! $voice) {
             throw new RuntimeException('FlowAI Sound has no available narration voice.');
         }
-        $spoken = $this->sound->speak($plan['script'], $voice['id'], 1.0, true);
-        $wav = tempnam(sys_get_temp_dir(), 'clip-voice').'.wav';
-        $image = null;
-        $rendered = null;
-        file_put_contents($wav, $spoken['wav']);
+        $image = $this->image($article['image']);
         try {
-            $image = $this->image($article['image']);
-            $clip->update(['status' => 'rendering', 'analysis' => [...$plan, 'source_title' => $article['title']]]);
-            $rendered = $this->reels->render([
-                'voice' => $wav,
-                'words' => $spoken['words'],
-                'background' => $image,
-                'background_kind' => $image ? 'image' : null,
-                'style' => 'bold',
-                'accent' => (string) ($clip->settings['accent'] ?? '#a5b4fc'),
-                'title' => $plan['title'],
-                'captions' => true,
-            ], $this->audio);
-            $asset = $this->assets->fromPath($clip->user, $rendered, 'video/mp4', $plan['title'].'.mp4', 'generated', [
-                'generator' => 'article-reel',
-                'source_url' => $clip->source_url,
-                'source_title' => $article['title'],
-                'sound' => 'reel',
-                'voice' => $spoken['voice'],
-                'script' => $plan['script'],
-                'words' => $spoken['words'],
-                'lang' => $spoken['lang'],
-            ]);
-            $this->finish($clip, $asset, $plan);
+            foreach ($targets as $index => $target) {
+                $wav = tempnam(sys_get_temp_dir(), 'clip-voice').'.wav';
+                $rendered = null;
+                try {
+                    $plan = $plans[$index] ?? $plans[0];
+                    $spoken = $this->sound->speak($plan['script'], $voice['id'], 1.0, true);
+                    file_put_contents($wav, $spoken['wav']);
+                    $target->update(['status' => 'rendering', 'analysis' => [...$plan, 'source_title' => $article['title']]]);
+                    $rendered = $this->reels->render([
+                        'voice' => $wav,
+                        'words' => $spoken['words'],
+                        'background' => $image,
+                        'background_kind' => $image ? 'image' : null,
+                        'style' => 'bold',
+                        'accent' => (string) ($target->settings['accent'] ?? '#a5b4fc'),
+                        'title' => $plan['title'],
+                        'captions' => true,
+                    ], $this->audio);
+                    $asset = $this->assets->fromPath($target->user, $rendered, 'video/mp4', $plan['title'].'.mp4', 'generated', [
+                        'generator' => 'article-reel',
+                        'source_url' => $target->source_url,
+                        'source_title' => $article['title'],
+                        'sound' => 'reel',
+                        'voice' => $spoken['voice'],
+                        'script' => $plan['script'],
+                        'words' => $spoken['words'],
+                        'lang' => $spoken['lang'],
+                    ]);
+                    $this->finish($target, $asset, $plan);
+                } catch (Throwable $e) {
+                    $this->fail($target, $e);
+                } finally {
+                    @unlink($wav);
+                    @unlink((string) $rendered);
+                }
+            }
         } finally {
-            @unlink($wav);
             @unlink((string) $image);
-            @unlink((string) $rendered);
         }
+    }
+
+    /** @return Collection<int, LinkClip> */
+    private function targets(LinkClip $clip): Collection
+    {
+        if (! $clip->batch_id) {
+            return new Collection([$clip]);
+        }
+
+        return LinkClip::with('user')->where('user_id', $clip->user_id)->where('batch_id', $clip->batch_id)->where('status', 'queued')->orderBy('batch_index')->get();
+    }
+
+    private function fail(LinkClip $clip, Throwable $error): void
+    {
+        report($error);
+        $clip->update(['status' => 'failed', 'error' => Str::limit($error->getMessage() ?: 'This clip could not be rendered.', 500)]);
     }
 
     private function finish(LinkClip $clip, Asset $asset, array $plan): void

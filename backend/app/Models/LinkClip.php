@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['source_url', 'source_type', 'status', 'title', 'settings', 'analysis', 'error', 'asset_id', 'post_id'])]
+#[Fillable(['batch_id', 'batch_index', 'batch_total', 'source_url', 'source_type', 'status', 'title', 'settings', 'analysis', 'error', 'asset_id', 'post_id'])]
 class LinkClip extends Model
 {
     protected function casts(): array
@@ -14,6 +14,8 @@ class LinkClip extends Model
         return [
             'settings' => 'array',
             'analysis' => 'array',
+            'batch_index' => 'integer',
+            'batch_total' => 'integer',
         ];
     }
 
@@ -39,6 +41,9 @@ class LinkClip extends Model
 
         return [
             'id' => $this->id,
+            'batch_id' => $this->batch_id,
+            'batch_index' => $this->batch_index,
+            'batch_total' => $this->batch_total,
             'source_url' => $this->source_url,
             'source_type' => $this->source_type,
             'status' => $this->status,

@@ -84,12 +84,12 @@ look — *Bold* (big words that light up), *Editorial* (a magazine page you read
 *Pulse* (an audiogram) — previewed live in a phone frame, then rendered with ffmpeg at
 1080 × 1920 with the music stepping aside whenever the voice speaks.
 
-**Clip from link** (`/dashboard/clips`) turns a public YouTube video or readable article into a
-captioned 1080 × 1920 TikTok or Instagram Reel draft. For video, it transcribes the source and
-selects a self-contained 15–60 second moment; for an article, it writes a short factual script and
-narrates it with FlowAI Sound. Processing stays in the background, the source URL remains attached
-for review, and the form requires confirmation that you have permission to republish the source.
-No cloud API key is required: ffmpeg, yt-dlp, FlowAI Sound, and the local model do the work.
+**Clip from link** (`/dashboard/clips`) turns a public YouTube video or readable article into one
+to eight captioned 1080 × 1920 TikTok or Instagram Reel drafts. It downloads and analyzes the
+source once, then selects distinct 15–60 second video moments or writes several factual article
+angles. Processing stays in the background, every source URL remains attached for review, and the
+form requires confirmation that you have permission to republish it. No cloud API key is required:
+ffmpeg, yt-dlp, FlowAI Sound, and the local model do the work.
 
 Each account has a **sound** (voice, pace, signature music, reel accent; Accounts → Voice →
 Sound). Flows use it in three new steps — *Read it aloud*, *Compose music*, *Make a reel* — and

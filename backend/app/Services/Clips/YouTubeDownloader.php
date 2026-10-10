@@ -26,24 +26,12 @@ class YouTubeDownloader
         if (! self::supports($url)) {
             throw new RuntimeException('Use a youtube.com or youtu.be video link.');
         }
-        $metaRun = Process::timeout(90)->run(['yt-dlp', '--no-playlist', '--quiet', '--no-warnings', '--dump-single-json', '--skip-download', $url]);
-        if (! $metaRun->successful()) {
-            throw new RuntimeException('YouTube could not open that video: '.Str::limit(trim($metaRun->errorOutput()), 240));
-        }
-        $meta = json_decode($metaRun->output(), true);
-        $duration = (float) ($meta['duration'] ?? 0);
-        if ($duration < 3) {
-            throw new RuntimeException('That video has no usable duration.');
-        }
-        if ($duration > self::MAX_SOURCE_SECONDS) {
-            throw new RuntimeException('For now, use a YouTube video under 30 minutes.');
-        }
-
         $dir = sys_get_temp_dir().'/youtube-'.Str::random(12);
         File::ensureDirectoryExists($dir);
         $run = Process::timeout(1200)->run([
             'yt-dlp', '--no-playlist', '--quiet', '--no-warnings', '--no-progress',
-            '--format', 'bv*[height<=1080]+ba/b[height<=1080]', '--merge-output-format', 'mp4',
+            '--match-filter', 'duration >= 3 & duration <= 1800', '--write-info-json',
+            '--concurrent-fragments', '4', '--format', 'bv*[height<=720]+ba/b[height<=720]', '--merge-output-format', 'mp4',
             '--output', "{$dir}/source.%(ext)s", $url,
         ]);
         if (! $run->successful()) {
@@ -54,6 +42,13 @@ class YouTubeDownloader
         if (! $path) {
             File::deleteDirectory($dir);
             throw new RuntimeException('The downloaded video file was missing.');
+        }
+        $info = collect(File::files($dir))->first(fn ($file) => str_ends_with($file->getFilename(), '.info.json'))?->getPathname();
+        $meta = $info ? json_decode((string) file_get_contents($info), true) : [];
+        $duration = (float) ($meta['duration'] ?? 0);
+        if ($duration < 3 || $duration > self::MAX_SOURCE_SECONDS) {
+            File::deleteDirectory($dir);
+            throw new RuntimeException('For now, use a YouTube video between 3 seconds and 30 minutes.');
         }
 
         return [

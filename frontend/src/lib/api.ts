@@ -83,6 +83,9 @@ export type TimedWord = { text: string; start: number; end: number }
 
 export type LinkClip = {
   id: number
+  batch_id: string | null
+  batch_index: number
+  batch_total: number
   source_url: string
   source_type: 'youtube' | 'article'
   status: 'queued' | 'downloading' | 'reading' | 'analyzing' | 'writing' | 'rendering' | 'ready' | 'failed'

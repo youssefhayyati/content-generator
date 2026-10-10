@@ -32,9 +32,13 @@ class CreateLinkClip implements ShouldQueue
             $clipper->run($clip);
         } catch (Throwable $e) {
             report($e);
-            $clip->update([
+            $message = Str::limit($e->getMessage() ?: 'The clip could not be made.', 500);
+            $query = $clip->batch_id
+                ? LinkClip::query()->where('user_id', $clip->user_id)->where('batch_id', $clip->batch_id)
+                : LinkClip::query()->whereKey($clip->id);
+            $query->whereIn('status', ['queued', 'downloading', 'reading', 'analyzing', 'writing', 'rendering'])->update([
                 'status' => 'failed',
-                'error' => Str::limit($e->getMessage() ?: 'The clip could not be made.', 500),
+                'error' => $message,
             ]);
         }
     }

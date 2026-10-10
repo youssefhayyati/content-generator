@@ -26,6 +26,7 @@ export default function Clips() {
   const [url, setUrl] = useState('')
   const [platform, setPlatform] = useState<Platform>('tiktok')
   const [seconds, setSeconds] = useState(30)
+  const [count, setCount] = useState(3)
   const [accent, setAccent] = useState('#a5b4fc')
   const [rights, setRights] = useState(false)
   const [clips, setClips] = useState<LinkClip[]>([])
@@ -59,14 +60,14 @@ export default function Clips() {
     setErrors({})
     setMaking(true)
     try {
-      const made = await api<LinkClip>('/clips', {
+      const made = await api<{ data: LinkClip[] }>('/clips', {
         method: 'POST',
-        body: { url: url.trim(), platform, seconds, accent, rights_confirmed: rights },
+        body: { url: url.trim(), platform, seconds, count, accent, rights_confirmed: rights },
       })
-      setClips((current) => [made, ...current])
+      setClips((current) => [...made.data, ...current])
       setUrl('')
       setRights(false)
-      toast('Clip queued. You can leave this page while it renders.')
+      toast(`${made.data.length} clip${made.data.length === 1 ? '' : 's'} queued from one source analysis.`)
     } catch (e) {
       if (e instanceof ApiError) {
         setErrors(Object.fromEntries(Object.entries(e.errors).map(([key, values]) => [key, values[0]])))
@@ -79,9 +80,10 @@ export default function Clips() {
 
   const retry = async (clip: LinkClip) => {
     try {
-      const fresh = await api<LinkClip>(`/clips/${clip.id}/retry`, { method: 'POST' })
-      setClips((all) => all.map((item) => (item.id === clip.id ? fresh : item)))
-      toast('Trying that source again.')
+      const fresh = await api<{ data: LinkClip[] }>(`/clips/${clip.id}/retry`, { method: 'POST' })
+      const updates = new Map(fresh.data.map((item) => [item.id, item]))
+      setClips((all) => all.map((item) => updates.get(item.id) ?? item))
+      toast(`Trying ${fresh.data.length} clip${fresh.data.length === 1 ? '' : 's'} again.`)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not retry the clip.', 'error')
     }
@@ -100,8 +102,8 @@ export default function Clips() {
     <div>
       <PageHeader
         eyebrow="Clip from link"
-        title={<>One link. <Serif>One vertical story.</Serif></>}
-        sub="Paste a YouTube video or an article. FlowAI finds one self-contained moment—or writes a short factual narration—then renders a captioned 9:16 draft for Reels or TikTok."
+        title={<>One link. <Serif>Many vertical stories.</Serif></>}
+        sub="Paste a YouTube video or an article once. FlowAI analyzes it once, selects several distinct moments or angles, then renders captioned 9:16 drafts for Reels or TikTok."
       />
 
       <Stagger i={0} className="mt-10">
@@ -135,6 +137,10 @@ export default function Clips() {
             <div>
               <p className="mb-1.5 text-xs text-muted">Target length</p>
               <Segmented id="clip-seconds" label="Target length" value={seconds} onChange={setSeconds} options={[{ value: 15, label: '15s' }, { value: 30, label: '30s' }, { value: 45, label: '45s' }, { value: 60, label: '60s' }]} />
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs text-muted">Number of clips</p>
+              <Segmented id="clip-count" label="Number of clips" value={count} onChange={setCount} options={[{ value: 1, label: '1' }, { value: 3, label: '3' }, { value: 5, label: '5' }, { value: 8, label: '8' }]} />
             </div>
             <label className="flex h-9 items-center gap-2 rounded-md border border-line-2 px-3 text-xs text-muted">
               <input aria-label="Caption accent" type="color" value={accent} onChange={(event) => setAccent(event.target.value)} className="size-5 cursor-pointer border-0 bg-transparent p-0" />
@@ -195,7 +201,7 @@ function ClipCard({ clip, onRetry, onRemove }: { clip: LinkClip; onRetry: () => 
         <div className="flex min-w-0 flex-col p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-dim"><Icon className="size-3" /> {clip.source_type} · {clip.platform} · {clip.seconds}s</p>
+              <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-dim"><Icon className="size-3" /> {clip.source_type} · {clip.platform} · {clip.seconds}s{clip.batch_total > 1 ? ` · ${clip.batch_index}/${clip.batch_total}` : ''}</p>
               <h3 className="mt-2 line-clamp-2 text-sm font-medium">{clip.title || 'Preparing source…'}</h3>
             </div>
             <Status clip={clip} />
