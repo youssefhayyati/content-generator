@@ -12,8 +12,8 @@ on. Use exactly those, nothing older.
    shows a login screen, stop and say the account must be logged in first; never type a password.
 2. Close anything in the way (a "Turn on notifications" prompt, a "Not now" dialog, a story or ad) with
    "Not now", "Cancel" or the X.
-3. Start a new post: tap the "+" (Create) button, at the bottom centre or the top left of the home feed. If a
-   choice of POST / STORY / REEL appears at the bottom, make sure POST is selected.
+3. Start a new post: tap the "+" (Create) button at the top left of the Home feed (the middle of the bottom bar
+   is Messages, not Create). If a choice of POST / STORY / REEL appears at the bottom, make sure POST is selected.
 4. Pick the media in the gallery (the "Recents" grid):
    - One item: tap the first (top left) thumbnail.
    - More than one: first turn on multiple selection (the "Select multiple" button or the stacked squares

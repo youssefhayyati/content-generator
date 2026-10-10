@@ -37,7 +37,7 @@ COPY backend backend
 COPY web web
 COPY skills skills
 COPY fonts fonts
-COPY comfyui/descriptions.yaml comfyui/
+COPY workflows workflows
 USER agent
 
 EXPOSE 8000

@@ -531,8 +531,10 @@ class PhoneWork:
     def skills(self) -> dict[str, Skill]:
         return load_skills(self.skills_dir)
 
-    def plan_post(self, platform: str, placement: str, caption: str, kinds: list[str]) -> PostPlan:
-        """The goal for posting this, from skills/phone/post-<platform>-<placement>.md (or post-<platform>.md)."""
+    def plan_post(self, platform: str, placement: str, caption: str, kinds: list[str],
+                  seconds: list[float | None] | None = None) -> PostPlan:
+        """The goal for posting this, from skills/phone/post-<platform>-<placement>.md (or post-<platform>.md).
+        seconds: each file's length, when known: a video's tells it apart in the phone's gallery."""
         skills = self.skills()
         skill = skills.get(f"post-{platform}-{placement}") or skills.get(f"post-{platform}")
         if not skill:
@@ -542,6 +544,9 @@ class PhoneWork:
         kind = "video" if "video" in kinds else "picture"
         n = len(kinds)
         media = f"{n} {kind}{'s' if n != 1 else ''}" if n else "no pictures (text only)"
+        lengths = [f"{int(t) // 60}:{int(t) % 60:02d}" for k, t in zip(kinds, seconds or []) if k == "video" and t]
+        if lengths:
+            media += f", {' and '.join(lengths)} long"
         goal = _fill(skill, {"count": str(n), "media": media, "kind": kind, "placement": placement,
                              "caption": _caption_block(lines), "first_words": _first_words(lines)})
         return PostPlan(goal, "\n".join(lines), dropped, media)
@@ -796,7 +801,8 @@ class PhoneWork:
             params = {k: v for k, v in (data.get("params") or {}).items() if k not in ("transport", "perception")}
             ok = bool(data.get("ok"))
             result = "ok" if ok else f"failed: {data.get('error')}"
-            if name == "tap" and ok and job.kind in ("post", "publish") and _shares(job.intent, params):
+            if name == "tap" and ok and job.kind in ("post", "publish") and not data.get("look") and \
+                    _shares(job.intent, params):
                 name, job.tapped_post = "tap:post-button", True  # FlowAI's name for it
             job.steps.append(f"{name} {json.dumps(params, ensure_ascii=False)[:120]}: {result}")
             job.last_step = data.get("n") or job.last_step
@@ -1066,7 +1072,8 @@ class PhoneSession(PhoneWork):
         if missing := [p.name for p in files if not p.exists()]:
             return {"error": f"draft {d.id}'s files are gone ({', '.join(missing)}); show it again to redraw it"}
         try:
-            plan = self.plan_post(d.platform, d.placement, d.caption, [f.kind for _, f in d.files])
+            plan = self.plan_post(d.platform, d.placement, d.caption, [f.kind for _, f in d.files],
+                                  [f.duration for _, f in d.files])
         except PhoneError as exc:
             return {"error": str(exc)}
         last = max((p for p in self.posts.values() if p.draft == d.id), key=lambda p: p.id, default=None)
@@ -1280,10 +1287,17 @@ class PhoneSession(PhoneWork):
                 await self.send(type="phone_post", **job.post.event())
             return
         tell = "\nTell the user the outcome in one or two short spoken sentences."
+        found_up = job.kind == "feedback" and job.post is not None and job.snapshot is not None and \
+            job.post.status == "unsure"
+        if found_up:
+            self._found_up(job, job.post)
         if job.kind == "post":
             note = self._posted_note(job) + tell
         elif job.kind == "feedback" and job.status != "failed":
             note = feedback_note(job.post, job.snapshot, job.result, job.data)
+            if found_up:
+                note += ("\nSo it is up after all: the check found it on the account. It now counts as posted, with "
+                         "the check's screenshot as proof, and FlowAI's calendar shows it published.")
         else:
             note = (f"Phone job {job.id} ({job.what}) has finished. Result: {job.result}"
                     + (f"\nVerdict: {job.verdict}" if job.verdict else "") + handover_note(job)
@@ -1294,10 +1308,22 @@ class PhoneSession(PhoneWork):
             note += tell
         if job.post:
             await self.send(type="phone_post", **job.post.event())
-        if job.kind == "post" and job.post:
-            self._track(self._record(job.post))
+        if job.kind in ("post", "feedback") and job.post:
+            self._track(self._record(job.post))  # a post just done, or one a check found up after all
         self.changed()
         self.notify(note)
+
+    def _found_up(self, job: PhoneJob, post: PhonePost):
+        """A post that may have gone up, found on the account by a check: posted, with that screen as proof."""
+        post.status, post.detail = "posted", ""
+        post.at = post.at or post.run.get("ended") or job.started_at
+        if job.proof:
+            post.proof = job.proof
+        notes = (job.snapshot or {}).get("notes") or ""
+        post.proof_note = ("Found on the account by a check" + (f": {notes}" if notes else ""))[:400]
+        post.recorded, post.record_error = False, ""
+        log.info("post %d: found on the account by a check, so it's posted", post.id)
+        self.on_changed(post)
 
     def _posted_note(self, job: PhoneJob) -> str:
         post = job.post
@@ -1316,8 +1342,9 @@ class PhoneSession(PhoneWork):
                 f"({post.status}): {job.result}" + (f"\nVerdict: {job.verdict}" if job.verdict else "") + proof + tries
                 + ("\nIt never got as far as sharing, so post_on_phone can try it again when the user wants."
                    if post.status == "failed" and not job.tapped_post else
-                   "\nIt may be up anyway: say so, and offer to check with post_feedback before posting it again "
-                   "(again true), so it doesn't go up twice.") + later)
+                   "\nIt may be up anyway: say so, and ask whether to check with post_feedback (don't start the "
+                   "check before they say so); never post it again (again true) before that, so it doesn't go up "
+                   "twice. A check that finds it makes it count as posted.") + later)
 
     # --- FlowAI's record ------------------------------------------------------------
 

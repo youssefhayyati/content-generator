@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Runs the manager (which runs ComfyUI) in the foreground; setup.sh starts it in the background.
 # Safe to re-run: it stops a running instance first.
-# The kit (this folder: scripts, env, workflows/) lives on the network volume. ComfyUI, its venv and
-# the models go on the container disk ($APP), which every new pod starts without: the first start
+# The kit (this folder: scripts, workflows/; the keys in ../env) lives on the network volume. ComfyUI, its
+# venv and the models go on the container disk ($APP), which every new pod starts without: the first start
 # installs ComfyUI, then restore.sh re-registers workflows/*.json and the manager downloads their models.
 set -e
 KIT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(dirname "$KIT")
 APP=${APP:-/opt/comfy}
 export WORKSPACE=$APP BUNDLE_DIR=$KIT/workflows  # read by manager.py
 VENV=$APP/venv
@@ -13,7 +14,10 @@ COMFY_DIR=$APP/ComfyUI
 mkdir -p "$APP" "$BUNDLE_DIR"
 
 # Secrets (MANAGER_API_KEY, HF_TOKEN, CIVITAI_TOKEN): KEY=value lines; tr copes with a Windows-edited file
-if [ -f "$KIT/env" ]; then set -a; . <(tr -d '\r' < "$KIT/env"); set +a; fi
+if [ -f "$ROOT/env" ]; then set -a; . <(tr -d '\r' < "$ROOT/env"); set +a; fi
+
+# Package caches on the container disk: the image puts them on the network volume, which is slow and costly
+export UV_CACHE_DIR=/opt/flowai/cache/uv PIP_CACHE_DIR=/opt/flowai/cache/pip
 
 # Stop a previous instance. The [x] patterns keep pkill from matching the shell that runs it.
 RUNNING='[m]anager.py|[m]ain.py --listen 0.0.0.0'

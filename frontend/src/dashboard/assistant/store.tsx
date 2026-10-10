@@ -693,6 +693,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   generation: boolean
   /** Videos can be dubbed (the lip sync service is set up). */
   dubbing: boolean
+  /** Faces can be swapped (the face swap service is set up). */
+  faceswap: boolean
   /** Text waiting in the composer, so other parts of the page can start a sentence. */
   input: string
   setInput: (text: string) => void
@@ -779,6 +781,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [booking, setBooking] = useState<number[]>([])
   const [generation, setGeneration] = useState(false)
   const [dubbing, setDubbing] = useState(false)
+  const [faceswap, setFaceswap] = useState(false)
   const wanted = useRef(false)
   const connecting = useRef(false)
   /** The assistant's FlowAI session, kept for reconnects until it nearly runs out. */
@@ -826,11 +829,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       retry.current = 0
       fetch(`${ASSISTANT_BASE}health`)
         .then((r) => r.json())
-        .then((h: { comfyui?: string; lipsync?: string }) => {
+        .then((h: { comfyui?: string; lipsync?: string; faceswap?: string }) => {
           setGeneration(!!h.comfyui?.startsWith('ok'))
           setDubbing(!!h.lipsync && h.lipsync !== 'off') // still downloading its model: a dub says so
+          setFaceswap(!!h.faceswap && h.faceswap !== 'off')
         })
-        .catch(() => (setGeneration(false), setDubbing(false)))
+        .catch(() => (setGeneration(false), setDubbing(false), setFaceswap(false)))
     } catch {
       dispatch({ type: 'conn', conn: 'offline' })
       if (wanted.current) {
@@ -1096,6 +1100,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       generation,
       dubbing,
+      faceswap,
       input,
       setInput,
       inputRef,
@@ -1115,7 +1120,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.phoneDriver, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation, dubbing],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.phoneDriver, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation, dubbing, faceswap],
   )
 
   return (

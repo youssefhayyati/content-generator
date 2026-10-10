@@ -1,4 +1,4 @@
-"""Client for the ComfyUI manager API on the RunPod pod (comfyui/manager.py, see comfyui/API.md).
+"""Client for the ComfyUI manager API on the RunPod pod (runpod/comfyui/manager.py and API.md in content-generator).
 
 Workflows are registered on the pod once, then run with simple JSON such as
 {"name": "z_image_turbo", "prompt": "..."}. This wraps the calls the voice agent needs and
@@ -195,7 +195,7 @@ class ComfyClient:
             return await self._json("POST", f"/cancel/{prompt_id}")
         except ComfyError as exc:
             if "Not Found" in str(exc):
-                raise ComfyError("the pod's manager has no cancel endpoint yet (redeploy comfyui/manager.py), "
+                raise ComfyError("the pod's manager has no cancel endpoint yet (redeploy it: runpod/deploy.sh), "
                                  "so the pod will finish the job anyway") from None
             raise
 

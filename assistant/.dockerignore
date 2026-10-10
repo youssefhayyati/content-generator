@@ -1,9 +1,9 @@
-# Only backend/, web/, skills/, fonts/ and comfyui/descriptions.yaml go into the image
+# Only backend/, web/, skills/, fonts/ and workflows/ (what each ComfyUI workflow is for, and the ones it can add) go into the image
 *
 !backend/
 !web/
 !skills/
 !fonts/
-!comfyui/descriptions.yaml
+!workflows/
 !requirements.txt
 **/__pycache__

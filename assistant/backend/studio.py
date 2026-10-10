@@ -465,6 +465,18 @@ class StudioSession:
             reply.update(draft=d.id, slide=n, note="the result goes into the draft by itself when it is ready")
         return reply
 
+    def slide_media(self, ref=None, slide=None) -> tuple[int, int, int]:
+        """A slide's picture or video, to change it elsewhere (a face swap): (draft, slide, its media number)."""
+        d = self.get(ref)
+        n = 1 if slide in (None, "") else _number(slide)
+        if not n or n > len(d.slides) or d.slides[n - 1].media is None:
+            raise StudioError(f"slide {slide or 1} of draft {d.id} has no picture or video")
+        return d.id, n, d.slides[n - 1].media
+
+    def into_slide(self, draft_id: int, n: int):
+        """What puts a result made elsewhere on that slide, once made (MediaJob.then)."""
+        return lambda items: self._made(draft_id, n, items)
+
     async def _made(self, draft_id: int, n: int, items: list["MediaItem"]) -> str:
         """A generation for a draft finished: put it on its slide. Returns a sentence for the assistant."""
         d = self.drafts.get(draft_id)

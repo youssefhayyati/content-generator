@@ -139,13 +139,13 @@ from . import dub, reel, tools
 from .asr import ASREngine, StreamingTranscription, resample
 from .browser import Browser
 from .browser_agent import BrowserAgent
-from .comfyui import ComfyClient, ComfyError, file_kind
+from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import Conversation, ConversationStore
 from .flowai import FlowAIClient, FlowAISession
 from .llm import LLM
-from .lipsync import LipSync
-from .media import MAX_UPLOAD, MediaSession, data_url
+from .podjobs import FaceSwap, LipSync
+from .media import MAX_UPLOAD, MediaSession
 from .music import SongWriter
 from .phone import PhoneClient, PhoneError, PhoneSession
 from .skills import catalogue, load_skills
@@ -182,6 +182,7 @@ class Models:
     comfy: ComfyClient | None = None
     music: SongWriter | None = None  # songs written for videos (ACE-Step), when MUSIC_URL is set
     lipsync: LipSync | None = None  # lips redrawn for dubbed videos (LatentSync), when LIPSYNC_URL is set
+    faceswap: FaceSwap | None = None  # faces swapped in pictures and videos (inswapper), when FACESWAP_URL is set
     phone: PhoneClient | None = None  # the team's phone, posting drafts from its apps, when PHONE_API_URL is set
     conversations: ConversationStore | None = None  # set once comfy is
 
@@ -287,8 +288,7 @@ class VoiceSession:
                 "which workflows exist, media_status for progress, and cancel_media to stop one. To add a "
                 "workflow, find it with search_workflow_templates (or use a workflow file the user attached, or "
                 "a URL they give), confirm the choice with the user, then call add_media_workflow. "
-                "To put the face from one picture onto someone in another picture or a video, call swap_face; it "
-                "runs in the background like the others. Workflows on the pod:\n" + self.m.comfy.catalogue()
+                "Workflows on the pod:\n" + self.m.comfy.catalogue()
             )
         if self.m.lipsync:
             prompt += (
@@ -297,6 +297,12 @@ class VoiceSession:
                 "the words about as long as what they say now (transcribe_media says what that is and how many "
                 "words fit); translating is fine. It takes a few minutes in the background: say one short "
                 "sentence, and you are told when it is ready.")
+        if self.m.faceswap:
+            prompt += (
+                "\n\nTo put the face from one picture onto the person in another picture or in a video, call "
+                "swap_face. With a draft (and slide), the swapped picture or video takes that slide's place by "
+                "itself (undo_draft goes back). A picture takes seconds, a video a minute or so, in the background: "
+                "say one short sentence, and you are told when it is ready.")
         prompt += (
             "\n\nclone_voice makes a voice from a recording in the conversation (an audio file, or a video's "
             "sound): it can then read videos or be the voice you speak in. transcribe_media says what is said in "
@@ -1019,17 +1025,6 @@ class VoiceSession:
         item.meta = {**(item.meta or {}), "speaker": voice}
         return voice
 
-    async def needs(self, workflow: str, what: str):
-        """Raises when a workflow this machine relies on isn't on the pod (or still installing)."""
-        try:
-            await self.media.workflow(workflow)
-        except ComfyError as exc:
-            if "no workflow named" not in str(exc):
-                raise
-            raise ComfyError(f"{what} isn't set up on the ComfyUI pod yet. It comes with the assistant: once the "
-                             f"user agrees, call add_media_workflow with name {workflow} (it installs in the "
-                             "background, can take a while the first time)") from None
-
     async def dub_video(self, video=None, script: str = "", voice: str | None = None) -> dict:
         tts, script = self.m.tts, " ".join(str(script or "").split())
         try:
@@ -1074,36 +1069,56 @@ class VoiceSession:
         return {**started, "video": item.id, "voice": chosen["name"] if chosen else "the speaker's own, cloned "
                 "from the video", "video_seconds": info["duration"]}
 
-    async def swap_face(self, face=None, target=None) -> dict:
+    async def swap_face(self, face=None, target=None, draft=None, slide=None, every: bool = False) -> dict:
+        """The face from one picture put on the person in another picture or a video: a number, or a draft's
+        slide, whose picture or video the result then replaces. every: every face, not only the largest."""
+        swapper, then = self.m.faceswap, None
         try:
+            if not swapper:
+                raise dub.DubError("face swapping is off (FACESWAP_URL is not set)")
             source = self.media.item(face, "image")
-            into = self.media.item(target, "image", "video")
+            if draft not in (None, ""):
+                d, n, current = self.studio.slide_media(draft, slide)
+                into = self.media.item(current, "image", "video")
+                then = self.studio.into_slide(d, n)
+            elif target not in (None, ""):
+                into = self.media.item(target, "image", "video")
+            else:
+                raise dub.DubError("swap_face needs what to put the face on: a picture or video number (target), "
+                                   "or a draft (and its slide)")
             if into.id == source.id:
                 raise dub.DubError("the face and what to put it on are the same picture")
-            workflow = dub.FACE_SWAP_VIDEO if into.kind == "video" else dub.FACE_SWAP
-            await self.needs(workflow, "Face swapping" + (" in videos" if into.kind == "video" else ""))
             if into.kind == "video":
                 await asyncio.to_thread(dub.check, into.path)
-        except ComfyError as exc:
+        except (ComfyError, StudioError) as exc:
             return {"error": str(exc)}
 
         async def work(job):
-            face_url = data_url(source.path.read_bytes(), source.path.name)
             if into.kind == "video":
                 await self.media.step(job, "preparing the video")
-                clip = await asyncio.to_thread(dub.for_pod, into.path)
-                inputs = {"video": data_url(clip, "target.mp4"), "image": face_url}
+                target_file = ("target.mp4", await asyncio.to_thread(dub.for_pod, into.path))  # its sound and rate kept
             else:
-                inputs = {"image": data_url(into.path.read_bytes(), into.path.name), "image_2": face_url}
-            await self.media.step(job, "swapping the face on the pod")
-            files = await self.media.on_pod(job, workflow, inputs)
-            return [(d, n, await asyncio.to_thread(dub.meta, d) if file_kind(n) == "video" else None)
-                    for d, n in files if file_kind(n) == into.kind]
+                target_file = (into.path.name, await asyncio.to_thread(into.path.read_bytes))
+            face_file = (source.path.name, await asyncio.to_thread(source.path.read_bytes))
+            await self.media.step(job, "swapping the face")
+            stop = threading.Event()
+            job.stop = stop.set
+
+            def progress(text: str):  # from the face swap's thread
+                asyncio.run_coroutine_threadsafe(self.media.step(job, text), self.loop)
+
+            made = await asyncio.to_thread(swapper.swap, face_file, target_file, bool(every), progress, stop.is_set)
+            if into.kind == "video":
+                return [(made, f"faceswap-{into.id}.mp4", await asyncio.to_thread(dub.meta, made))]
+            return [(made, f"faceswap-{into.id}.png", None)]
 
         what = f"{'video' if into.kind == 'video' else 'picture'} {into.id}"
-        started = self.media.pipeline(f"Swapping the face in {what}", workflow, f"the face from picture {source.id}",
-                                      into.kind, work)
-        return {**started, "face": f"picture {source.id}", "into": what}
+        started = self.media.pipeline(f"Swapping the face in {what}", "face swap", f"the face from picture {source.id}",
+                                      into.kind, work, then=then)
+        reply = {**started, "face": f"picture {source.id}", "into": what}
+        if then and "error" not in started:
+            reply.update(draft=d, slide=n, note="the result takes the slide's place by itself when it is ready")
+        return reply
 
     def focus_note(self) -> str | None:
         """What the user selected or painted on screen, for "this" and "it", when it changed since the LLM
@@ -1242,6 +1257,7 @@ class VoiceSession:
                   (set() if self.flowai else tools.FLOWAI_TOOLS) | \
                   (set() if self.m.phone else tools.PHONE_TOOLS) | \
                   (set() if self.m.lipsync else tools.LIPSYNC_TOOLS) | \
+                  (set() if self.m.faceswap else tools.FACESWAP_TOOLS) | \
                   ({"load_skill"} if self.skills_inline else set())
         try:
             for _ in range(settings.llm_max_tool_rounds):

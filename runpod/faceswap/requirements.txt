@@ -1,0 +1,8 @@
+# The face swap service, on the PyTorch the pod's image has (only for the CUDA libraries onnxruntime loads).
+# insightface itself is installed by setup.sh: it builds a Cython part against the numpy below.
+numpy==1.26.4
+onnxruntime-gpu==1.22.0
+opencv-python-headless==4.10.0.84
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.20

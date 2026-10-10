@@ -7,7 +7,9 @@ read: do not like, comment, reply, share, delete or change anything.
 
 The post: a {{placement}} posted {{posted}}, whose caption starts with {{first_words}}.
 
-Be quick: this takes about ten steps. Stop as soon as you have read what is listed below.
+Be quick: this takes about ten steps. Stop as soon as you have read what is listed below. Instagram's bottom
+bar, left to right: Home, Reels, Messages (paper plane), Search, your profile picture (far right). If the screen
+already shows the post (the account's name over its caption's first words), read it right there: skip to step 4.
 
 If the post is a story (the line above says "a story"): open the Instagram app, close any pop-up, and tap
 your own profile picture at the top left of the home feed. If it has no coloured ring, the story is gone
@@ -24,7 +26,8 @@ comments null. Then report and stop; skip the steps below.
    starts with the words above; if not, look at the next ones (at most the 12 newest). If it is not there,
    report found false.
 4. Read the numbers under the post: likes ("N likes" or "Liked by someone and N others": that is N + 1), and
-   comments ("View all N comments"). If there is a "View insights" link (professional accounts), tap it and
+   comments ("View all N comments"). On a reel they sit under the icons on the right (heart: likes, speech
+   bubble: comments, paper plane: shares); an icon with no number under it means 0. If there is a "View insights" link (professional accounts), tap it and
    read views (or reach / plays), shares and saves, then go back. Use the exact numbers shown; 1.2K is fine.
 5. Tap the comment icon to open the comments. Read the {{comments_kept}} newest comments (the author's name
    and the words). Do not reply.

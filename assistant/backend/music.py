@@ -1,4 +1,4 @@
-"""Songs for videos from ACE-Step 1.5 (MIT; content-generator/music/), on this PC's GPU or a pod's.
+"""Songs for videos from ACE-Step 1.5 (MIT; content-generator/runpod/music/), on the RunPod pod or this PC's GPU.
 
 The composer in FlowAI Sound plays one of six moods; ACE-Step writes the music a description asks
 for ("upbeat acoustic pop, bright ukulele and hand claps, 110 bpm"), so a video for a bakery and one

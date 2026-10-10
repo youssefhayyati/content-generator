@@ -14,7 +14,7 @@ end-to-end and still produce run records with proof.
 
 ```sh
 # 1. Everything: the dashboard (:5173), the API (Laravel, :8002), queue worker, scheduler,
-#    FlowAI Sound, the voice assistant (:8003), its music model (:8004), Mailpit (:8025), Ollama
+#    FlowAI Sound, the voice assistant (:8003), Mailpit (:8025), Ollama
 docker compose up -d
 docker compose exec ollama ollama pull llama3.2:1b        # once; 3b/8b need more RAM than ~2.5 GB free
 
@@ -28,11 +28,11 @@ FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=x-phone
 ```
 
 The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models
-(about 6 GB), the music model downloads ACE-Step, and the dashboard installs its packages. The
-assistant and the music model need an NVIDIA GPU; without one, `docker compose --profile
-assistant-cpu up -d --scale assistant=0 --scale music=0` runs the assistant on the CPU. Its
-settings (Ollama cloud key, ComfyUI, VoiceStudio) are in `assistant/.env`, from
-`assistant/.env.example`. To run the dashboard outside Docker instead: `docker compose stop
+(about 6 GB), and the dashboard installs its packages. The assistant's speech recognition uses an
+NVIDIA GPU; without one, `docker compose --profile assistant-cpu up -d --scale assistant=0` runs it on
+the CPU. The GPU models (pictures and videos, voices, songs, lip sync) run on a RunPod pod, deployed
+from `runpod/` in one command (`runpod/README.md`). The assistant's settings (Ollama cloud key, the
+pod's URLs and keys) are in `assistant/.env`, from `assistant/.env.example`. To run the dashboard outside Docker instead: `docker compose stop
 frontend`, then `cd frontend && npm install && API_ORIGIN=http://localhost:8002 npm run dev`.
 
 Sign in at http://localhost:5173 as **demo@flowai.test / password**.
@@ -209,8 +209,10 @@ docker compose exec api php artisan migrate     # after adding a migration
 - `publishing-agent/` — the phone-driving worker (`agent.py`, Python)
 - `publishing-studio/` — the device layer it uses (adb + simulator, Instagram/X recipes, named targets)
 - `sound/` — FlowAI Sound: voices, listening and the composer (Python, CPU)
-- `music/` — ACE-Step 1.5 for songs under the assistant's videos (GPU; MIT, licensed training data)
-- `lipsync/` — LatentSync for the assistant's dubbed videos (GPU; Apache-2.0): on the RunPod pod (`lipsync/runpod/setup.sh`, port 8004), or here with `--profile lipsync`
+- `runpod/` — everything on the GPU pod, deployed in one command (`runpod/deploy.sh`): ComfyUI (pictures and videos),
+  VoiceStudio (voices), ACE-Step 1.5 (songs under videos; MIT), LatentSync (dubbed videos' lips; Apache-2.0) and
+  face swaps (inswapper_128 and GFPGAN, ONNX).
+  Music and lip sync also run here on a local GPU: `docker compose --profile music` / `--profile lipsync`
 - `assistant/` — the voice assistant behind the Assistant page (Python, GPU; copied from the gamechange repo, where it's developed)
 - `demo/` — the one-command full cycle
 - `deploy/` — production stack for the VPS (nginx + PHP-FPM + Postgres)
