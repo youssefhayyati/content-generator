@@ -36,12 +36,16 @@ function useTyped(text: string) {
   return shown
 }
 
-/** The part of the studio the current question is filling in: lit, so the answer visibly lands somewhere. */
-function Spot({ on, children, className }: { on: boolean; children: ReactNode; className?: string }) {
+/**
+ * The part of the studio the current question is filling in: lit, so the answer visibly lands
+ * somewhere. `name` is what the thread aims at; each `hit` flashes it once more.
+ */
+function Spot({ on, name, hit, children, className }: { on: boolean; name: string; hit?: number; children: ReactNode; className?: string }) {
   return (
     <div
+      data-spot={name}
       className={cn(
-        'rounded-lg transition-[box-shadow,background-color] duration-500',
+        'relative rounded-lg transition-[box-shadow,background-color] duration-500',
         on
           ? 'bg-accent/[0.07] shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-accent)_55%,transparent),0_0_32px_-8px_color-mix(in_oklab,var(--color-accent)_55%,transparent)]'
           : 'shadow-[0_0_0_1px_transparent]',
@@ -49,6 +53,16 @@ function Spot({ on, children, className }: { on: boolean; children: ReactNode; c
       )}
     >
       {children}
+      {!!hit && (
+        <motion.span
+          key={hit}
+          aria-hidden
+          className="pointer-events-none absolute -inset-px rounded-lg bg-accent/25 shadow-[0_0_0_2px_var(--color-accent-glow),0_0_40px_4px_color-mix(in_oklab,var(--color-accent)_70%,transparent)]"
+          initial={{ opacity: 1, scale: 1 }}
+          animate={{ opacity: 0, scale: 1.06 }}
+          transition={{ duration: 0.9, ease }}
+        />
+      )}
     </div>
   )
 }
@@ -140,7 +154,22 @@ const partOfDay = () => {
  * corner, the account in the sidebar, the week filling with posting times, the voice, the palette,
  * and at the end the first post. Tilted like a product shot until it's finished, then square.
  */
-export function Preview({ a, step, name, post, accountShown }: { a: Answers; step: number; name: string; post: FirstPostState | null; accountShown: boolean }) {
+export function Preview({
+  a,
+  step,
+  name,
+  post,
+  accountShown,
+  hits,
+}: {
+  a: Answers
+  step: number
+  name: string
+  post: FirstPostState | null
+  accountShown: boolean
+  /** How many times the thread has landed on each part. */
+  hits: Record<string, number>
+}) {
   const brand = a.brand.trim()
   const about = a.about.trim()
   const tone = TONES.find((t) => t.id === a.tone)!
@@ -155,6 +184,7 @@ export function Preview({ a, step, name, post, accountShown }: { a: Answers; ste
         animate={finale ? { opacity: 0.4, x: 64, y: -56, rotateX: 0, rotateY: 0, scale: 0.86 } : { opacity: 1, x: 0, y: 0, rotateX: 4, rotateY: -9, scale: 1 }}
         transition={{ duration: 1.2, ease }}
         style={{ transformStyle: 'preserve-3d' }}
+        data-spot="window"
         className="overflow-hidden rounded-2xl border border-line-2 bg-panel shadow-[0_70px_140px_-50px_rgb(0_0_0_/_0.95)]"
       >
         <div className="flex h-9 items-center gap-1.5 border-b border-line px-3.5">
@@ -166,7 +196,7 @@ export function Preview({ a, step, name, post, accountShown }: { a: Answers; ste
 
         <div className="grid h-[430px] grid-cols-[156px_minmax(0,1fr)]">
           <aside className="flex flex-col gap-3 border-r border-line bg-panel-2/60 p-2.5">
-            <Spot on={step === 1} className="flex items-center gap-2 p-1.5">
+            <Spot on={step === 1} name="brand" hit={hits.brand} className="flex items-center gap-2 p-1.5">
               <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent text-[13px] font-semibold text-on-accent transition-colors duration-500">
                 {brand ? (
                   <motion.span key={monogram(brand)} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.4, ease }}>
@@ -193,7 +223,7 @@ export function Preview({ a, step, name, post, accountShown }: { a: Answers; ste
 
             <div>
               <p className="px-2 font-mono text-[9px] uppercase tracking-[0.14em] text-dim">Accounts</p>
-              <Spot on={step === 3} className="mt-1.5 p-1.5">
+              <Spot on={step === 3} name="account" hit={hits.account} className="mt-1.5 p-1.5">
                 <AnimatePresence mode="wait" initial={false}>
                   {accountShown && a.handle ? (
                     <motion.span
@@ -226,7 +256,7 @@ export function Preview({ a, step, name, post, accountShown }: { a: Answers; ste
               <div className="mt-1 h-4">{about ? <p className="truncate text-[11px] text-muted">{about}</p> : <Bar w="60%" className="mt-1.5" />}</div>
             </div>
 
-            <Spot on={step === 4} className="border border-line p-3">
+            <Spot on={step === 4} name="rhythm" hit={hits.rhythm} className="border border-line p-3">
               <span className="flex items-center justify-between">
                 <span className="text-[11px] font-medium">This week</span>
                 <span className="font-mono text-[9.5px] text-dim">{slots.length ? `${slots.length} times` : 'no times yet'}</span>
@@ -236,7 +266,7 @@ export function Preview({ a, step, name, post, accountShown }: { a: Answers; ste
               </span>
             </Spot>
 
-            <Spot on={step === 2} className="border border-line p-3">
+            <Spot on={step === 2} name="voice" hit={hits.voice} className="border border-line p-3">
               <span className="flex items-center justify-between">
                 <span className="text-[11px] font-medium">Voice</span>
                 {step >= 2 && <span className="rounded-full border border-accent/40 px-2 py-px text-[9.5px] text-accent-soft">{tone.name}</span>}
@@ -255,7 +285,7 @@ export function Preview({ a, step, name, post, accountShown }: { a: Answers; ste
               </span>
             </Spot>
 
-            <Spot on={finale} className="min-h-0 flex-1 border border-line p-3">
+            <Spot on={finale} name="drafts" hit={hits.drafts} className="min-h-0 flex-1 border border-line p-3">
               <span className="flex items-center justify-between">
                 <span className="text-[11px] font-medium">Drafts</span>
                 {post && <span className="rounded-full bg-white/[0.06] px-2 py-px text-[9.5px] text-muted">1</span>}

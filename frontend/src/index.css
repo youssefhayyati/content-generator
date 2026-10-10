@@ -421,3 +421,18 @@ body *::-webkit-scrollbar-track:horizontal {
     scrollbar-color: color-mix(in oklab, var(--color-accent-soft) 34%, transparent) transparent;
   }
 }
+/* ------------------------------------------------------------------ */
+/* Onboarding                                                           */
+/* ------------------------------------------------------------------ */
+
+/* Picking a palette washes it over the screen from the swatch: the new page is revealed
+   by a growing circle (set from script), so the browser's own crossfade is switched off. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@keyframes onb-fade-in {
+  to { opacity: 1; }
+}

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { AnimatePresence, motion, type Variants } from 'framer-motion'
-import { ArrowLeft, ArrowRight, AtSign, CalendarClock, Check, CornerDownLeft, LoaderCircle, Minus, RotateCcw, ShieldCheck, TriangleAlert, Waves } from 'lucide-react'
+import { ArrowLeft, ArrowRight, AtSign, Check, CornerDownLeft, LoaderCircle, Minus, RotateCcw, TriangleAlert } from 'lucide-react'
 import { useLenis } from 'lenis/react'
 import { LogoMark } from '../../components/ui/Logo'
 import { applyPalette, Chip, PALETTES } from '../../components/ui/PalettePicker'
@@ -8,14 +9,17 @@ import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/Pl
 import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, apiStream, type User } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import { ease } from '../../lib/motion'
+import { ease, easeInOut } from '../../lib/motion'
 import { useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import { count, firstName, useInvalidate } from '../data'
+import { Flap } from '../live/Flap'
 import { useToast } from '../toast'
 import { inputClass, Label } from '../ui'
 import { fallbackPost, firstBrief, handleFrom, RHYTHMS, TONES, type Answers } from './model'
 import { FirstPost, Preview, WeekDots, type FirstPostState } from './Preview'
+import { SCENE_MS, SCENES, SceneIndex, Showcase } from './Showcase'
+import { Threads, useThread } from './Thread'
 
 /*
  * The first minute of a new account. Five questions (brand, voice, first account, posting rhythm,
@@ -37,6 +41,11 @@ const rise: Variants = { hidden: { opacity: 0, y: 22 }, show: { opacity: 1, y: 0
 type TaskId = 'studio' | 'account' | 'rhythm' | 'look' | 'post' | 'draft'
 type TaskState = 'waiting' | 'running' | 'done' | 'skipped' | 'failed'
 const TASKS: TaskId[] = ['studio', 'account', 'rhythm', 'look', 'post', 'draft']
+
+/** Where each answer lands in the studio beside it, and where each finished task wires in. */
+const ANSWER_SPOT: Record<number, string> = { 1: 'brand', 2: 'voice', 3: 'account', 4: 'rhythm' }
+const TASK_SPOT: Record<TaskId, string> = { studio: 'brand', account: 'account', rhythm: 'rhythm', look: 'window', post: 'drafts', draft: 'drafts' }
+const SLIDE = { type: 'spring', stiffness: 420, damping: 36 } as const
 
 export function Onboarding() {
   const { user, setUser } = useSession()
@@ -68,6 +77,20 @@ export function Onboarding() {
   const account = useRef<number | null>(null)
   const draft = useRef<number | null>(null)
   const built = useRef(false)
+  const [scene, setScene] = useState(0)
+  const [hits, setHits] = useState<Record<string, number>>({})
+  const [launching, setLaunching] = useState(false)
+  const ringRef = useRef<HTMLSpanElement>(null)
+  const land = useCallback((spot: string) => setHits((h) => ({ ...h, [spot]: (h[spot] ?? 0) + 1 })), [])
+  const { lines, fire } = useThread(land)
+  const wired = (id: TaskId) => fire(document.querySelector(`[data-task="${id}"]`), TASK_SPOT[id])
+
+  // The welcome's showreel moves on by itself; picking a scene restarts its clock.
+  useEffect(() => {
+    if (step !== 0) return
+    const t = window.setTimeout(() => setScene((n) => (n + 1) % SCENES.length), SCENE_MS)
+    return () => window.clearTimeout(t)
+  }, [step, scene])
 
   const set = (patch: Partial<Answers>) => setA((prev) => ({ ...prev, ...patch }))
   const mark = (id: TaskId, state: TaskState, note?: string) => setTasks((t) => ({ ...t, [id]: { state, note } }))
@@ -105,7 +128,13 @@ export function Onboarding() {
     setError(null)
     setStep(to)
   }
-  const next = () => valid && step < FINALE && go(step + 1)
+  const next = () => {
+    if (!valid || step >= FINALE) return
+    // The answer runs along a thread into the part of the studio it fills in.
+    const spot = ANSWER_SPOT[step]
+    if (spot && !(step === 3 && skipAccount)) fire(document.querySelector('[data-continue]'), spot)
+    go(step + 1)
+  }
   const back = () => step > 0 && step < FINALE && go(step - 1)
 
   /* ------------------------------------------------------------------ */
@@ -134,12 +163,14 @@ export function Onboarding() {
       const text = out.trim()
       setPost({ text, writing: false })
       mark('post', 'done')
+      wired('post')
       return text
     } catch (e) {
       const text = fallbackPost(a)
       setPost({ text, writing: false })
       setCanRetry(false)
       mark('post', 'done', e instanceof ApiError && e.status === 503 ? 'AI writing isn’t switched on here yet, so this one is written from your answers.' : 'Written from your answers this time.')
+      wired('post')
       return text
     }
   }
@@ -155,6 +186,7 @@ export function Onboarding() {
       try {
         setUser(await api<User>('/user', { method: 'PATCH', body: { preferences: { studio: a.brand.trim() } } }))
         mark('studio', 'done')
+        wired('studio')
       } catch (e) {
         mark('studio', 'failed', reason(e))
       }
@@ -175,6 +207,7 @@ export function Onboarding() {
           })
           account.current = created.id
           mark('account', 'done')
+          wired('account')
         } catch (e) {
           mark('account', 'failed', reason(e))
         }
@@ -188,6 +221,7 @@ export function Onboarding() {
         try {
           await api('/queue-slots', { method: 'PUT', body: { slots } })
           mark('rhythm', 'done')
+          wired('rhythm')
         } catch (e) {
           mark('rhythm', 'failed', reason(e))
         }
@@ -196,6 +230,7 @@ export function Onboarding() {
       mark('look', 'running')
       await pause(350)
       mark('look', 'done')
+      wired('look')
 
       setCanRetry(true)
       const text = await write()
@@ -205,6 +240,7 @@ export function Onboarding() {
       try {
         draft.current = (await api<{ id: number }>('/posts', { method: 'POST', body: draftBody(text) })).id
         mark('draft', 'done')
+        wired('draft')
       } catch (e) {
         mark('draft', 'failed', reason(e))
       }
@@ -233,6 +269,11 @@ export function Onboarding() {
   const close = async (finished: boolean) => {
     setClosing(true)
     setError(null)
+    if (finished) {
+      // The curtain rises with the studio's name on it; the dashboard is behind it when it lifts.
+      setLaunching(true)
+      await pause(1100)
+    }
     try {
       const done = await api<User>('/user', { method: 'PATCH', body: { preferences: { onboarding: 'done' } } })
       invalidate()
@@ -244,8 +285,50 @@ export function Onboarding() {
       setUser(done)
     } catch (e) {
       setClosing(false)
+      setLaunching(false)
       setError(reason(e))
     }
+  }
+
+  /**
+   * The new palette washes over the screen from the swatch that was picked, a lit ring riding
+   * its edge. The ring lives in the new page, which shows live inside the growing circle, so the
+   * two travel together. Without view transitions the ring still sweeps over the new colours.
+   */
+  const pickPalette = (id: string, origin: HTMLElement) => {
+    const r = origin.getBoundingClientRect()
+    const x = r.left + r.width / 2
+    const y = r.top + r.height / 2
+    const reach = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y))
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const easing = `cubic-bezier(${ease.join(', ')})`
+    const ring = () => {
+      const el = ringRef.current
+      if (!el) return
+      Object.assign(el.style, { left: `${x - reach}px`, top: `${y - reach}px`, width: `${reach * 2}px`, height: `${reach * 2}px` })
+      el.animate({ transform: ['scale(0)', 'scale(1)'] }, { duration: 1100, easing })
+      el.animate({ opacity: [1, 1, 0], offset: [0, 0.7, 1] }, { duration: 1100 })
+    }
+    const apply = () => {
+      flushSync(() => set({ palette: id }))
+      applyPalette(id)
+    }
+    if (still) return apply()
+    if (!document.startViewTransition) {
+      apply()
+      return ring()
+    }
+    document
+      .startViewTransition(apply)
+      .ready.then(() => {
+        // One clock for both, or the ring runs ahead of the edge and is clipped away with it.
+        ring()
+        document.documentElement.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${reach}px at ${x}px ${y}px)`] },
+          { duration: 1100, easing, pseudoElement: '::view-transition-new(root)' },
+        )
+      })
+      .catch(() => {})
   }
 
   const settled = TASKS.every((t) => tasks[t].state !== 'waiting' && tasks[t].state !== 'running')
@@ -273,7 +356,7 @@ export function Onboarding() {
       className="fixed inset-0 z-[140] flex flex-col bg-ink text-fg"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, scale: 1.02, filter: 'blur(8px)', transition: { duration: 0.7, ease } }}
+      exit={{ y: '-100%', transition: { duration: 0.9, ease: easeInOut } }}
       transition={{ duration: 0.6, ease }}
       onKeyDown={(e) => {
         if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
@@ -292,8 +375,8 @@ export function Onboarding() {
 
         <div className="ml-auto flex items-center gap-5">
           <div className="flex items-center gap-3" aria-label={step === 0 ? 'Welcome' : step === FINALE ? 'Ready' : `Step ${step} of ${STEPS.length}: ${STEPS[step - 1]}`}>
-            <span className="hidden font-mono text-[10.5px] uppercase tracking-[0.16em] text-dim md:block">
-              {step === 0 ? 'Welcome' : step === FINALE ? 'Ready' : `${pad(step)} / ${pad(STEPS.length)} · ${STEPS[step - 1]}`}
+            <span className="hidden text-[10px] md:block">
+              <Flap text={step === 0 ? 'Welcome' : step === FINALE ? (settled ? 'Ready' : 'Building') : `${pad(step)}/${pad(STEPS.length)} ${STEPS[step - 1]}`} width={14} />
             </span>
             <span className="flex gap-1">
               {STEPS.map((s, i) => (
@@ -322,27 +405,20 @@ export function Onboarding() {
                     <Title>
                       Let’s build your <Serif>studio.</Serif>
                     </Title>
+                    <motion.p variants={rise} className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2 text-[17px] text-muted">
+                      FlowAI
+                      <span className="text-[19px]">
+                        <Flap text={SCENES[scene].verb} width={9} />
+                      </span>
+                      for you.
+                    </motion.p>
                     <Lead>
                       Five short questions, about a minute. FlowAI sets up your account, your posting rhythm and your look, then writes your first post in your
-                      voice.
+                      voice. Nothing is published without your yes.
                     </Lead>
-                    <motion.ul variants={rise} className="mt-9 space-y-4 border-t border-line pt-7">
-                      {[
-                        { icon: Waves, title: 'Your voice, learned once', body: 'Every post FlowAI writes sounds like you.' },
-                        { icon: CalendarClock, title: 'A rhythm that runs itself', body: 'Approved posts drop into your posting times.' },
-                        { icon: ShieldCheck, title: 'Nothing posts without you', body: 'Every post waits for your yes.' },
-                      ].map((p) => (
-                        <li key={p.title} className="flex items-start gap-3.5">
-                          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-line-2 text-accent-soft">
-                            <p.icon className="size-4" strokeWidth={1.75} />
-                          </span>
-                          <span>
-                            <span className="block text-[14px] font-medium">{p.title}</span>
-                            <span className="block text-[13px] text-muted">{p.body}</span>
-                          </span>
-                        </li>
-                      ))}
-                    </motion.ul>
+                    <motion.div variants={rise} className="mt-8 border-t border-line pt-4">
+                      <SceneIndex scene={scene} onPick={setScene} />
+                    </motion.div>
                     <Actions onNext={next} label="Start" />
                   </>
                 )}
@@ -398,17 +474,18 @@ export function Onboarding() {
                             aria-checked={on}
                             onClick={() => set({ tone: t.id })}
                             className={cn(
-                              'flex flex-col justify-start rounded-xl border p-4 text-left transition-[border-color,background-color] duration-300',
-                              on ? 'border-accent/70 bg-accent/[0.08]' : 'border-line-2 hover:border-white/25 hover:bg-white/[0.02]',
+                              'relative flex flex-col justify-start rounded-xl border p-4 text-left transition-[border-color,background-color] duration-300',
+                              on ? 'border-transparent' : 'border-line-2 hover:border-white/25 hover:bg-white/[0.02]',
                             )}
                           >
-                            <span className="flex w-full items-center justify-between">
+                            {on && <motion.span layoutId="onb-tone" transition={SLIDE} className="absolute inset-0 rounded-xl border border-accent/70 bg-accent/[0.08]" />}
+                            <span className="relative flex w-full items-center justify-between">
                               <span className="text-[14px] font-medium">{t.name}</span>
                               <span className={cn('grid size-4 place-items-center rounded-full border transition-colors', on ? 'border-accent bg-accent text-on-accent' : 'border-line-2')}>
                                 {on && <Check className="size-2.5" strokeWidth={3} />}
                               </span>
                             </span>
-                            <span className="mt-2 block text-[13px] leading-snug text-muted">“{t.line(a.brand.trim() || 'Your brand')}”</span>
+                            <span className="relative mt-2 block text-[13px] leading-snug text-muted">“{t.line(a.brand.trim() || 'Your brand')}”</span>
                           </button>
                         )
                       })}
@@ -448,12 +525,15 @@ export function Onboarding() {
                               setSkipAccount(false)
                             }}
                             className={cn(
-                              'flex h-10 items-center gap-2 rounded-full border px-3.5 text-[13px] transition-colors duration-300',
-                              on ? 'border-fg bg-fg text-ink' : 'border-line-2 text-muted hover:border-white/30 hover:text-fg',
+                              'relative flex h-10 items-center rounded-full border px-3.5 text-[13px] transition-colors duration-300',
+                              on ? 'border-transparent text-ink' : 'border-line-2 text-muted hover:border-white/30 hover:text-fg',
                             )}
                           >
-                            <PlatformIcon id={p} className="size-3.5" />
-                            {PLATFORMS[p].name}
+                            {on && <motion.span layoutId="onb-platform" transition={SLIDE} className="absolute inset-0 rounded-full bg-fg" />}
+                            <span className="relative flex items-center gap-2">
+                              <PlatformIcon id={p} className="size-3.5" />
+                              {PLATFORMS[p].name}
+                            </span>
                           </button>
                         )
                       })}
@@ -515,15 +595,16 @@ export function Onboarding() {
                             aria-checked={on}
                             onClick={() => set({ rhythm: r.id })}
                             className={cn(
-                              'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-5 rounded-xl border px-4 py-3 text-left transition-[border-color,background-color] duration-300',
-                              on ? 'border-accent/70 bg-accent/[0.08]' : 'border-line-2 hover:border-white/25 hover:bg-white/[0.02]',
+                              'relative grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-5 rounded-xl border px-4 py-3 text-left transition-[border-color,background-color] duration-300',
+                              on ? 'border-transparent' : 'border-line-2 hover:border-white/25 hover:bg-white/[0.02]',
                             )}
                           >
-                            <span className="min-w-0">
+                            {on && <motion.span layoutId="onb-rhythm" transition={SLIDE} className="absolute inset-0 rounded-xl border border-accent/70 bg-accent/[0.08]" />}
+                            <span className="relative min-w-0">
                               <span className="block text-[14px] font-medium">{r.name}</span>
                               <span className="block truncate text-[12.5px] text-muted">{r.detail}</span>
                             </span>
-                            <span className="w-28">
+                            <span className="relative w-28">
                               <WeekDots slots={r.slots} />
                             </span>
                           </button>
@@ -553,10 +634,7 @@ export function Onboarding() {
                             type="button"
                             role="radio"
                             aria-checked={on}
-                            onClick={() => {
-                              set({ palette: p.id })
-                              applyPalette(p.id)
-                            }}
+                            onClick={(e) => pickPalette(p.id, e.currentTarget)}
                             className={cn(
                               'rounded-xl border p-2 text-left transition-[border-color,background-color] duration-300',
                               on ? 'border-accent/70 bg-accent/[0.08]' : 'border-line-2 hover:border-white/25',
@@ -591,7 +669,7 @@ export function Onboarding() {
                     </Title>
                     <motion.ul variants={rise} className="mt-9 space-y-3.5">
                       {TASKS.map((t) => (
-                        <TaskRow key={t} state={tasks[t].state} label={labels[t]} note={tasks[t].note} />
+                        <TaskRow key={t} id={t} state={tasks[t].state} label={labels[t]} note={tasks[t].note} />
                       ))}
                     </motion.ul>
                     {post && (
@@ -644,14 +722,69 @@ export function Onboarding() {
             }}
           />
           <div aria-hidden className="absolute left-1/2 top-1/2 size-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/[0.16] blur-[120px] transition-colors duration-700" />
-          <div className="relative w-full max-w-[640px] px-12 xl:px-16">
-            <Preview a={a} step={step} name={firstName(me.name)} post={post} accountShown={step >= 3 && !skipAccount} />
+          <div className="relative w-full max-w-[640px] px-12 [perspective:1600px] xl:px-16">
+            <AnimatePresence mode="wait">
+              {step === 0 ? (
+                <motion.div
+                  key="showcase"
+                  className="flex h-[520px] items-center"
+                  exit={{ opacity: 0, scale: 0.86, rotateY: 22, filter: 'blur(10px)', transition: { duration: 0.55, ease } }}
+                >
+                  <Showcase scene={scene} />
+                </motion.div>
+              ) : (
+                <motion.div key="studio">
+                  <Preview a={a} step={step} name={firstName(me.name)} post={post} accountShown={step >= 3 && !skipAccount} hits={hits} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <p className="absolute bottom-6 left-1/2 -translate-x-1/2 font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
-            {step === FINALE ? 'Your studio' : 'Your studio, as you build it'}
+          <p className="absolute bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+            {step === 0 ? `Fig. ${pad(scene + 1)} — ${SCENES[scene].title}, for a demo brand` : step === FINALE ? 'Your studio' : 'Your studio, as you build it'}
           </p>
         </div>
       </div>
+
+      <Threads lines={lines} />
+
+      {/* The palette wash's leading edge; placed and played from pickPalette. */}
+      <span
+        ref={ringRef}
+        aria-hidden
+        className="pointer-events-none fixed z-[155] rounded-full border-[3px] border-accent-glow opacity-0 shadow-[0_0_48px_8px_color-mix(in_oklab,var(--color-accent)_60%,transparent),inset_0_0_48px_8px_color-mix(in_oklab,var(--color-accent)_40%,transparent)]"
+      />
+
+      <AnimatePresence>
+        {launching && (
+          <motion.div
+            className="fixed inset-0 z-[160] flex flex-col justify-between bg-accent px-5 py-6 text-on-accent md:px-10 md:py-8"
+            initial={{ y: '100%', borderTopLeftRadius: '50% 14vh', borderTopRightRadius: '50% 14vh' }}
+            animate={{ y: '0%', borderTopLeftRadius: '0% 0vh', borderTopRightRadius: '0% 0vh' }}
+            transition={{ duration: 0.8, ease: easeInOut }}
+          >
+            <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.18em] opacity-70">
+              <span className="flex items-center gap-2">
+                <LogoMark className="size-4" /> FlowAI
+              </span>
+              <span>Opening your studio</span>
+            </div>
+            <div className="overflow-hidden text-center">
+              <motion.p
+                className="font-serif text-[clamp(3.5rem,11vw,10rem)] italic leading-[1.05] tracking-[-0.02em]"
+                initial={{ y: '110%' }}
+                animate={{ y: '0%' }}
+                transition={{ duration: 0.9, ease, delay: 0.3 }}
+              >
+                {a.brand.trim() || 'Your studio'}
+              </motion.p>
+            </div>
+            <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.18em] opacity-70">
+              <span>Create once. Publish everywhere.</span>
+              <span>/dashboard</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
@@ -671,7 +804,7 @@ function Eyebrow({ index, children }: { index?: number; children: ReactNode }) {
 function Title({ children }: { children: ReactNode }) {
   return (
     <h1 id="onboarding-title" className="mt-6 overflow-hidden pb-[0.08em] text-[clamp(2.4rem,4.2vw,3.75rem)] font-medium leading-[0.98] tracking-[-0.045em]">
-      <motion.span className="block" variants={{ hidden: { y: '105%' }, show: { y: '0%', transition: { duration: 0.9, ease } } }}>
+      <motion.span className="block origin-bottom-left" variants={{ hidden: { y: '105%', rotate: 4 }, show: { y: '0%', rotate: 0, transition: { duration: 1, ease } } }}>
         {children}
       </motion.span>
     </h1>
@@ -701,6 +834,7 @@ function Actions({ onBack, onNext, disabled, label = 'Continue', extra }: { onBa
       )}
       <button
         type="button"
+        data-continue
         onClick={onNext}
         disabled={disabled}
         className="group flex h-11 items-center gap-2 rounded-lg bg-fg px-5 text-[14px] font-medium text-ink transition-[background-color,opacity] duration-300 hover:bg-white disabled:opacity-35"
@@ -716,9 +850,9 @@ function Actions({ onBack, onNext, disabled, label = 'Continue', extra }: { onBa
   )
 }
 
-function TaskRow({ state, label, note }: { state: TaskState; label: string; note?: string }) {
+function TaskRow({ id, state, label, note }: { id: TaskId; state: TaskState; label: string; note?: string }) {
   return (
-    <li className={cn('flex items-start gap-3 transition-opacity duration-500', state === 'waiting' ? 'opacity-35' : 'opacity-100')}>
+    <li data-task={id} className={cn('flex items-start gap-3 transition-opacity duration-500', state === 'waiting' ? 'opacity-35' : 'opacity-100')}>
       <span
         className={cn(
           'mt-px grid size-5 shrink-0 place-items-center rounded-full border transition-colors duration-500',
