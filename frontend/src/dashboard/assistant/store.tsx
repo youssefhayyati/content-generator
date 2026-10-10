@@ -45,6 +45,8 @@ export type VideoRecipe = {
   motion: string
   placement: string
   color: string | null
+  /** Who reads it: the video's own voice, picked to suit it or by the person. */
+  voice?: Voice | null
 }
 export type Check = { key: string; status: 'pass' | 'warn' | 'fail'; label: string; detail: string }
 export type Draft = {
@@ -127,6 +129,8 @@ export type Voice = {
   archetype?: string | null
   /** A catalog voice's use: narration, conversational, characters… */
   use?: string
+  /** In a video's voices: it's from the catalog (set up when the video is made), not a ready one. */
+  catalog?: boolean
 }
 export type VoiceList = {
   q: string
@@ -139,6 +143,21 @@ export type VoiceList = {
   /** Catalog voices matching the search (or featured), of which the first ones are in catalog. */
   total: number
   languages: string[]
+}
+/** The voices that fit a draft's video best (video_voices): those matching q, or without q one cast for the post. */
+export type VideoVoices = {
+  draft: number
+  q: string
+  lang: string
+  /** The description they were matched to: q, or the one the assistant wrote for the post. */
+  described: string
+  language?: string
+  voices: Voice[]
+  languages: string[]
+  choosable: boolean
+  /** The voice the assistant speaks in. */
+  mine: Voice
+  error?: string
 }
 /** A font texts can use (assistant/fonts/fonts.yaml): its name, the style it's grouped under, what it suits. */
 export type FontInfo = { name: string; label: string; style: string; suits: string; url: string }
@@ -194,6 +213,8 @@ type State = {
   voicePending: string | null
   /** The voice whose sample was asked for; loading until it starts playing. */
   sample: { id: string; loading: boolean } | null
+  /** The voices last found for a draft's video. */
+  videoVoices: VideoVoices | null
   /** The fonts texts can use, by style. */
   fonts: FontList | null
 }
@@ -208,6 +229,7 @@ const EMPTY_SESSION = {
   jobs: {},
   focus: {},
   painting: null,
+  videoVoices: null,
 } satisfies Partial<State>
 
 const INITIAL: State = {
@@ -415,6 +437,8 @@ function onEvent(s: State, m: AssistantEvent): State {
       return { ...s, fonts: { styles: (m.styles as FontList['styles']) ?? [], fonts: ((m.fonts as FontInfo[]) ?? []).map((f) => ({ ...f, url: assistantUrl(f.url) })) } }
     case 'voices':
       return { ...s, voices: m as unknown as VoiceList }
+    case 'video_voices':
+      return { ...s, videoVoices: m as unknown as VideoVoices }
     case 'media': {
       if (m.kind !== 'image' && m.kind !== 'video') return s
       const pic: Picture = {
@@ -487,6 +511,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   chooseVoice: (v: Voice, catalog: boolean) => void
   /** Hear a voice's sample (it stops what the assistant is saying). */
   previewVoice: (v: Voice, catalog: boolean) => void
+  /** The voices that fit a draft's video: matching q, or without q one suited to the post (and these lines). */
+  findVideoVoices: (draft: number, q?: string, lang?: string, lines?: string[]) => void
   /** A FlowAI campaign's posts into the conversation on screen. */
   importCampaign: (campaign: number) => void
   say: (text: string) => Promise<void>
@@ -743,6 +769,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     [link],
   )
 
+  const findVideoVoices = useCallback(
+    (draft: number, q = '', lang = '', lines?: string[]) => link.send({ type: 'video_voices', draft, q, lang, ...(lines ? { lines } : {}) }),
+    [link],
+  )
+
   const select = useCallback(
     (focus: Focus) => {
       dispatch({ type: 'focus', focus })
@@ -785,6 +816,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       voices: state.voices,
       voicePending: state.voicePending,
       sample: state.sample,
+      videoVoices: state.videoVoices,
       fonts: state.fonts,
       link,
       start,
@@ -808,6 +840,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'sample', id: v.id })
         link.send({ type: 'preview_voice', ...(catalog ? { archetype: v.id } : { id: v.id }) })
       },
+      findVideoVoices,
       importCampaign: (campaign) => action('open_campaign', { campaign }),
       say,
       action,
@@ -851,7 +884,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.fonts, link, start, switchTo, refreshConversations, findVoices, say, action, select, toggleMic, approve, input, micOn, bargeIn, booking, generation],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, bargeIn, booking, generation],
   )
 
   return (

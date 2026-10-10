@@ -48,8 +48,11 @@ Wire protocol
                                                change only the painted area (mode: change, remove,
                                                replace, improve)
               make_video {"draft": 1, "lines": [...], "cta", "cta_line", "music", "captions",
-                          "motion", "placement"}
-                                               the draft's pictures as a video with the voice
+                          "motion", "placement", "voice"}
+                                               the draft's pictures as a video read in a voice: voice is
+                                               a voice's id (a ready one's or the catalog's), a
+                                               description of one, or "mine" for the assistant's;
+                                               left out, the last video's, or one that suits the post
             {"type": "approve" | "decline", "id": 3, "conversation": "..."}
                                                the user's answer to an approval (scheduling, a campaign
                                                version); with "done": true the page did it itself
@@ -60,6 +63,9 @@ Wire protocol
                                                up first); kept for the user
             {"type": "preview_voice", "id" | "archetype": "..."}
                                                play how a voice sounds (it stops what is being said)
+            {"type": "video_voices", "draft": 1, "q": "calm deep male", "lang": "", "lines": [...]}
+                                               the voices that fit a draft's video best: the ones matching
+                                               q, or without q one suited to the post (and lines)
   server -> client
     binary: 4-byte little-endian turn id + PCM16 mono 24 kHz assistant speech
     json:   ready | vad | transcript | assistant_delta | assistant_done |
@@ -80,6 +86,8 @@ Wire protocol
             conversations (the user's conversations, newest first, and which one is on screen) |
             voice (the voice it speaks in: id, name, description, language) |
             voices (the ones ready to use, catalog voices matching the search, and the current one) |
+            video_voices (for a draft's video: the description they fit, the voices, best first, each
+                          with catalog true or false, and the assistant's own voice) |
             fonts (after ready: the fonts texts can use, by style, each with its file under fonts/)
 
 Conversations are kept (backend/conversations.py): this connection shows one at a time, and a
@@ -109,7 +117,7 @@ from .flowai import FlowAIClient, FlowAISession
 from .llm import LLM
 from .media import MediaSession
 from .skills import catalogue, load_skills
-from .studio import LOOK, StudioSession, fonts_event, fonts_prompt
+from .studio import LOOK, StudioError, StudioSession, fonts_event, fonts_prompt
 from .tts import SAMPLE_RATE as TTS_RATE
 from .tts import SentenceChunker, TTSEngine
 from .vad import TurnDetector
@@ -117,6 +125,15 @@ from .vad import TurnDetector
 log = logging.getLogger(__name__)
 
 SKILLS_INLINE_CHARS = 8000  # content skills up to this size go in the prompt instead of load_skill
+MY_VOICE = {"mine", "yours", "your", "assistant", "you", "same", "current", "default", "own"}
+CASTING = (
+    "You cast the voice that reads a short social media video. Reply with JSON only, no other words: "
+    '{"voice": "...", "language": "..."}. voice: 5 to 12 words in English, in this order: gender (male or '
+    "female), age (child, teenager, young adult, middle-aged or elderly), pitch (low, moderate or high), an "
+    "accent only if the post calls for one (american, british, australian...), then how it is said (warm, "
+    "energetic, calm, luxurious, playful, confident...) and what for (advertisement, social or narration). "
+    "Pick what suits the brand, the product and who it speaks to. language: the language the words are in, "
+    "in English (English, French, Spanish...).")
 
 
 @dataclass
@@ -167,6 +184,7 @@ class VoiceSession:
         self.user_speaking = False
         self.job: BrowserJob | None = None
         self.job_count = 0
+        self.castings: dict[str, dict] = {}  # a post's content -> the voice described for it (cast)
 
     # The conversation on screen: its numbered pictures and files (generating them needs the ComfyUI
     # pod, self.m.comfy) and its drafts. Tools reach them as session.media and session.studio.
@@ -255,11 +273,14 @@ class VoiceSession:
             + "\n"
             "A text the platform check calls hard to read needs a panel (style box) or a colour that stands out "
             "from its picture; each slide lists its picture's colours, which make texts look part of the post. "
-            "make_video turns a draft, with one picture or several, into a short video: your voice reads a line "
-            "per picture in the user's chosen voice while the pictures slowly zoom and pan, with captions, music "
-            "and an end card with a call to action ('Order now'). Write the lines like a short spoken ad: a hook, "
-            "one idea per picture, then the call to action in cta_line. It is made in the background into its "
-            "own draft; asking again (other words, music, button) makes that same video again. "
+            "make_video turns a draft, with one picture or several, into a short video: a voice reads a line "
+            "per picture while the pictures slowly zoom and pan, with captions, music and an end card with a "
+            "call to action ('Order now'). Write the lines like a short spoken ad: a hook, one idea per picture, "
+            "then the call to action in cta_line. The video has a voice of its own, not the one you speak in: "
+            "describe in voice the one that suits the post and its audience (gender, age, pitch, accent, how it "
+            "is said), or pass the voice the user asked for; find_voices lists the ones that fit a description. "
+            "Say which voice it is, so the user can ask for another. It is made in the background into its "
+            "own draft; asking again (other words, music, button, voice) makes that same video again. "
             "Make independent changes together in one step. Change only what the user named (the headline is one "
             "text) and keep everything else. Never leave a placeholder such as [date] or [link] in a caption or "
             "text: write the real words (\"this Friday\") or ask. The user sees every new version, so say in a few "
@@ -370,6 +391,8 @@ class VoiceSession:
                 self.spawn(self.set_voice(msg))
             case "preview_voice":
                 self.spawn(self.preview_voice(msg))
+            case "video_voices":
+                self.spawn(self.send_video_voices(msg))
 
     async def on_upload(self, msg: dict):
         try:
@@ -445,9 +468,10 @@ class VoiceSession:
                    "; it is being edited and goes on the slide by itself"
         elif name == "make_video":
             result = await self.make_video(draft, **{k: msg[k] for k in ("lines", "cta", "cta_line", "music", "captions",
-                                                                      "motion", "placement", "color") if k in msg})
+                                                                      "motion", "placement", "color", "voice") if k in msg})
             done = f"asked for a video of draft {result.get('source')} with these lines: " \
-                   f"{json.dumps(msg.get('lines'), ensure_ascii=False)}; it is being made into {result.get('into')}"
+                   f"{json.dumps(msg.get('lines'), ensure_ascii=False)}, read by {result.get('voice')}; it is " \
+                   f"being made into {result.get('into')}"
         elif name == "open_campaign" and self.flowai:
             if self.flowai_loading:
                 await self.flowai_loading  # its accounts say which platform each post is for
@@ -605,9 +629,28 @@ class VoiceSession:
         await self.send_audio(self.turn, audio)
         self.speaking_until = time.monotonic() + len(audio) / TTS_RATE
 
-    async def make_video(self, draft=None, **asked) -> dict:
-        """make_video in the voice the user picked, with FlowAI Sound's music if it's there."""
-        tts, voice = self.m.tts, self.voice["id"]
+    # --- a video's voice -------------------------------------------------------------
+    # A video is read in a voice of its own, kept in its recipe: the one asked for, else the one its
+    # last version had, else one cast for the post (the LLM describes the voice that suits it, and
+    # the voice that fits that description best is used). The assistant keeps speaking in self.voice.
+
+    async def make_video(self, draft=None, voice=None, **asked) -> dict:
+        """make_video in the video's voice, with FlowAI Sound's music if it's there."""
+        try:
+            source, target = self.studio.video_drafts(draft)
+            before = (target.video or {}).get("voice") if target else None
+            if voice not in (None, ""):
+                chosen = await self.video_voice(str(voice))
+            elif before:
+                chosen = await asyncio.to_thread(self.find_voice, before)
+            else:
+                chosen = await self.cast_voice(source, asked.get("lines"))
+        except StudioError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # the voice server: the video is still made, in the assistant's voice
+            log.warning("no voice of its own for the video: %s", exc)
+            chosen = self.voice
+        tts, speaker = self.m.tts, chosen["id"]
 
         def compose(mood: str, seconds: float) -> bytes | None:  # in the render's thread
             try:
@@ -619,8 +662,81 @@ class VoiceSession:
                 log.warning("no music for the video: %s", exc)
                 return None
 
-        return await self.studio.make_video(draft, **asked, speak=lambda text: tts.synthesize(text, voice),
+        return await self.studio.make_video(draft, **asked, voice=chosen,
+                                            speak=lambda text: tts.synthesize(text, speaker),
                                             compose=compose if settings.sound_url else None, moods=tuple(reel.MOODS))
+
+    async def video_voice(self, wanted: str) -> dict:
+        """A voice asked for by id (a ready one's or the catalog's), by name, or by a description of it."""
+        tts = self.m.tts
+        if wanted.strip().lower() in MY_VOICE:
+            return self.voice
+        if not tts.choosable:
+            return tts.default
+        found = await asyncio.to_thread(tts.find, wanted)
+        if not found:
+            best = await asyncio.to_thread(tts.match, wanted, "", 1)
+            if not best:
+                raise StudioError(f"no voice fits “{wanted}”; describe it in fewer words, e.g. “young female, warm”")
+            found = best[0], best[0]["catalog"]
+        v, catalog = found
+        return await asyncio.to_thread(tts.adopt, v["id"]) if catalog else v
+
+    async def cast(self, source, lines=None) -> dict:
+        """The voice that suits a post, described: {"voice": "female, young adult, ...", "language": "..."}.
+        Asked of the LLM once per content."""
+        lines = [str(x) for x in lines] if isinstance(lines, list) else (source.video or {}).get("lines") or []
+        texts = [t.text for sl in source.slides for t in sl.texts]
+        post = "\n".join(filter(None, [
+            f"Platform: {source.label}", source.title and f"Title: {source.title}",
+            source.caption and f"Caption: {source.caption[:600]}", texts and f"Words on the pictures: {' / '.join(texts)}",
+            any(lines) and f"What the voice says: {' / '.join(x for x in lines if x)}"]))
+        if post in self.castings:
+            return self.castings[post]
+        described = {"voice": "", "language": ""}
+        try:
+            reply = await self.m.llm.chat([{"role": "system", "content": CASTING}, {"role": "user", "content": post}], [])
+            text = reply.content or ""
+            found = json.loads(text[text.index("{"):text.rindex("}") + 1])
+            described = {"voice": str(found.get("voice") or "")[:160], "language": str(found.get("language") or "")[:40]}
+        except Exception as exc:
+            log.warning("no voice described for draft %s: %s", source.id, exc)
+        if described["voice"]:
+            self.castings[post] = described
+        return described
+
+    async def cast_voice(self, source, lines=None) -> dict:
+        """The voice that suits the post best, set up to speak (the assistant's own when nothing fits)."""
+        tts = self.m.tts
+        if not tts.choosable:
+            return tts.default
+        described = await self.cast(source, lines)
+        if not described["voice"]:
+            return self.voice
+        best = await asyncio.to_thread(tts.match, described["voice"], described["language"], 1)
+        if not best:
+            return self.voice
+        log.info("video voice for draft %s: %r -> %s", source.id, described["voice"], best[0]["name"])
+        return await asyncio.to_thread(tts.adopt, best[0]["id"]) if best[0]["catalog"] else best[0]
+
+    async def send_video_voices(self, msg: dict):
+        tts, q, lang = self.m.tts, str(msg.get("q") or "").strip(), str(msg.get("lang") or "")
+        reply = {"type": "video_voices", "draft": msg.get("draft"), "q": q, "lang": lang, "choosable": tts.choosable,
+                 "mine": self.voice}
+        try:
+            described = {"voice": q, "language": ""}
+            if not q:
+                source, _ = self.studio.video_drafts(msg.get("draft"))
+                described = await self.cast(source, msg.get("lines"))
+            voices = await asyncio.to_thread(tts.match, described["voice"], lang or described["language"])
+            languages = (await asyncio.to_thread(tts.catalog))[2] if tts.choosable else []
+        except StudioError as exc:
+            return await self.try_send(**reply, described="", voices=[], languages=[], error=str(exc))
+        except Exception as exc:
+            log.warning("voices for a video couldn't be found: %s", exc)
+            return await self.try_send(type="error", message="The voice server didn't answer. Try again in a moment.")
+        await self.try_send(**reply, described=described["voice"], language=described["language"], voices=voices,
+                            languages=languages)
 
     def focus_note(self) -> str | None:
         """What the user selected or painted on screen, for "this" and "it", when it changed since the LLM

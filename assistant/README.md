@@ -213,7 +213,7 @@ check, plus one of ours: no `[placeholder]` left in), and shown on the page with
 | "Make an Instagram post for our linen shirt launch" | one `create_draft` with the caption, the texts and a picture prompt; the picture is made in the draft's 4:5 shape and drops in when ready |
 | "Remove the cup on the table" | `generate_media(flux2_klein_edit, draft=1)`: edits that slide's current picture and puts the result back in the draft |
 | (paint over the cup on the slide) "remove this" / "make it gold" / "put a vase there" | `edit_area`: only the painted part changes, the rest of the picture stays exactly as it was (see [Changing part of a picture](#changing-part-of-a-picture)) |
-| "Make it a reel with a voiceover and an Order now button" | `make_video`: the pictures move, your voice reads a line over each, captions, music, an end card (see [Videos with the voice](#videos-with-the-voice)) |
+| "Make it a reel with a voiceover and an Order now button" | `make_video`: the pictures move, a voice that suits the post reads a line over each, captions, music, an end card (see [Videos with the voice](#videos-with-the-voice)) |
 | "Make the headline yellow and move it to the bottom" / "Drop the second line" | `edit_text` / `remove_text` |
 | (click a text on the page) "make this bigger" | the click tells the assistant which text "this" is |
 | "Shorter caption, fewer hashtags" | `update_draft(caption=...)` |
@@ -292,8 +292,9 @@ Results vary from run to run: if a removal leaves a smudge, run it again or pain
 
 `make_video` (`reel.py`) turns a draft's pictures, one or several, into a short video:
 
-- **Voice:** the assistant writes a line per picture and reads it in the user's chosen voice (the
-  TTS, VoiceStudio or local). A line of several sentences is a shot per sentence.
+- **Voice:** the assistant writes a line per picture, read by a voice of the video's own, not the
+  one the assistant speaks in. A line of several sentences is a shot per sentence. See
+  [The video's voice](#the-videos-voice).
 - **Motion:** each shot moves the whole time it's on screen (a slow zoom in or out, or a pan), so a
   still looks filmed. A new picture fades in over the last one. The same picture again comes in
   with a straight cut and a new framing, like an edit.
@@ -313,7 +314,26 @@ story or feed on request; an X post for X), which passes the platform check (siz
 known). Asked again, of either draft ("other music", "say it shorter", "the button says Shop
 now"), that same video draft is made again with the changes, and Undo goes back to the previous
 video. On the page, the draft's **Video with voice** section does the same by hand: a line per
-picture, the end card, music, motion, captions and format, with a progress bar while it's made.
+picture, the end card, music, motion, captions, format and voice, with a progress bar while it's made.
+
+#### The video's voice
+
+With VoiceStudio (`TTS_URL`), each video is read by the voice that suits it:
+
+- **Cast for the post:** the first time, if nobody named a voice, the LLM reads the post (platform,
+  title, caption, words on the pictures, the lines) and describes its narrator in the catalog's
+  words, e.g. "male, middle-aged, low pitch, british accent, calm, narration", plus the language.
+  `VoiceStudioTTS.match` then finds the closest voice among the ready profiles and the catalog. A
+  gender asked for is a must, the language is a must when some voices speak it, and every other word
+  counts towards the fit. The description is asked once per content, so asking again costs nothing.
+- **Asked for:** `make_video`'s `voice` is a description ("upbeat young woman for an ad"), a voice id
+  (`find_voices` lists the ones that fit a description), or "mine" for the assistant's own voice.
+- **Kept:** the voice goes into the video's recipe, so making the video again uses it until it's changed.
+
+On the page, the **Voice** row of the Video section shows who reads it, with a sample to hear.
+**Change** lists the voices that suit the post (with the description they were matched to), or the
+closest to words you type, and the assistant's own voice. The voice you pick is used on the next
+**Make the video**. With the local OmniVoice there is one voice, so videos use it.
 
 ### Content skills
 
@@ -418,7 +438,8 @@ its sample, which stops what is being said).
 ### Inside FlowAI
 
 FlowAI (`content-generator/`) has a copy of this repo in `assistant/`. It runs as its `assistant`
-service: `docker compose --profile assistant up -d`, or `--profile assistant-cpu` without a GPU.
+service, which `docker compose up -d` starts with the rest (without a GPU:
+`docker compose --profile assistant-cpu up -d --scale assistant=0`).
 Its page is the dashboard's **Assistant** tab (`frontend/src/dashboard/assistant/`), served
 through the Vite proxy at `/assistant/`. Beyond this page, it adds:
 - **Sign-in as the person who opened it.** The tab asks FlowAI for a token
@@ -442,7 +463,7 @@ After changing the agent here, copy it over and rebuild:
 rsync -a --delete --exclude __pycache__ --exclude comfyui/outputs --exclude comfyui/pod.env \
   backend web skills fonts comfyui requirements.txt Dockerfile .dockerignore .env.example .gitignore README.md \
   content-generator/assistant/
-cd content-generator && docker compose --profile assistant up -d --build assistant
+cd content-generator && docker compose up -d --build assistant
 ```
 
 ## Adding plain tools

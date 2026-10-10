@@ -16,7 +16,7 @@ const USE: Record<string, string> = {
   informative: 'Explainer',
 }
 
-function describe(v: Voice) {
+export function describe(v: Voice) {
   const bits = [v.description.charAt(0).toUpperCase() + v.description.slice(1)]
   if (v.use && USE[v.use]) bits.push(USE[v.use])
   if (v.language && v.language !== 'English') bits.push(v.language)
@@ -55,7 +55,19 @@ export function VoicePicker({ open, onClose }: { open: boolean; onClose: () => v
   const narrowed = !!(q.trim() || lang)
   // A catalog voice in use is a ready one with that catalog id
   const inUse = (v: Voice, catalog: boolean) => v.id === a.voice?.id || (catalog && v.id === a.voice?.archetype)
-  const row = (v: Voice, i: number, catalog: boolean) => <VoiceRow key={v.id} v={v} i={i} catalog={catalog} current={inUse(v, catalog)} speaking={speaking} />
+  const row = (v: Voice, i: number, catalog: boolean) => (
+    <VoiceRow
+      key={v.id}
+      v={v}
+      i={i}
+      catalog={catalog}
+      current={inUse(v, catalog)}
+      speaking={speaking}
+      onUse={() => a.chooseVoice(v, catalog)}
+      pending={a.voicePending === v.id}
+      busy={!!a.voicePending}
+    />
+  )
 
   return (
     <AnimatePresence>
@@ -146,7 +158,28 @@ export function VoicePicker({ open, onClose }: { open: boolean; onClose: () => v
   )
 }
 
-function VoiceRow({ v, i, catalog, current, speaking }: { v: Voice; i: number; catalog: boolean; current: boolean; speaking: boolean }) {
+/** A voice to hear and pick: the conversation's voice (VoicePicker) or a video's (VideoMaker). */
+export function VoiceRow({
+  v,
+  i,
+  catalog,
+  current,
+  speaking,
+  onUse,
+  pending = false,
+  busy = false,
+  currentLabel = 'In use',
+}: {
+  v: Voice
+  i: number
+  catalog: boolean
+  current: boolean
+  speaking: boolean
+  onUse: () => void
+  pending?: boolean
+  busy?: boolean
+  currentLabel?: string
+}) {
   const a = useAssistant()
   const mine = a.sample?.id === v.id
   const loading = mine && a.sample!.loading
@@ -179,10 +212,10 @@ function VoiceRow({ v, i, catalog, current, speaking }: { v: Voice; i: number; c
       </div>
       {current ? (
         <span className="flex shrink-0 items-center gap-1 px-1.5 font-mono text-[10px] text-accent-soft">
-          <Check className="size-3" /> In use
+          <Check className="size-3" /> {currentLabel}
         </span>
       ) : (
-        <Btn size="sm" onClick={() => a.chooseVoice(v, catalog)} loading={a.voicePending === v.id} disabled={!!a.voicePending || a.conn !== 'online'} className="shrink-0">
+        <Btn size="sm" onClick={onUse} loading={pending} disabled={busy || a.conn !== 'online'} className="shrink-0">
           Use
         </Btn>
       )}

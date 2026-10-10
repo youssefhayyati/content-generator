@@ -100,6 +100,12 @@ class TTSEngine:
     def catalog(self, q: str = "", lang: str = "", exclude: set[str] = frozenset()) -> tuple[list[dict], int, list[str]]:
         return [], 0, []
 
+    def find(self, wanted: str) -> tuple[dict, bool] | None:
+        return (self.default, False) if wanted.strip() in (self.default["id"], self.default["name"]) else None
+
+    def match(self, description: str, lang: str = "", limit: int = 0) -> list[dict]:
+        return [{**self.default, "catalog": False}]
+
     def adopt(self, archetype: str) -> dict:
         raise ValueError("voices can only be picked with a VoiceStudio server (TTS_URL)")
 

@@ -12,6 +12,9 @@ is what a VoiceStudio voice profile holds. Any other voice ("alloy" and the othe
 default: a new random voice for every request. So voices are checked against the server's
 profiles, and a voice from its catalog (1,100 described voices, "archetypes") becomes a profile
 before it is used: VoiceStudio renders its sample once, and asking again returns the same profile.
+
+A video has a voice of its own (session.py, video_voice): match finds the voices that fit a
+description of it ("warm young female, upbeat, for an ad") among the ready ones and the catalog.
 """
 
 import io
@@ -31,6 +34,27 @@ OPENAI_VOICES = {"alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "on
                  "marin", "cedar", "default"}
 CATALOG_SHOWN = 60
 SAMPLE_SECONDS = 12  # a preview is the start of the voice's recording
+MATCHES_SHOWN = 12
+
+# Describing a voice (match): everyday words in the catalog's own (its descriptions read "female, young
+# adult, moderate pitch, american accent"; its uses are narration, advertisement, social…)
+SYNONYMS = {"man": "male", "men": "male", "guy": "male", "masculine": "male", "boy": "male",
+            "woman": "female", "women": "female", "girl": "female", "lady": "female", "feminine": "female",
+            "deep": "low", "old": "elderly", "older": "elderly", "senior": "elderly", "kid": "child",
+            "teen": "teenager", "youthful": "young", "uk": "british", "us": "american",
+            "ad": "advertisement", "ads": "advertisement", "advert": "advertisement",
+            "commercial": "advertisement", "promo": "advertisement", "promotional": "advertisement",
+            "marketing": "advertisement", "narrator": "narration", "storyteller": "narration",
+            "storytelling": "narration", "tiktok": "social", "instagram": "social", "reel": "social",
+            "explainer": "informative", "tutorial": "informative", "educational": "informative",
+            "chatty": "conversational", "casual": "conversational"}
+FILLER = {"a", "an", "the", "and", "or", "with", "for", "of", "in", "to", "voice", "voices", "pitch", "accent",
+          "tone", "sounding", "speaker", "who", "that", "is", "very", "bit", "slightly", "video"}
+USE_RANK = {"advertisement": 2, "social": 2, "narration": 2, "characters": 0, "entertainment": 0}  # others 1
+
+
+def _gender(words: list[str]) -> str | None:
+    return "female" if "female" in words else "male" if "male" in words else None
 
 
 def _first_sentence(text: str) -> str:
@@ -159,6 +183,44 @@ class VoiceStudioTTS:
                         break
                 self._catalog = voices
             return self._catalog
+
+    def find(self, wanted: str) -> tuple[dict, bool] | None:
+        """A voice by its profile id or name, or its catalog id, and whether it's from the catalog."""
+        wanted = wanted.strip()
+        for p in self.profiles():
+            if wanted == p["id"] or wanted.lower() == p["name"].lower():
+                return p, False
+        v = next((v for v in self._load_catalog() if v["id"] == wanted), None)
+        return (v, True) if v else None
+
+    def match(self, description: str, lang: str = "", limit: int = MATCHES_SHOWN) -> list[dict]:
+        """The voices that best fit a description ("warm young female, upbeat, for an ad"), best first:
+        the ready ones and the catalog's, each with catalog true or false. A gender asked for is a must,
+        and so is the language when some voices have it; every other word counts towards the fit.
+        Whispering voices only when asked for."""
+        ready = self.profiles()
+        taken = {v["archetype"] for v in ready if v["archetype"]}
+        voices = [{**v, "catalog": False} for v in ready] + \
+                 [{**v, "catalog": True} for v in self._load_catalog() if v["id"] not in taken]
+        said = re.findall(r"\w+", description.lower())
+        words, very = [SYNONYMS.get(w, w) for w in said if w not in FILLER], "very" in said
+        gender = "female" if "female" in words else "male" if "male" in words else None
+        if lang and any(v["language"] == lang for v in voices):
+            voices = [v for v in voices if v["language"] == lang]
+        scored = []
+        for v in voices:
+            have = re.findall(r"\w+", f'{v["name"]} {v["description"]} {v.get("use", "")} {v["language"]}'.lower())
+            if gender and _gender(have) not in (gender, None):
+                continue
+            if "whisper" in have and "whisper" not in words:  # no one wants a whispered ad by surprise
+                continue
+            score = sum(any(h.startswith(w) for h in have) for w in words)
+            # Between equals: "low pitch" when asked for low (not "very low"), then a voice for this kind of
+            # video (narration, ads, social) before one for characters, then the featured ones
+            off = "very" in have and not very
+            scored.append((score, not off, USE_RANK.get(v.get("use"), 1), v.get("featured", False), not v["catalog"], v))
+        scored.sort(key=lambda s: s[:5], reverse=True)
+        return [s[-1] for s in scored[:limit]]
 
     def adopt(self, archetype: str) -> dict:
         """A catalog voice as a profile: rendered the first time (about 3 s), the same one after that."""

@@ -1,6 +1,30 @@
+# Everything at once: docker compose up -d
+#   dashboard http://localhost:5173 · API :8002 · assistant :8003 · Mailpit :8025
+# Without an NVIDIA GPU, run the assistant on the CPU instead:
+#   docker compose --profile assistant-cpu up -d --scale assistant=0
 services:
-  # Laravel API on http://localhost:8000. The Vite dev server proxies /api, /sanctum
-  # and /oauth here, so the browser only ever talks to one origin.
+  # The dashboard (React + Vite) on http://localhost:5173, the address the API trusts for its
+  # session cookie. It proxies /api, /sanctum and /oauth to the API and /assistant/ to the
+  # assistant, so the browser only ever talks to one origin. Edits in frontend/ show up live.
+  frontend:
+    image: node:22-slim
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      # Linux packages in a volume, apart from any node_modules installed on the host
+      - frontend-modules:/app/node_modules
+    environment:
+      API_ORIGIN: http://api:8000
+      ASSISTANT_ORIGIN: http://assistant:8000
+    # Installs packages on the first start and whenever package-lock.json changes
+    command: sh -c '[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci --no-audit --no-fund; exec npx vite --host 0.0.0.0 --port 5173 --strictPort'
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Laravel API on http://localhost:8002. The dashboard proxies /api, /sanctum and /oauth here.
   api:
     build: ./docker/php
     volumes:
@@ -49,15 +73,17 @@ services:
     mem_limit: 1000m
     restart: unless-stopped
 
-  # The voice assistant (assistant/): the Assistant page talks to it at /assistant/ through the
-  # Vite proxy. Speech recognition and its voice run on an NVIDIA GPU (NVIDIA container toolkit),
-  # so it only starts when asked: docker compose --profile assistant up -d
-  # The first start downloads its speech models (about 6 GB) into assistant-models.
-  # Settings (the Ollama key, ComfyUI, VoiceStudio) are in assistant/.env, from assistant/.env.example.
+  # The voice assistant (assistant/) on :8003: the Assistant page talks to it at /assistant/
+  # through the dashboard's proxy. Speech recognition (and its voice, without TTS_URL) runs on an
+  # NVIDIA GPU (Docker Desktop, or the NVIDIA container toolkit on Linux).
+  # The first start builds the image and downloads its speech models (about 6 GB) into
+  # assistant-models. Settings (the Ollama key, ComfyUI, VoiceStudio) are in assistant/.env, made
+  # from assistant/.env.example; without that file it starts with the defaults.
   assistant:
     build: ./assistant
-    profiles: [assistant]
-    env_file: ./assistant/.env
+    env_file:
+      - path: ./assistant/.env
+        required: false
     environment: &assistant-env
       FLOWAI_URL: http://api:8000
       FLOWAI_DASHBOARD_URL: http://localhost:5173
@@ -81,15 +107,18 @@ services:
       - api
     restart: unless-stopped
 
-  # The same without a GPU: docker compose --profile assistant-cpu up -d
+  # The same without a GPU: docker compose --profile assistant-cpu up -d --scale assistant=0
   # Recognition takes about 2 s after you stop talking; set TTS_URL (VoiceStudio) for its voice.
+  # The dashboard finds it under the assistant name too.
   assistant-cpu:
     build:
       context: ./assistant
       args:
         TORCH: cpu
     profiles: [assistant-cpu]
-    env_file: ./assistant/.env
+    env_file:
+      - path: ./assistant/.env
+        required: false
     environment:
       <<: *assistant-env
       ASR_DEVICE: cpu
@@ -99,6 +128,9 @@ services:
     ports:
       - "${ASSISTANT_PORT:-8003}:8000"
     volumes: *assistant-volumes
+    networks:
+      default:
+        aliases: [assistant]
     depends_on:
       - api
     restart: unless-stopped
@@ -118,6 +150,7 @@ services:
       - ollama:/root/.ollama
 
 volumes:
+  frontend-modules:
   vendor:
   ollama:
   assistant-models:

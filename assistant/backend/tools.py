@@ -242,7 +242,7 @@ _POST = {
 }
 
 STUDIO_TOOLS = {"create_draft", "update_draft", "add_text", "edit_text", "remove_text", "undo_draft",
-                "show_draft", "load_skill", "make_video"}
+                "show_draft", "load_skill", "make_video", "find_voices"}
 
 
 @tool(
@@ -393,10 +393,10 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
 
 @tool(
     "make_video",
-    "Make a draft's pictures (one or several) into a short video: your voice reads a line per picture in the "
-    "user's voice while each picture slowly zooms or pans, with captions, music and an end card with a call to "
+    "Make a draft's pictures (one or several) into a short video: a voice that suits the video reads a line per "
+    "picture while each picture slowly zooms or pans, with captions, music and an end card with a call to "
     "action. It goes into a draft of its own (an Instagram reel or an X post), made in the background; asked "
-    "again, of either draft, that same video is made again with the changes.",
+    "again, of either draft, that same video is made again with the changes. The reply says which voice reads it.",
     {
         "type": "object",
         "properties": {
@@ -420,14 +420,46 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
                                       "side to side, one way then the other)"},
             "placement": {"type": "string", "description": "Instagram: reel (default), story or feed. X: post"},
             "color": {"type": "string", "description": "The end card button's colour (default: the post's own)"},
+            "voice": {"type": "string", "description": "Who reads it, in English: a description of the voice that "
+                                                       "suits the post and its audience, e.g. 'female, young adult, "
+                                                       "moderate pitch, american accent, warm, social' or 'male, "
+                                                       "middle-aged, low pitch, british accent, calm, narration' (the "
+                                                       "closest voice is used), a voice id from find_voices, or "
+                                                       "'mine' for the voice you speak in. Leave out to keep the last "
+                                                       "video's voice; the first video gets one cast for the post"},
         },
     },
 )
 async def make_video(session, draft: int | None = None, lines: list | None = None, cta: str | None = None,
                      cta_line: str | None = None, music: str | None = None, captions: bool | None = None,
-                     motion: str | None = None, placement: str | None = None, color: str | None = None):
+                     motion: str | None = None, placement: str | None = None, color: str | None = None,
+                     voice: str | None = None):
     return await session.make_video(draft, lines=lines, cta=cta, cta_line=cta_line, music=music, captions=captions,
-                                    motion=motion, placement=placement, color=color)
+                                    motion=motion, placement=placement, color=color, voice=voice)
+
+
+@tool(
+    "find_voices",
+    "The voices that best fit a description, best first, to read a video (make_video's voice). Use it when the "
+    "user wants to choose among a few, or to check a voice exists before using it.",
+    {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string", "description": "In English: gender, age, pitch, accent, how it is "
+                                                             "said, what for, e.g. 'female, elderly, warm, narration'"},
+            "language": {"type": "string", "description": "The language it speaks, in English, e.g. 'French' "
+                                                          "(default: any)"},
+        },
+        "required": ["description"],
+    },
+)
+async def find_voices(session, description: str, language: str = ""):
+    tts = session.m.tts
+    if not tts.choosable:
+        return {"voices": [tts.default], "note": "this assistant has the one voice (no VoiceStudio server)"}
+    found = await asyncio.to_thread(tts.match, description, language, 8)
+    return {"voices": [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found],
+            "note": "pass a voice's id as make_video's voice"}
 
 
 @tool(

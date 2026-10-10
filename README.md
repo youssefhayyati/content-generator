@@ -9,28 +9,32 @@ built on the [publishing-studio](publishing-studio/) device layer (adb or simula
 
 ## Run it (keyless demo, ~5 minutes)
 
-Needs Docker and Node 18+. No API keys, no phone: text runs on a local Ollama model,
-phones are simulated end-to-end and still produce run records with proof.
+Needs Docker. No API keys, no phone: text runs on a local Ollama model, phones are simulated
+end-to-end and still produce run records with proof.
 
 ```sh
-# 1. The API (Laravel, :8002), queue worker, scheduler, Mailpit (:8025), Ollama
+# 1. Everything: the dashboard (:5173), the API (Laravel, :8002), queue worker, scheduler,
+#    FlowAI Sound, the voice assistant (:8003), Mailpit (:8025), Ollama
 docker compose up -d
 docker compose exec ollama ollama pull llama3.2:1b        # once; 3b/8b need more RAM than ~2.5 GB free
 
 # 2. Demo data: demo user, two phones, Instagram + X accounts, photos
 docker compose exec api php artisan db:seed --class=DemoSeeder
 
-# 3. The dashboard on http://localhost:5175
-cd frontend && npm install
-API_ORIGIN=http://localhost:8002 npm run dev
-
-# 4. The two phone agents (simulator driver), each in its own shell
+# 3. The two phone agents (simulator driver), each in its own shell
 cd publishing-agent && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=ig-phone DRIVER=simulator .venv/bin/python agent.py
 FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=x-phone  DRIVER=simulator .venv/bin/python agent.py
 ```
 
-Sign in at http://localhost:5175 as **demo@flowai.test / password**.
+The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models
+(about 6 GB), and the dashboard installs its packages. The assistant needs an NVIDIA GPU; without
+one, `docker compose --profile assistant-cpu up -d --scale assistant=0` runs it on the CPU. Its
+settings (Ollama cloud key, ComfyUI, VoiceStudio) are in `assistant/.env`, from
+`assistant/.env.example`. To run the dashboard outside Docker instead: `docker compose stop
+frontend`, then `cd frontend && npm install && API_ORIGIN=http://localhost:8002 npm run dev`.
+
+Sign in at http://localhost:5173 as **demo@flowai.test / password**.
 
 ## The full cycle, one command
 
@@ -145,11 +149,11 @@ of its catalog of over a thousand, searched by words like “british”, “deep
 to hear it first. Every sentence is said in that voice, in all your conversations, and it stays
 picked after a reload.
 
-It is its own service (`assistant/`, Python, needs an NVIDIA GPU) and starts only when asked:
+It is its own service (`assistant/`, Python, needs an NVIDIA GPU) and starts with the rest:
 
 ```sh
 cp assistant/.env.example assistant/.env      # once: OLLAMA_API_KEY at least
-docker compose --profile assistant up -d      # no GPU: --profile assistant-cpu, with TTS_URL set
+docker compose up -d                          # no GPU: --profile assistant-cpu --scale assistant=0, with TTS_URL set
 ```
 
 The first start downloads its speech models (about 6 GB). The Vite proxy serves it at

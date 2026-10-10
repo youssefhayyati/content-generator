@@ -13,7 +13,8 @@ Each slide also comes with the colours of its picture (for texts that match it),
 how readable it is where it sits; a text that is hard to read is a warning in the draft's check.
 Part of a slide's picture can be changed alone: the user paints over it on the page (a mask) and
 edit_area sends just that part to the editing model (retouch.py). And a draft can become a video
-with the assistant's voice over its pictures (make_video, reel.py), kept as a draft of its own.
+with a voice over its pictures (make_video, reel.py), kept as a draft of its own; the voice is the
+video's own, one that suits it, and the user can change it.
 """
 
 import asyncio
@@ -469,27 +470,33 @@ class StudioSession:
                          note="only the painted area changes; the new picture goes on the slide by itself when ready")
         return reply
 
-    # --- a video with the assistant's voice (reel.py) -----------------------------------
+    # --- a video with a voice over it (reel.py) -------------------------------------------
+
+    def video_drafts(self, ref=None) -> tuple[Draft, Draft | None]:
+        """The draft with a video's pictures and the video's own draft (None before it's made), from
+        either one."""
+        d = self.get(ref)
+        if d.video:  # the video draft itself: made again from its pictures' draft
+            source = self.drafts.get(d.video.get("from"))
+            if not source:
+                raise StudioError(f"draft {d.video.get('from')}, which this video was made from, is gone")
+            return source, d
+        return d, next((x for x in reversed(self.drafts.values()) if x.video and x.video.get("from") == d.id), None)
 
     async def make_video(self, ref=None, lines=None, cta=None, cta_line=None, music=None, captions=None,
-                         motion=None, placement=None, color=None, *, speak, compose=None, moods=()) -> dict:
-        """The draft's pictures as a video, its lines read in the user's voice. It goes into a draft of its
-        own; asked again (of either draft), that same video draft is made again with the changes.
-        speak(text) -> 24 kHz audio; compose(mood, seconds) -> WAV bytes or None (FlowAI Sound)."""
+                         motion=None, placement=None, color=None, *, voice: dict, speak, compose=None,
+                         moods=()) -> dict:
+        """The draft's pictures as a video, its lines read in `voice` (the video's own: session.py picks
+        it). It goes into a draft of its own; asked again (of either draft), that same video draft is made
+        again with the changes. speak(text) -> 24 kHz audio in that voice; compose(mood, seconds) -> WAV
+        bytes or None (FlowAI Sound)."""
         try:
-            d = self.get(ref)
-            if d.video:  # the video draft itself: made again from its pictures' draft
-                target, source = d, self.drafts.get(d.video.get("from"))
-                if not source:
-                    raise StudioError(f"draft {d.video.get('from')}, which this video was made from, is gone")
-            else:
-                source = d
-                target = next((x for x in reversed(self.drafts.values())
-                               if x.video and x.video.get("from") == d.id), None)
+            source, target = self.video_drafts(ref)
             recipe = self._recipe(source, dict(target.video) if target else {}, lines, cta, cta_line, music,
                                   captions, motion, placement, color, moods, compose is not None)
         except StudioError as exc:
             return {"error": str(exc)}
+        recipe["voice"] = {k: voice.get(k) for k in ("id", "name", "description", "language", "archetype")}
 
         platform, where = source.platform, recipe["placement"]
         spec = platforms.spec(platform, where)
@@ -537,6 +544,7 @@ class StudioSession:
         if "error" not in reply:
             reply.update(source=source.id, into=f"draft {target.id}, made again" if target else "a new draft",
                          post=platforms.label(platform, where), size=f"{size[0]}x{size[1]}",
+                         voice=f"{voice['name']} ({voice['description']})" if voice.get("description") else voice["name"],
                          expected_time=f"about {max(15, said // 12)} seconds",
                          note="it is made in the background and shown when ready; you'll be told")
         return reply
@@ -845,7 +853,8 @@ class StudioSession:
         problems = [f"{c['status']}, {c['label'].lower()}: {c['detail']}" for c in d.check.get("checks", [])
                     if c["status"] != "pass"]
         video = {"made_from": f"draft {d.video['from']}", **{k: d.video[k] for k in ("lines", "cta", "cta_line",
-                 "music", "captions", "motion") if d.video.get(k) not in (None, "")}} if d.video else None
+                 "music", "captions", "motion") if d.video.get(k) not in (None, "")},
+                 **({"voice": d.video["voice"]["name"]} if d.video.get("voice") else {})} if d.video else None
         return {"draft": d.id, "version": d.version, "post": d.label, "size": f"{w}x{h}", "title": d.title,
                 **({"video": video} if video else {}),
                 "caption": d.caption,
