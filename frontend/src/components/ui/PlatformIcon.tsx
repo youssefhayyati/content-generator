@@ -24,13 +24,17 @@ const PATHS: Partial<Record<PlatformId, string>> = {
 }
 
 /** Monochrome platform marks. They inherit `currentColor` so they sit quietly in the UI. */
+// cn() doesn't merge classes, and size-4 sits after every smaller size in the stylesheet:
+// the default size applies only when the caller hasn't asked for one.
+const iconClass = (className?: string) => cn(!/(^|\s)size-/.test(className ?? '') && 'size-4', 'shrink-0', className)
+
 export function PlatformIcon({ id, className }: { id: PlatformId; className?: string }) {
   const maskId = useId()
 
   if (id === 'linkedin') {
     // Not shipped by simple-icons, so drawn by hand: a rounded tile with "in" knocked out.
     return (
-      <svg viewBox="0 0 24 24" className={cn('size-4 shrink-0', className)} aria-label="LinkedIn" role="img">
+      <svg viewBox="0 0 24 24" className={iconClass(className)} aria-label="LinkedIn" role="img">
         <mask id={maskId}>
           <rect width="24" height="24" fill="#fff" />
           <circle cx="7.1" cy="7.2" r="1.65" fill="#000" />
@@ -46,7 +50,7 @@ export function PlatformIcon({ id, className }: { id: PlatformId; className?: st
   }
 
   return (
-    <svg viewBox="0 0 24 24" className={cn('size-4 shrink-0', className)} aria-label={PLATFORMS[id].name} role="img" fill="currentColor">
+    <svg viewBox="0 0 24 24" className={iconClass(className)} aria-label={PLATFORMS[id].name} role="img" fill="currentColor">
       <path d={PATHS[id]} />
     </svg>
   )

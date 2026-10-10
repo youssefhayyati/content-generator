@@ -211,7 +211,7 @@ export function CanvasView({ id }: { id: number }) {
   if (!canvas || !registry) return <div className="skeleton h-[70dvh] rounded-xl" />
 
   return (
-    <div className="-mx-4 -mt-8 md:-mx-8 md:-mt-10">
+    <div className="-mx-4 -mt-8 md:-mx-6 md:-mt-10">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel/80 px-4 py-2.5 backdrop-blur md:px-6">
         <Btn variant="subtle" size="sm" icon={ArrowLeft} onClick={() => navigate('/dashboard/studio?tab=projects')} aria-label="All projects" />

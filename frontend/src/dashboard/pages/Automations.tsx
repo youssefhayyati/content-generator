@@ -73,7 +73,6 @@ export default function Automations() {
   return (
     <div className="pb-16">
       <PageHeader
-        eyebrow="Automations"
         title={
           <>
             Posting <Serif>queue.</Serif>

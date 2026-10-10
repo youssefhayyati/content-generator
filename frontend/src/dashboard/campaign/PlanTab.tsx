@@ -6,7 +6,7 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Account, type Campaign, type CampaignItem } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { fmtRelative } from '../data'
+import { count, fmtRelative } from '../data'
 import { useToast } from '../toast'
 import { Btn, FieldError, inputClass, Label, Modal, Panel, Segmented, Skeleton } from '../ui'
 import { AccountChips, AgentTimeline, FORMAT_ICON, FORMAT_LABEL, Pill } from './shared'
@@ -89,7 +89,7 @@ export function PlanTab({
         )}
 
         <div className="flex items-center justify-between">
-          <Label>{items?.length ?? 0} posts</Label>
+          <Label>{count(items?.length ?? 0, 'post')}</Label>
           {reviewing && (
             <Btn size="sm" icon={Plus} onClick={() => setEditing('new')}>
               Add a post

@@ -10,6 +10,9 @@ const LABELS: Record<string, string> = {
   '/signup': 'Sign up',
   '/forgot-password': 'Reset',
   '/reset-password': 'Reset',
+  '/privacy': 'Privacy',
+  '/terms': 'Terms',
+  '/cookies': 'Cookies',
 }
 
 const labelFor = (path: string) => (isAppPath(path) ? 'Studio' : (LABELS[path] ?? 'FlowAI'))

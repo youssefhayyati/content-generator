@@ -7,7 +7,7 @@ import { api, ApiError, type Account, type Device } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
-import { PLATFORM_ORDER, useApi, useInvalidate } from '../data'
+import { count, PLATFORM_ORDER, useApi, useInvalidate } from '../data'
 import { Autonomy } from '../accounts/Autonomy'
 import { Voice } from '../accounts/Voice'
 import { useUser } from '../Shell'
@@ -25,7 +25,6 @@ export default function Accounts() {
   return (
     <div>
       <PageHeader
-        eyebrow="Accounts"
         title={
           <>
             Where you <Serif>publish.</Serif>
@@ -94,7 +93,7 @@ function AccountCard({ account: a, i, onOpen, onVoice, onAutonomy }: { account: 
               {PLATFORMS[a.platform].name}
             </span>
           </span>
-          {a.posts_count !== undefined && <span className="font-mono text-[10.5px] text-dim">{a.posts_count} posts</span>}
+          {a.posts_count !== undefined && <span className="font-mono text-[10.5px] text-dim">{count(a.posts_count, 'post')}</span>}
         </button>
         <button
           type="button"

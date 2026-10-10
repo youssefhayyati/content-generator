@@ -99,7 +99,6 @@ export default function Library() {
   return (
     <div>
       <PageHeader
-        eyebrow="Gallery"
         title={
           <>
             Everything you’ve <Serif>made.</Serif>

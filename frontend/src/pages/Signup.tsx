@@ -326,7 +326,15 @@ export default function Signup() {
 
                 <Enter i={10} className="mt-8">
                   <Checkbox checked={terms} onChange={setTerms} error={!!shown('terms', 1)}>
-                    I agree to the Terms and Privacy Policy.
+                    I agree to the{' '}
+                    <a href="/terms" target="_blank" rel="noreferrer" className="text-fg underline decoration-line-2 underline-offset-2 hover:decoration-current">
+                      Terms
+                    </a>{' '}
+                    and{' '}
+                    <a href="/privacy" target="_blank" rel="noreferrer" className="text-fg underline decoration-line-2 underline-offset-2 hover:decoration-current">
+                      Privacy Policy
+                    </a>
+                    .
                   </Checkbox>
                   <ErrorLine message={shown('terms', 1)} />
                 </Enter>

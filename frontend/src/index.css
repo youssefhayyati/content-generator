@@ -92,11 +92,6 @@
     outline-offset: 3px;
     border-radius: 4px;
   }
-
-  html.has-cursor,
-  html.has-cursor * {
-    cursor: none !important;
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -374,28 +369,55 @@ html[data-palette='mono'] {
   }
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(var(--color-accent) / 0.16) transparent;
-}
+/* ------------------------------------------------------------------ */
+/* Scrollbars: a pill riding a hairline rail, tinted by the palette.   */
+/* Under the pointer it widens and takes the accent; dragged, it glows. */
+/* ------------------------------------------------------------------ */
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-track {
+  background: linear-gradient(90deg, transparent calc(50% - 0.5px), var(--color-line) 0 calc(50% + 0.5px), transparent 0);
+}
+::-webkit-scrollbar-track:horizontal {
+  background: linear-gradient(180deg, transparent calc(50% - 0.5px), var(--color-line) 0 calc(50% + 0.5px), transparent 0);
+}
+::-webkit-scrollbar-thumb {
+  min-width: 40px;
+  min-height: 40px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in oklab, var(--color-accent-soft) 26%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-image: linear-gradient(var(--color-accent-soft), var(--color-accent));
+}
+::-webkit-scrollbar-thumb:horizontal:hover {
+  background-image: linear-gradient(90deg, var(--color-accent-soft), var(--color-accent));
+}
+::-webkit-scrollbar-thumb:active {
+  border-width: 2px;
+  background-image: linear-gradient(var(--color-accent-glow), var(--color-accent-soft));
 }
 
-::-webkit-scrollbar-track {
+/* Only the page's own scrollbar draws the rail; boxes inside it stay clean. */
+body *::-webkit-scrollbar-track:vertical,
+body *::-webkit-scrollbar-track:horizontal {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgb(var(--color-accent) / 0.16);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--color-accent) / 0.28);
-  background-clip: padding-box;
+/* Firefox has no scrollbar pseudo-elements: a thin tinted bar instead. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--color-accent-soft) 34%, transparent) transparent;
+  }
 }

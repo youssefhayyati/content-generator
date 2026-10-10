@@ -28,7 +28,6 @@ export default function Reposts() {
   return (
     <div>
       <PageHeader
-        eyebrow="Repost"
         title={
           <>
             From X to <Serif>Instagram.</Serif>

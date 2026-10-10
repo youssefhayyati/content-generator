@@ -49,7 +49,6 @@ function StudioHome() {
   return (
     <div>
       <PageHeader
-        eyebrow="Creative Lab"
         title={
           <>
             Make <Serif>anything.</Serif>

@@ -147,7 +147,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="transition-[padding] duration-300 ease-expo lg:pl-[var(--sidebar-w)]">
           <TopBar onMenu={() => setDrawer(true)} onSearch={() => setPalette(true)} rail={rail} onRail={() => setRail((r) => !r)} />
           {!user.email_verified && <VerifyBanner email={user.email} />}
-          <main className="mx-auto w-full max-w-[1320px] px-4 pb-24 pt-8 md:px-8 md:pt-10">{children}</main>
+          <main className="mx-auto w-full max-w-[1680px] px-4 pb-24 pt-8 md:px-6 md:pt-10">{children}</main>
         </div>
 
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
@@ -454,7 +454,7 @@ function TopBar({ onMenu, onSearch, rail, onRail }: { onMenu: () => void; onSear
   const label = pageLabel(path)
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-ink/80 px-4 backdrop-blur-xl md:px-8">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-ink/80 px-4 backdrop-blur-xl md:px-6">
       <button
         type="button"
         onClick={onMenu}
@@ -535,7 +535,7 @@ function VerifyBanner({ email }: { email: string }) {
           transition={{ duration: 0.4, ease }}
           className="overflow-hidden border-b border-accent/20 bg-accent/[0.07]"
         >
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-[12.5px] md:px-8">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-[12.5px] md:px-6">
             <Mail className="size-3.5 text-accent-soft" strokeWidth={1.75} />
             <p className="text-muted">
               Confirm <span className="text-fg">{email}</span> to keep your account secure.

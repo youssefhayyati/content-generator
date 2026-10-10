@@ -48,7 +48,6 @@ function FlowsHome() {
   return (
     <div className="pb-16">
       <PageHeader
-        eyebrow="Flows"
         title={
           <>
             Set it <Serif>once.</Serif>

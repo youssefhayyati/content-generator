@@ -119,7 +119,6 @@ function Studio({ initial }: { initial: Campaign }) {
   return (
     <div>
       <PageHeader
-        eyebrow={STAGE_LABEL[campaign.stage]}
         title={
           campaign.title ? (
             <span className="block max-w-[22ch] truncate">{campaign.title}</span>
@@ -209,7 +208,6 @@ function Start() {
   return (
     <div>
       <PageHeader
-        eyebrow="Campaigns"
         title={
           <>
             Campaign <Serif>intake.</Serif>

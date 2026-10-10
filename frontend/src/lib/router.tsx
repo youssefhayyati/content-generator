@@ -149,6 +149,18 @@ export function useDocumentTitle(title: string) {
   }, [title])
 }
 
+/*
+ * A home-page section ("#features") to scroll to once the home page shows. Links to sections
+ * set it when they're clicked on another page (a legal page, the 404), then go home.
+ */
+let section: string | null = null
+export const queueSection = (hash: string) => void (section = hash)
+export function takeSection() {
+  const s = section
+  section = null
+  return s
+}
+
 /** Click handler for internal paths ("/login"). Hash and external links fall through untouched. */
 export function useLinkClick(href: string | undefined) {
   const { navigate } = useRouter()

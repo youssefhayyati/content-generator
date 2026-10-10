@@ -249,7 +249,6 @@ export default function Create() {
   return (
     <div>
       <PageHeader
-        eyebrow="Create"
         title={
           existing ? (
             <>

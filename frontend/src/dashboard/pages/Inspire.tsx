@@ -133,7 +133,6 @@ export default function Inspire() {
   return (
     <div>
       <PageHeader
-        eyebrow="Inspire"
         title={
           <>
             What's working <Serif>right now.</Serif>

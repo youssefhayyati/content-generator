@@ -115,9 +115,9 @@ export default function LiveWall() {
   const date = clock.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: live?.timezone })
 
   return (
-    <div ref={wall} className={cn('-mx-4 -mt-8 bg-[#060607] md:-mx-8 md:-mt-10', full && 'h-screen overflow-y-auto')} data-lenis-prevent>
+    <div ref={wall} className={cn('-mx-4 -mt-8 bg-[#060607] md:-mx-6 md:-mt-10', full && 'h-screen overflow-y-auto')} data-lenis-prevent>
       {/* The top bar: the clock, the state of publishing, today's numbers. */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-white/[0.06] px-4 py-4 md:px-8">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-white/[0.06] px-4 py-4 md:px-6">
         <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#5ee39a]">
           <span className="relative flex size-2">
             <span className="absolute inset-0 animate-ping rounded-full bg-[#5ee39a]/60" />

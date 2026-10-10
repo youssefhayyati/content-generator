@@ -6,7 +6,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useApi } from '../data'
 import { fmtShape, MediaThumb } from '../media/Media'
-import { Btn, EmptyState, Label, Modal, Segmented, Skeleton } from '../ui'
+import { Btn, EmptyState, Label, Modal, Segmented, Skeleton, Viewer, viewerMedia } from '../ui'
 import { useAssistant, type Picture } from './store'
 
 /** Drag types: a numbered picture from the conversation, or a file from the FlowAI gallery. */
@@ -165,67 +165,62 @@ function PictureModal({ p, onClose }: { p: Picture | null; onClose: () => void }
     void a.say(text)
   }
   return (
-    <Modal open={!!p} onClose={onClose} title={p ? `Picture ${p.id}` : ''} className="max-w-2xl">
+    <Modal open={!!p} onClose={onClose} title={p ? `Picture ${p.id}` : ''} full>
       {p && (
-        <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
-            {p.kind === 'video' ? <video src={p.url} controls autoPlay loop playsInline className="max-h-[60vh] w-full" /> : <img src={p.url} alt={p.prompt || p.name} className="max-h-[60vh] w-full object-contain" />}
-          </div>
-          <div className="flex flex-col gap-4">
-            <dl className="space-y-2.5 text-[12.5px]">
-              <div>
-                <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">From</dt>
-                <dd className="mt-0.5">{SOURCE[p.source] ?? p.source}</dd>
-              </div>
-              {p.prompt && (
-                <div>
-                  <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">Prompt</dt>
-                  <dd className="mt-0.5 line-clamp-6 text-muted">{p.prompt}</dd>
-                </div>
-              )}
-            </dl>
-            <div className="mt-auto flex flex-col gap-1.5">
-              {d && (
-                <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('place', { draft: d.id, media: p.id }), onClose())}>
-                  Add to draft {d.id}
-                </Btn>
-              )}
-              <Btn size="sm" icon={MessageSquarePlus} onClick={() => ask(`Make an Instagram post with picture ${p.id}`)}>
-                Make a post with it
-              </Btn>
-              {a.generation && p.kind === 'image' && (
-                <>
-                  <Btn size="sm" icon={Clapperboard} onClick={() => ask(`Animate picture ${p.id} into a short video`)}>
-                    Animate it
-                  </Btn>
-                  <Btn
-                    size="sm"
-                    icon={Wand2}
-                    onClick={() => {
-                      onClose()
-                      a.setInput(`Edit picture ${p.id}: `)
-                      a.inputRef.current?.focus()
-                    }}
-                  >
-                    Edit it…
-                  </Btn>
-                </>
-              )}
-              <Btn
-                size="sm"
-                variant="subtle"
-                icon={AtSign}
-                onClick={() => {
-                  onClose()
-                  a.setInput(`${a.input.trim()} picture ${p.id} `.trimStart())
-                  a.inputRef.current?.focus()
-                }}
-              >
-                Mention it in the chat
-              </Btn>
+        <Viewer media={p.kind === 'video' ? <video src={p.url} controls autoPlay loop playsInline className={viewerMedia} /> : <img src={p.url} alt={p.prompt || p.name} className={viewerMedia} />}>
+          <dl className="space-y-2.5 text-[12.5px]">
+            <div>
+              <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">From</dt>
+              <dd className="mt-0.5">{SOURCE[p.source] ?? p.source}</dd>
             </div>
+            {p.prompt && (
+              <div>
+                <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">Prompt</dt>
+                <dd className="mt-0.5 line-clamp-6 text-muted">{p.prompt}</dd>
+              </div>
+            )}
+          </dl>
+          <div className="mt-auto flex flex-col gap-1.5">
+            {d && (
+              <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('place', { draft: d.id, media: p.id }), onClose())}>
+                Add to draft {d.id}
+              </Btn>
+            )}
+            <Btn size="sm" icon={MessageSquarePlus} onClick={() => ask(`Make an Instagram post with picture ${p.id}`)}>
+              Make a post with it
+            </Btn>
+            {a.generation && p.kind === 'image' && (
+              <>
+                <Btn size="sm" icon={Clapperboard} onClick={() => ask(`Animate picture ${p.id} into a short video`)}>
+                  Animate it
+                </Btn>
+                <Btn
+                  size="sm"
+                  icon={Wand2}
+                  onClick={() => {
+                    onClose()
+                    a.setInput(`Edit picture ${p.id}: `)
+                    a.inputRef.current?.focus()
+                  }}
+                >
+                  Edit it…
+                </Btn>
+              </>
+            )}
+            <Btn
+              size="sm"
+              variant="subtle"
+              icon={AtSign}
+              onClick={() => {
+                onClose()
+                a.setInput(`${a.input.trim()} picture ${p.id} `.trimStart())
+                a.inputRef.current?.focus()
+              }}
+            >
+              Mention it in the chat
+            </Btn>
           </div>
-        </div>
+        </Viewer>
       )}
     </Modal>
   )
@@ -278,33 +273,32 @@ function AssetModal({ asset, onClose }: { asset: Asset | null; onClose: () => vo
   const a = useAssistant()
   const d = a.current ? a.drafts[a.current] : undefined
   return (
-    <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'From the gallery'} className="max-w-2xl">
+    <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'From the gallery'} full>
       {asset && (
-        <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
-            {asset.kind === 'video' ? (
-              <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className="max-h-[60vh] w-full" />
+        <Viewer
+          media={
+            asset.kind === 'video' ? (
+              <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className={viewerMedia} />
             ) : (
-              <img src={asset.url} alt={asset.name ?? ''} className="max-h-[60vh] w-full object-contain" />
-            )}
+              <img src={asset.url} alt={asset.name ?? ''} className={viewerMedia} />
+            )
+          }
+        >
+          <div>
+            <Label>Shape</Label>
+            <p className="mt-0.5 text-[12.5px]">{fmtShape(asset)}</p>
           </div>
-          <div className="flex flex-col gap-4">
-            <div>
-              <Label>Shape</Label>
-              <p className="mt-0.5 text-[12.5px]">{fmtShape(asset)}</p>
-            </div>
-            <div className="mt-auto flex flex-col gap-1.5">
-              {d && (
-                <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('use_assets', { assets: [asset.id], draft: d.id }), onClose())}>
-                  Add to draft {d.id}
-                </Btn>
-              )}
-              <Btn size="sm" icon={ImagePlus} onClick={() => (a.action('use_assets', { assets: [asset.id] }), onClose())}>
-                Bring into the conversation
+          <div className="mt-auto flex flex-col gap-1.5">
+            {d && (
+              <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('use_assets', { assets: [asset.id], draft: d.id }), onClose())}>
+                Add to draft {d.id}
               </Btn>
-            </div>
+            )}
+            <Btn size="sm" icon={ImagePlus} onClick={() => (a.action('use_assets', { assets: [asset.id] }), onClose())}>
+              Bring into the conversation
+            </Btn>
           </div>
-        </div>
+        </Viewer>
       )}
     </Modal>
   )

@@ -6,7 +6,7 @@ import { api, type Account, type Device, type Investigation, type PublishingUsag
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
-import { fmtRelative, useApi, useInvalidate } from '../data'
+import { count, fmtRelative, useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
 import { Btn, EmptyState, Label, Modal, PageHeader, Skeleton, Stagger } from '../ui'
 import { KitMarkdown } from '../intake/KitMarkdown'
@@ -51,7 +51,6 @@ export default function Investigations() {
   return (
     <div>
       <PageHeader
-        eyebrow="Investigate"
         title={
           <>
             Did it really <Serif>happen?</Serif>
@@ -92,7 +91,7 @@ export default function Investigations() {
                           : inv.status === 'failed'
                             ? `Failed: ${inv.error ?? 'unknown'}`
                             : inv.counts
-                              ? `${inv.counts.posts} posts · ${inv.counts.runs} runs · ${inv.open_issues} ${inv.open_issues === 1 ? 'issue' : 'issues'}`
+                              ? `${count(inv.counts.posts, 'post')} · ${count(inv.counts.runs, 'run')} · ${count(inv.open_issues, 'issue')}`
                               : '—'}
                       </span>
                     </span>

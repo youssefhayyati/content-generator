@@ -294,7 +294,7 @@ function GenerateMedia({ kind, hint, onMade }: { kind: 'image' | 'video'; hint: 
             'flex h-8 shrink-0 basis-full items-center justify-center gap-1.5 rounded-md px-3 text-[12.5px] font-medium transition-colors sm:basis-auto',
             busy
               ? 'cursor-default text-dim'
-              : 'bg-accent text-white hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40',
+              : 'bg-accent text-on-accent hover:bg-accent/85 disabled:cursor-not-allowed disabled:opacity-40',
           )}
         >
           {busy ? <LoaderCircle className="size-3.5 animate-spin" strokeWidth={2} /> : <Sparkles className="size-3.5" strokeWidth={2} />}

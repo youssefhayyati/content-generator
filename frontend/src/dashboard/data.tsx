@@ -172,6 +172,9 @@ export const fmtLongDay = (d: Date) => longDay.format(d)
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
 /** "in 3 hours", "yesterday", "in 2 weeks". */
+/** "1 post", "3 posts": a number with its noun in the right number. */
+export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
 export function fmtRelative(iso: string, now = Date.now()) {
   const diff = (Date.parse(iso) - now) / 1000
   const abs = Math.abs(diff)

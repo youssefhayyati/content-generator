@@ -225,7 +225,6 @@ export function Interview({
     <div>
       {!embedded && (
         <PageHeader
-          eyebrow="Campaigns"
           title={
             campaign.title ? (
               <span className="block max-w-[22ch] truncate">{campaign.title}</span>

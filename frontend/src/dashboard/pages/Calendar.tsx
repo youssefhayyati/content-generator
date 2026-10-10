@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronLeft, ChevronRight, Clock3, Copy, MousePointerClick, PenLine, Plus, Trash2, Undo2 } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Clock3, Copy, Layers, MousePointerClick, PenLine, Plus, Trash2, Undo2 } from 'lucide-react'
 import { PLATFORMS, PlatformIcon } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import { api, type Page, type Post } from '../../lib/api'
@@ -28,16 +28,19 @@ const HOUR = 52
 /** How much of an hour a post's block covers, in minutes. Posts are moments, not meetings. */
 const BLOCK_MIN = 50
 const SNAP_MIN = 15
+/** Beyond this many side by side, posts are too thin to read: the whole group becomes one stack. */
+const MAX_LANES = 2
 
 const monthYear = (d: Date) => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 const range = (a: Date, b: Date) =>
   `${a.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${b.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 const minutesOf = (d: Date) => d.getHours() * 60 + d.getMinutes()
 
-/** Side-by-side columns for posts whose blocks would overlap. */
+/** Side-by-side columns for posts whose blocks would overlap, or one stack when there are too many. */
 function lanes(posts: Post[]) {
   const sorted = [...posts].sort((a, b) => Date.parse(a.scheduled_at!) - Date.parse(b.scheduled_at!))
   const out = new Map<number, { lane: number; lanes: number }>()
+  const stacks: Post[][] = []
   let cluster: Post[] = []
   let clusterEnd = -1
 
@@ -51,7 +54,8 @@ function lanes(posts: Post[]) {
       ends[lane] = start + BLOCK_MIN
       assigned.push([p, lane])
     }
-    for (const [p, lane] of assigned) out.set(p.id, { lane, lanes: ends.length })
+    if (ends.length > MAX_LANES) stacks.push(cluster)
+    else for (const [p, lane] of assigned) out.set(p.id, { lane, lanes: ends.length })
     cluster = []
   }
 
@@ -62,7 +66,7 @@ function lanes(posts: Post[]) {
     clusterEnd = Math.max(clusterEnd, start + BLOCK_MIN)
   }
   if (cluster.length) flush()
-  return out
+  return { lanes: out, stacks }
 }
 
 export default function Calendar() {
@@ -138,7 +142,6 @@ export default function Calendar() {
   return (
     <div>
       <PageHeader
-        eyebrow="Calendar"
         title={
           <>
             See everything. <Serif>Plan ahead.</Serif>
@@ -335,7 +338,23 @@ export function WeekGrid({
   const firstColumn = useRef<HTMLDivElement>(null)
   const [colWidth, setColWidth] = useState(120)
   const [ghost, setGhost] = useState<{ day: number; minutes: number } | null>(null)
+  const [openStack, setOpenStack] = useState<number | null>(null)
   const dragged = useRef(false)
+
+  // An open stack closes on a click anywhere outside it, or on Escape.
+  useEffect(() => {
+    if (openStack === null) return
+    const close = (e: PointerEvent) => {
+      if (!(e.target as Element).closest?.(`[data-stack="${openStack}"]`)) setOpenStack(null)
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpenStack(null)
+    document.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [openStack])
 
   // Once this week's posts are in, open on the earliest of them; with none, on a little
   // before now (this week) or the start of the working day. Only the first time.
@@ -463,10 +482,83 @@ export function WeekGrid({
                   </div>
                 )}
 
+                {layouts[di].stacks.map((stack) => {
+                  const at = new Date(stack[0].scheduled_at!)
+                  const id = stack[0].id
+                  const open = openStack === id
+                  const platforms = [...new Set(stack.flatMap((p) => p.platforms))]
+                  return (
+                    <div
+                      key={`stack-${id}`}
+                      data-stack={id}
+                      className={cn('absolute inset-x-1.5', open ? 'z-30' : 'z-[5]')}
+                      style={{ top: (minutesOf(at) / 60) * HOUR + 2, height: (BLOCK_MIN / 60) * HOUR - 4 }}
+                    >
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        onClick={() => setOpenStack(open ? null : id)}
+                        className={cn(
+                          'size-full overflow-hidden rounded-md border bg-panel-3 px-2 py-1.5 text-left shadow-[3px_-3px_0_-1px_var(--color-panel-2),3px_-3px_0_0_var(--color-line-2)] transition-colors',
+                          open || stack.some((p) => p.id === selectedId) ? 'border-white/30' : 'border-line-2 hover:border-white/20',
+                        )}
+                      >
+                        <p className="flex items-center gap-1.5 font-mono text-[10px] text-muted">
+                          <Layers className="size-3 shrink-0 text-fg" />
+                          {fmtTime(at)}
+                        </p>
+                        <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12px] font-medium leading-tight">
+                          {stack.length} posts
+                          <span className="flex gap-0.5 text-muted">
+                            {platforms.slice(0, 3).map((pl) => (
+                              <PlatformIcon key={pl} id={pl} className="size-2.5" />
+                            ))}
+                          </span>
+                        </p>
+                      </button>
+                      <AnimatePresence>
+                        {open && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                            transition={{ duration: 0.2, ease }}
+                            className={cn(
+                              'absolute top-full mt-1.5 w-[260px] space-y-1 rounded-lg border border-line-2 bg-panel-3 p-1.5 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
+                              di >= 5 ? 'right-0' : 'left-0',
+                            )}
+                          >
+                            {stack.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  onSelect(p.id)
+                                  setOpenStack(null)
+                                }}
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-md border border-l-2 border-transparent px-2 py-1.5 text-left transition-colors hover:brightness-125',
+                                  STATE[postState(p, now.getTime())].tone,
+                                  selectedId === p.id && 'shadow-[0_0_0_1px_rgb(255_255_255_/_0.4)]',
+                                )}
+                              >
+                                <PlatformIcon id={p.platforms[0]} className="size-3 shrink-0" />
+                                <span className="min-w-0 flex-1 truncate text-[12px]">{titleOf(p)}</span>
+                                <span className="font-mono text-[10px] text-dim">{fmtTime(p.scheduled_at!)}</span>
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )
+                })}
+
                 {byDay[di].map((p, pi) => {
                   const at = new Date(p.scheduled_at!)
                   const state = postState(p, now.getTime())
-                  const lane = layouts[di].get(p.id) ?? { lane: 0, lanes: 1 }
+                  const lane = layouts[di].lanes.get(p.id)
+                  if (!lane) return null
                   const movable = p.status !== 'published'
                   return (
                     <motion.button
