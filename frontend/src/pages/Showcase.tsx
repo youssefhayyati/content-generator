@@ -1,0 +1,785 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { useLenis } from 'lenis/react'
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, X } from 'lucide-react'
+import { Footer } from '../components/Footer'
+import { Navbar } from '../components/Navbar'
+import { PlatformIcon } from '../components/ui/PlatformIcon'
+import { VelocityMarquee } from '../components/ui/Marquee'
+import { LineReveal, Serif } from '../components/ui/Reveal'
+import { cn } from '../lib/cn'
+import { ease, easeInOut } from '../lib/motion'
+import { ReadyContext, useArrival } from '../lib/ready'
+import { useDocumentTitle, useRouter } from '../lib/router'
+import { useSession } from '../lib/session'
+import { CASES, caseById, GROUPS, KIND_LABEL, MAKE_LABEL, makePath, type Case, type Group } from '../showcase/cases'
+import { Clip, FlowMap, FORMAT_ICON, monogram, Picture, PlanBoard, PostCard, PostText, platformName, Tag } from '../showcase/pieces'
+
+const pad = (n: number) => String(n).padStart(2, '0')
+const kindTag = (c: Case) =>
+  c.kind === 'carousel'
+    ? `Carousel · ${c.shots?.length}`
+    : c.kind === 'reel'
+      ? `Reel · 0:${pad(c.video?.seconds ?? 0)}`
+      : c.kind === 'flow'
+        ? `Flow · ${c.flow?.steps.length} steps`
+        : c.kind === 'post' && (c.versions?.length ?? 0) > 1
+          ? `Post · ${c.versions?.length} networks`
+          : KIND_LABEL[c.kind]
+
+/** Signed in, straight to the studio; otherwise sign up first and land there after. */
+function useMake() {
+  const { user } = useSession()
+  const { navigate } = useRouter()
+  return (path: string) => navigate(user ? path : `/signup?next=${encodeURIComponent(path)}`)
+}
+
+/** /showcase: what FlowAI made for a handful of demo brands, each one open to see how, and to make your own. */
+export default function Showcase() {
+  const ready = useArrival()
+  const { search, navigate } = useRouter()
+  const open = caseById(new URLSearchParams(search).get('case'))
+  useDocumentTitle(open ? `${open.title} — FlowAI Showcase` : 'Showcase — Made with FlowAI')
+  const [group, setGroup] = useState<Group | 'all'>('all')
+  const list = group === 'all' ? CASES : CASES.filter((c) => c.group === group)
+  // Where the open case came from on the wall, so the viewer can grow out of it and shrink back.
+  const [origin, setOrigin] = useState<DOMRect | null>(null)
+  const pushed = useRef(false)
+
+  const show = (c: Case, from: Element | null) => {
+    setOrigin(from?.getBoundingClientRect() ?? null)
+    pushed.current = true
+    navigate(`/showcase?case=${c.id}`)
+  }
+  const close = () => {
+    if (pushed.current) {
+      pushed.current = false
+      window.history.back()
+    } else navigate('/showcase', { replace: true })
+  }
+  const step = (by: number) => {
+    if (!open) return
+    const i = CASES.indexOf(open)
+    const next = CASES[(i + by + CASES.length) % CASES.length]
+    setOrigin(null)
+    navigate(`/showcase?case=${next.id}`, { replace: true })
+  }
+
+  return (
+    <ReadyContext.Provider value={ready}>
+      <div className="relative overflow-x-clip">
+        <Navbar />
+        <main>
+          <Hero ready={ready} />
+          <Briefs />
+          <section aria-label="Cases" className="container-x pb-28 md:pb-40">
+            <Filters group={group} onGroup={setGroup} />
+            <Wall key={group} list={list} onOpen={show} />
+          </section>
+          <YourBrief />
+        </main>
+        <Footer />
+      </div>
+
+      <AnimatePresence>{open && <Viewer key="viewer" c={open} origin={origin} onClose={close} onStep={step} />}</AnimatePresence>
+    </ReadyContext.Provider>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Hero                                                                */
+/* ------------------------------------------------------------------ */
+
+function Hero({ ready }: { ready: boolean }) {
+  // Every picture, clip, post, flow and plan on the page.
+  const pieces = CASES.reduce((n, c) => n + (c.video ? 1 : (c.shots?.length ?? 0)) + (c.versions?.length ?? 0) + (c.flow ? 1 : 0) + (c.plan ? 1 : 0), 0)
+  return (
+    <header className="container-x pt-32 md:pt-44">
+      <div className="grid gap-10 lg:grid-cols-12 lg:items-end">
+        <div className="lg:col-span-8">
+          <motion.p
+            className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-muted"
+            initial={{ opacity: 0, y: 12 }}
+            animate={ready ? { opacity: 1, y: 0 } : undefined}
+            transition={{ duration: 0.8, ease }}
+          >
+            <span className="text-fg">(Showcase)</span>
+            <span className="h-px w-8 bg-current opacity-40" />
+            <span>
+              {CASES.length} briefs · {pieces} pieces
+            </span>
+          </motion.p>
+          <LineReveal
+            as="h1"
+            play={ready}
+            className="mt-8 text-[clamp(3.6rem,15vw,7rem)] font-medium leading-[0.86] tracking-[-0.06em] md:text-[clamp(5rem,11vw,11.5rem)]"
+            lines={['Made with', <Serif>FlowAI.</Serif>]}
+          />
+        </div>
+        <motion.div
+          className="lg:col-span-4"
+          initial={{ opacity: 0, y: 16 }}
+          animate={ready ? { opacity: 1, y: 0 } : undefined}
+          transition={{ duration: 0.9, ease, delay: 0.25 }}
+        >
+          <p className="max-w-[40ch] text-[16px] leading-relaxed text-muted">
+            Posts, pictures, reels, a flow and a launch plan, each from one brief. Open any of them to see the brief, what the studio did with it, and every version it became. Then make your own from it.
+          </p>
+          <p className="mt-5 max-w-[44ch] border-l border-line-2 pl-3 text-[12.5px] leading-relaxed text-dim">
+            The brands are invented for this page. Everything else is what FlowAI returned from the brief or prompt on each case, left as it came out.
+          </p>
+        </motion.div>
+      </div>
+    </header>
+  )
+}
+
+/** The briefs themselves, drifting past: one line in, everything below came out of it. */
+function Briefs() {
+  return (
+    <div aria-hidden className="mt-20 border-y border-line py-5 md:mt-28">
+      <VelocityMarquee speed={-1.2}>
+        {CASES.map((c) => (
+          <span key={c.id} className="flex items-center whitespace-nowrap pr-10 text-[15px] md:text-[17px]">
+            <span className="font-serif italic text-fg/80">“{c.brief.length > 72 ? `${c.brief.slice(0, 70).trimEnd()}…` : c.brief}”</span>
+            <ArrowRight className="mx-4 size-4 text-accent-soft" strokeWidth={1.5} />
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-dim">{kindTag(c)}</span>
+          </span>
+        ))}
+      </VelocityMarquee>
+    </div>
+  )
+}
+
+function Filters({ group, onGroup }: { group: Group | 'all'; onGroup: (g: Group | 'all') => void }) {
+  return (
+    <div className="sticky top-20 z-20 mt-14 flex justify-center md:top-24">
+      <div role="tablist" aria-label="Show" className="no-scrollbar flex max-w-full gap-1 overflow-x-auto rounded-full border border-line-2 bg-panel/80 p-1 backdrop-blur-xl">
+        {GROUPS.map((g) => {
+          const n = g.id === 'all' ? CASES.length : CASES.filter((c) => c.group === g.id).length
+          const on = g.id === group
+          return (
+            <button
+              key={g.id}
+              role="tab"
+              type="button"
+              aria-selected={on}
+              onClick={() => onGroup(g.id)}
+              className={cn('relative flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[13.5px] transition-colors duration-300', on ? 'text-ink' : 'text-muted hover:text-fg')}
+            >
+              {on && <motion.span layoutId="showcase-group" className="absolute inset-0 rounded-full bg-fg" transition={{ type: 'spring', stiffness: 420, damping: 36 }} />}
+              <span className="relative">{g.label}</span>
+              <span className={cn('relative font-mono text-[10.5px]', on ? 'text-ink/50' : 'text-dim')}>{n}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* The wall                                                            */
+/* ------------------------------------------------------------------ */
+
+const columnsFor = (w: number) => (w >= 1280 ? 4 : w >= 1024 ? 3 : w >= 640 ? 2 : 1)
+
+/** How tall a case's card is for its width, near enough to balance the columns. */
+function heightOf(c: Case) {
+  const shot = c.shots?.[0]
+  const visual =
+    c.kind === 'reel' ? 16 / 9 : c.kind === 'carousel' ? 1 : c.kind === 'flow' ? 1.95 : c.kind === 'campaign' ? 1.25 : shot ? shot.h / shot.w : 1.2
+  return visual + 0.2
+}
+
+/**
+ * A masonry of cases: each goes into the shortest column so far, which keeps the columns level
+ * and the reading order running across the rows (01, 02, 03…) rather than down each column.
+ */
+function Wall({ list, onOpen }: { list: Case[]; onOpen: (c: Case, from: Element | null) => void }) {
+  const [n, setN] = useState(() => columnsFor(window.innerWidth))
+  useEffect(() => {
+    const on = () => setN(columnsFor(window.innerWidth))
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  const columns = useMemo(() => {
+    const cols: Case[][] = Array.from({ length: n }, () => [])
+    const heights = new Array(n).fill(0)
+    for (const c of list) {
+      const k = heights.indexOf(Math.min(...heights))
+      cols[k].push(c)
+      heights[k] += heightOf(c)
+    }
+    return cols
+  }, [list, n])
+
+  return (
+    <div className="mt-8 grid items-start gap-4 md:gap-5" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
+      {columns.map((col, k) => (
+        <div key={k} className="flex min-w-0 flex-col gap-9">
+          {col.map((c) => (
+            <Card key={c.id} c={c} i={k} onOpen={onOpen} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Card({ c, i, onOpen }: { c: Case; i: number; onOpen: (c: Case, from: Element | null) => void }) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const reduce = useReducedMotion()
+  return (
+    <motion.figure
+      className="group w-full"
+      initial={reduce ? false : { opacity: 0, y: 48 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '0px 0px -8% 0px' }}
+      transition={{ duration: 1, ease, delay: (i % 4) * 0.07 }}
+    >
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => onOpen(c, ref.current)}
+        aria-label={`${c.title}, for ${c.brand.name}`}
+        className="relative block w-full overflow-hidden rounded-[22px] border border-line bg-card text-left outline-none ring-accent-soft/60 transition-[border-color,box-shadow] duration-500 hover:border-line-2 focus-visible:ring-2"
+      >
+        <motion.div
+          initial={reduce ? false : { clipPath: 'inset(22% 0% 0% 0%)', scale: 1.08 }}
+          whileInView={{ clipPath: 'inset(0% 0% 0% 0%)', scale: 1 }}
+          viewport={{ once: true, margin: '0px 0px -8% 0px' }}
+          transition={{ duration: 1.3, ease, delay: (i % 4) * 0.07 }}
+        >
+          <Visual c={c} />
+        </motion.div>
+        <Tag className="absolute left-3 top-3">{kindTag(c)}</Tag>
+        <span className="absolute right-3 top-3 grid size-9 place-items-center rounded-full bg-fg text-ink opacity-0 transition-[opacity,rotate] duration-500 ease-expo group-hover:rotate-45 group-hover:opacity-100">
+          <ArrowUpRight className="size-4" strokeWidth={2} />
+        </span>
+      </button>
+      <figcaption className="mt-3 flex items-baseline gap-3 px-1">
+        <span className="font-mono text-[10.5px] text-dim">{pad(CASES.indexOf(c) + 1)}</span>
+        <span className="min-w-0">
+          <span className="block text-[15.5px] font-medium leading-snug tracking-[-0.01em]">{c.title}</span>
+          <span className="mt-0.5 block text-[12.5px] text-dim">
+            {c.brand.name} · {c.brand.trade}
+          </span>
+        </span>
+      </figcaption>
+    </motion.figure>
+  )
+}
+
+/** What a case shows on the wall. Pictures carry their brief on hover: one line in, this out. */
+function Visual({ c }: { c: Case }) {
+  const shot = c.shots?.[0]
+  const brief = (
+    <span className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-3 bg-linear-to-t from-black/85 via-black/45 to-transparent px-4 pb-4 pt-16 opacity-0 transition-[opacity,translate] duration-500 ease-expo group-hover:translate-y-0 group-hover:opacity-100">
+      <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-white/55">The brief</span>
+      <span className="mt-1 line-clamp-3 block font-serif text-[17px] italic leading-snug text-white">“{c.brief}”</span>
+    </span>
+  )
+
+  if (c.kind === 'reel')
+    return (
+      <span className="relative block">
+        <Clip c={c} className="aspect-[9/16] w-full object-cover" />
+        {brief}
+      </span>
+    )
+
+  if (c.kind === 'carousel' && c.shots) return <Carousel c={c} brief={brief} />
+
+  if (c.kind === 'flow' && c.flow)
+    return (
+      <span className="relative block bg-panel px-4 pb-6 pt-14" style={{ background: 'radial-gradient(120% 70% at 50% 0%, color-mix(in oklab, var(--color-accent) 16%, transparent), transparent 70%), var(--color-panel)' }}>
+        <FlowMap flow={c.flow} compact />
+      </span>
+    )
+
+  if (c.kind === 'campaign' && c.plan && shot)
+    return (
+      <span className="block">
+        <span className="relative block overflow-hidden">
+          <Picture shot={shot} size="sm" className="aspect-[4/3] w-full object-cover transition-transform duration-1000 ease-expo group-hover:scale-[1.04]" />
+        </span>
+        <span className="block p-4 pb-5">
+          <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-dim">Big idea</span>
+          <span className="mt-1 block font-serif text-[24px] italic leading-[1.05]">{c.plan.idea}</span>
+          <span className="mt-4 flex items-center gap-3 text-[12px] text-muted">
+            {c.plan.pillars.length} pillars · {c.plan.posts.length} posts
+            <span className="ml-auto flex gap-1">
+              {c.plan.posts.map((p, j) => {
+                const Icon = FORMAT_ICON[p.format]
+                return (
+                  <span key={j} className="grid size-6 place-items-center rounded-md border border-line text-muted">
+                    <Icon className="size-3" strokeWidth={1.75} />
+                  </span>
+                )
+              })}
+            </span>
+          </span>
+        </span>
+      </span>
+    )
+
+  if (c.kind === 'post' && shot)
+    return (
+      <span className="relative block overflow-hidden">
+        <Picture shot={shot} size="sm" className="h-auto w-full transition-transform duration-1000 ease-expo group-hover:scale-[1.04]" />
+        <span className="absolute bottom-3 left-3 flex -space-x-1.5 transition-opacity duration-300 group-hover:opacity-0">
+          {c.versions?.map((v) => (
+            <span key={v.platform} className="grid size-8 place-items-center rounded-full border border-white/15 bg-black/55 text-white backdrop-blur-md">
+              <PlatformIcon id={v.platform} className="size-3.5" />
+            </span>
+          ))}
+        </span>
+        {brief}
+      </span>
+    )
+
+  if (c.kind === 'post' && c.versions)
+    return (
+      <span
+        className="block px-5 pb-6 pt-14"
+        style={{ background: 'radial-gradient(110% 80% at 100% 0%, color-mix(in oklab, var(--color-accent) 22%, transparent), transparent 65%), var(--color-card)' }}
+      >
+        <PostCard c={c} version={c.versions[0]} clamp className="rotate-[-1.2deg] transition-transform duration-700 ease-expo group-hover:rotate-0" />
+      </span>
+    )
+
+  return shot ? (
+    <span className="relative block overflow-hidden">
+      <Picture shot={shot} size="sm" className="h-auto w-full transition-transform duration-1000 ease-expo group-hover:scale-[1.04]" />
+      {brief}
+    </span>
+  ) : null
+}
+
+/** A carousel on the wall: the slides fanned behind the first, and dealt through while hovered. */
+function Carousel({ c, brief }: { c: Case; brief: ReactNode }) {
+  const shots = c.shots!
+  const [at, setAt] = useState(0)
+  const [hover, setHover] = useState(false)
+  useEffect(() => {
+    if (!hover) return
+    const t = window.setInterval(() => setAt((n) => (n + 1) % shots.length), 950)
+    return () => window.clearInterval(t)
+  }, [hover, shots.length])
+
+  return (
+    <span className="relative block aspect-square overflow-hidden" onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+      {shots.map((s, j) => (
+        <motion.span
+          key={s.src}
+          className="absolute inset-0"
+          initial={false}
+          animate={{ opacity: j === at ? 1 : 0, scale: j === at ? 1 : 1.06 }}
+          transition={{ duration: 0.7, ease }}
+        >
+          <Picture shot={s} size="sm" className="size-full object-cover" />
+        </motion.span>
+      ))}
+      <span className="absolute inset-x-0 bottom-3 flex justify-center gap-1.5">
+        {shots.map((s, j) => (
+          <span key={s.src} className={cn('h-1 rounded-full bg-white transition-all duration-500', j === at ? 'w-5 opacity-100' : 'w-1 opacity-50')} />
+        ))}
+      </span>
+      {brief}
+    </span>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* The case viewer                                                     */
+/* ------------------------------------------------------------------ */
+
+function Viewer({ c, origin, onClose, onStep }: { c: Case; origin: DOMRect | null; onClose: () => void; onStep: (by: number) => void }) {
+  const lenis = useLenis()
+  const make = useMake()
+  const reduce = useReducedMotion()
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const scroller = useRef<HTMLDivElement>(null)
+  const [version, setVersion] = useState(0)
+  const [copied, setCopied] = useState(false)
+  useEffect(() => setVersion(0), [c.id])
+
+  // The page holds still underneath, and the keys move between cases.
+  useEffect(() => {
+    lenis?.stop()
+    closeRef.current?.focus({ preventScroll: true })
+    return () => lenis?.start()
+  }, [lenis])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowRight') onStep(1)
+      else if (e.key === 'ArrowLeft') onStep(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, onStep])
+
+  // Grows out of the card that was clicked; without one (a shared link), it rises.
+  const clip = useMemo(() => {
+    if (!origin) return null
+    const w = window.innerWidth
+    const h = window.innerHeight
+    return `inset(${origin.top}px ${w - origin.right}px ${h - origin.bottom}px ${origin.left}px round 22px)`
+  }, [origin])
+  const from = reduce ? { opacity: 0 } : clip ? { clipPath: clip } : { clipPath: 'inset(100% 0% 0% 0% round 0px)' }
+  const to = reduce ? { opacity: 1 } : { clipPath: 'inset(0% 0% 0% 0% round 0px)' }
+
+  const copyText = c.prompt ?? c.brief
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(copyText)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      /* Clipboard refused: nothing to do. */
+    }
+  }
+  const index = CASES.indexOf(c)
+  const next = CASES[(index + 1) % CASES.length]
+  const v = c.versions?.[version]
+
+  return (
+    <motion.div
+      role="dialog"
+      aria-modal="true"
+      aria-label={c.title}
+      className="fixed inset-0 z-[120] bg-ink"
+      initial={from}
+      animate={to}
+      exit={{ ...from, transition: { duration: 0.6, ease: easeInOut } }}
+      transition={{ duration: 0.85, ease: easeInOut }}
+    >
+      <div ref={scroller} className="flex h-full flex-col overflow-y-auto lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] lg:overflow-hidden" data-lenis-prevent>
+        {/* The stage */}
+        <div
+          className="relative flex min-h-[50svh] shrink-0 items-center justify-center overflow-hidden px-4 pb-8 pt-16 lg:h-full lg:px-12 lg:py-12"
+          style={{ background: `radial-gradient(80% 70% at 50% 45%, color-mix(in oklab, ${c.shots?.[0]?.tone ?? 'var(--color-accent)'} 70%, transparent), transparent 75%), var(--color-ink-2)` }}
+        >
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={c.id + (c.kind === 'post' ? version : '')}
+              className="flex size-full items-center justify-center"
+              initial={{ opacity: 0, scale: 0.94, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.6, ease, delay: origin ? 0.25 : 0.05 } }}
+              exit={{ opacity: 0, scale: 0.97, filter: 'blur(6px)', transition: { duration: 0.25, ease } }}
+            >
+              <Stage c={c} version={version} />
+            </motion.div>
+          </AnimatePresence>
+        </div>
+
+        {/* The case */}
+        <aside className="relative flex min-h-0 flex-col border-line bg-panel lg:border-l">
+          <div className="flex-1 px-5 pb-8 pt-6 md:px-8 lg:overflow-y-auto lg:pt-20" data-lenis-prevent>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={c.id}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0, transition: { duration: 0.5, ease, delay: origin ? 0.3 : 0.05 } }}
+                exit={{ opacity: 0, y: -8, transition: { duration: 0.2 } }}
+              >
+                <p className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-dim">
+                  <span className="text-fg">Case {pad(index + 1)}</span>
+                  <span>/ {pad(CASES.length)}</span>
+                  <span className="h-px w-6 bg-current opacity-40" />
+                  <span>{KIND_LABEL[c.kind]}</span>
+                </p>
+                <h2 className="mt-5 text-[clamp(2rem,3.2vw,3rem)] font-medium leading-[0.98] tracking-[-0.045em]">{c.title}</h2>
+                <p className="mt-4 flex items-center gap-2.5 text-[13px] text-muted">
+                  <span className="grid size-7 place-items-center rounded-full bg-fg text-[9.5px] font-semibold text-ink">{monogram(c.brand.name)}</span>
+                  {c.brand.name} · {c.brand.trade}
+                  <span className="rounded-full border border-line-2 px-2 py-0.5 text-[10.5px] text-dim">Demo brand</span>
+                </p>
+
+                <Block title="The brief">
+                  <p className="font-serif text-[23px] italic leading-[1.22] tracking-[-0.005em] text-fg">“{c.brief}”</p>
+                  {c.fields && (
+                    <dl className="mt-4 space-y-2.5">
+                      {c.fields.map(([k, val]) => (
+                        <div key={k} className="grid grid-cols-[86px_minmax(0,1fr)] gap-3 text-[13px] leading-snug">
+                          <dt className="text-dim">{k}</dt>
+                          <dd className="text-muted">{val}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                </Block>
+
+                {c.prompt && (
+                  <Block title={c.video ? 'Clip prompt' : 'Picture prompt'}>
+                    <p className="rounded-xl border border-line bg-white/[0.02] p-3 font-mono text-[12px] leading-relaxed text-muted">{c.prompt}</p>
+                  </Block>
+                )}
+
+                {c.versions && (c.versions.length > 1 || c.kind !== 'post') && (
+                  <Block title={c.versions.length > 1 ? `${c.versions.length} versions` : 'Caption'}>
+                    {c.versions.length > 1 && (
+                      <div role="tablist" aria-label="Versions" className="mb-3 flex flex-wrap gap-1.5">
+                        {c.versions.map((x, j) => (
+                          <button
+                            key={x.platform}
+                            role="tab"
+                            type="button"
+                            aria-selected={j === version}
+                            onClick={() => {
+                              setVersion(j)
+                              // On a phone the post is up above the tabs: bring it back into view.
+                              if (c.kind === 'post' && !window.matchMedia('(min-width: 1024px)').matches) scroller.current?.scrollTo({ top: 0, behavior: 'smooth' })
+                            }}
+                            className={cn(
+                              'flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12.5px] transition-colors duration-300',
+                              j === version ? 'border-fg bg-fg text-ink' : 'border-line-2 text-muted hover:border-white/30 hover:text-fg',
+                            )}
+                          >
+                            <PlatformIcon id={x.platform} className="size-3.5" />
+                            {platformName(x)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {v && c.kind !== 'post' && (
+                      <div className="rounded-xl border border-line bg-white/[0.02] p-3.5" style={{ ['--tag' as string]: 'var(--color-accent-soft)' }}>
+                        <PostText text={v.text} className="text-[13.5px] leading-relaxed text-fg/90" />
+                      </div>
+                    )}
+                  </Block>
+                )}
+
+                <Block title="What FlowAI did">
+                  <ol className="space-y-2.5">
+                    {c.made.map((m, j) => (
+                      <li key={j} className="flex items-start gap-3 text-[13.5px] leading-snug">
+                        <span className="mt-px grid size-5 shrink-0 place-items-center rounded-full border border-line-2 font-mono text-[10px] text-dim">{j + 1}</span>
+                        <span className="min-w-0 flex-1">{m.did}</span>
+                        <span className="shrink-0 rounded-md border border-line px-2 py-0.5 font-mono text-[10.5px] text-dim">{m.model}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </Block>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+
+          <div className="sticky bottom-0 border-t border-line bg-panel/95 px-5 py-4 backdrop-blur md:px-8">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => make(makePath(c.make))}
+                className="group flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-fg px-5 text-[14px] font-medium text-ink transition-[background-color,box-shadow] duration-300 hover:bg-white hover:shadow-[0_0_0_5px_color-mix(in_oklab,var(--color-accent)_22%,transparent)]"
+              >
+                {MAKE_LABEL[c.make.tool]}
+                <ArrowRight className="size-4 transition-transform duration-500 ease-expo group-hover:-rotate-45" strokeWidth={1.75} />
+              </button>
+              <button
+                type="button"
+                onClick={copy}
+                aria-label={c.prompt ? 'Copy the prompt' : 'Copy the brief'}
+                title={c.prompt ? 'Copy the prompt' : 'Copy the brief'}
+                className="grid size-12 shrink-0 place-items-center rounded-full border border-line-2 text-muted transition-colors hover:border-white/30 hover:text-fg"
+              >
+                {copied ? <Check className="size-4 text-ok" /> : <Copy className="size-4" strokeWidth={1.75} />}
+              </button>
+            </div>
+            <div className="mt-3 flex items-center justify-between text-[12.5px] text-dim">
+              <button type="button" onClick={() => onStep(-1)} className="flex items-center gap-1.5 transition-colors hover:text-fg">
+                <ArrowLeft className="size-3.5" /> Previous
+              </button>
+              <button type="button" onClick={() => onStep(1)} className="flex min-w-0 items-center gap-1.5 transition-colors hover:text-fg">
+                <span className="truncate">Next: {next.title}</span>
+                <ArrowRight className="size-3.5 shrink-0" />
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <button
+        ref={closeRef}
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="fixed right-3 top-3 z-10 grid size-11 place-items-center rounded-full border border-white/15 bg-black/50 text-white backdrop-blur-md transition-[background-color,rotate] duration-500 ease-expo hover:rotate-90 hover:bg-black/70 md:right-5 md:top-5"
+      >
+        <X className="size-5" strokeWidth={1.75} />
+      </button>
+    </motion.div>
+  )
+}
+
+function Block({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mt-8 border-t border-line pt-5">
+      <h3 className="mb-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-dim">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+/** The made thing, as big as the screen allows. */
+function Stage({ c, version }: { c: Case; version: number }) {
+  const shot = c.shots?.[0]
+  const v = c.versions?.[version]
+
+  if (c.kind === 'reel') return <Reel c={c} version={version} />
+  if (c.kind === 'carousel') return <Slides c={c} />
+  if (c.kind === 'flow' && c.flow)
+    return (
+      <div className="flex w-full justify-center lg:h-full">
+        <FlowMap flow={c.flow} fit className="max-w-[640px]" />
+      </div>
+    )
+  if (c.kind === 'campaign' && c.plan && shot)
+    return (
+      <div className="no-scrollbar w-full max-w-[880px] py-2 lg:h-full lg:overflow-y-auto" data-lenis-prevent>
+        <div className="grid items-start gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <Picture shot={shot} eager className="w-full rounded-[20px] object-cover md:sticky md:top-0" />
+          <PlanBoard plan={c.plan} />
+        </div>
+      </div>
+    )
+  if (c.kind === 'post' && v)
+    return (
+      <div className="no-scrollbar flex w-full max-w-[500px] py-2 lg:max-h-full lg:overflow-y-auto" data-lenis-prevent>
+        <PostCard c={c} version={v} className="my-auto w-full" />
+      </div>
+    )
+  return shot ? <Picture shot={shot} eager className="h-auto max-h-full w-auto max-w-full rounded-[18px] shadow-[0_40px_120px_-40px_rgb(0_0_0_/_0.9)]" /> : null
+}
+
+/** A reel as a phone would play it: full bleed, the handle and caption over the bottom, a progress line on top. */
+function Reel({ c, version }: { c: Case; version: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const bar = useRef<HTMLSpanElement>(null)
+  const caption = c.versions?.[version]
+  useEffect(() => {
+    const v = ref.current?.querySelector('video')
+    if (!v) return
+    let raf = 0
+    const tick = () => {
+      if (v.duration && bar.current) bar.current.style.transform = `scaleX(${v.currentTime / v.duration})`
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+  return (
+    <div ref={ref} className="relative aspect-[9/16] h-[70svh] max-h-full max-w-full overflow-hidden rounded-[26px] border border-white/10 shadow-[0_40px_120px_-40px_rgb(0_0_0_/_0.9)] lg:h-full">
+      <Clip c={c} size="full" className="size-full object-cover" />
+      <span className="absolute inset-x-3 top-3 h-[3px] overflow-hidden rounded-full bg-white/25">
+        <span ref={bar} className="block h-full origin-left scale-x-0 rounded-full bg-white" />
+      </span>
+      {caption && (
+        <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 via-black/30 to-transparent p-4 pt-20 text-white">
+          <p className="flex items-center gap-2 text-[13px] font-semibold">
+            <span className="grid size-7 place-items-center rounded-full bg-white text-[9px] text-black">{monogram(c.brand.name)}</span>@{c.brand.handle}
+            <PlatformIcon id={caption.platform} className="ml-auto size-4 text-white/80" />
+          </p>
+          <p className="mt-2 line-clamp-3 whitespace-pre-line text-[12.5px] leading-snug text-white/90">{caption.text}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Slides({ c }: { c: Case }) {
+  const shots = c.shots!
+  const [at, setAt] = useState(0)
+  const [dir, setDir] = useState(1)
+  const go = (by: number) => {
+    setDir(by)
+    setAt((n) => (n + by + shots.length) % shots.length)
+  }
+  return (
+    <div className="relative flex aspect-square max-h-full w-full max-w-[min(100%,calc(100svh-7rem))] items-center justify-center">
+      <div className="relative size-full overflow-hidden rounded-[20px] shadow-[0_40px_120px_-40px_rgb(0_0_0_/_0.9)]">
+        <AnimatePresence initial={false} custom={dir} mode="popLayout">
+          <motion.div
+            key={at}
+            custom={dir}
+            className="absolute inset-0 cursor-grab active:cursor-grabbing"
+            variants={{
+              enter: (d: number) => ({ x: `${d * 100}%` }),
+              center: { x: '0%' },
+              exit: (d: number) => ({ x: `${d * -100}%` }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.7, ease }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.25}
+            onDragEnd={(_, info) => Math.abs(info.offset.x) > 60 && go(info.offset.x < 0 ? 1 : -1)}
+          >
+            <Picture shot={shots[at]} eager className="size-full object-cover" />
+          </motion.div>
+        </AnimatePresence>
+        <span className="absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 font-mono text-[11px] text-white backdrop-blur-md">
+          {at + 1} / {shots.length}
+        </span>
+      </div>
+      <button type="button" aria-label="Previous slide" onClick={() => go(-1)} className="absolute left-2 grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur-md transition-colors hover:bg-black/75 md:-left-5">
+        <ChevronLeft className="size-5" />
+      </button>
+      <button type="button" aria-label="Next slide" onClick={() => go(1)} className="absolute right-2 grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur-md transition-colors hover:bg-black/75 md:-right-5">
+        <ChevronRight className="size-5" />
+      </button>
+      <span className="absolute -bottom-5 left-1/2 flex -translate-x-1/2 gap-1.5">
+        {shots.map((s, j) => (
+          <span key={s.src} className={cn('h-1 rounded-full bg-white transition-all duration-500', j === at ? 'w-5' : 'w-1 opacity-40')} />
+        ))}
+      </span>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Your turn                                                           */
+/* ------------------------------------------------------------------ */
+
+function YourBrief() {
+  const make = useMake()
+  const [brief, setBrief] = useState('')
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    const text = brief.trim()
+    make(text ? `/dashboard/create?${new URLSearchParams({ brief: text })}` : '/dashboard/create')
+  }
+  return (
+    <section className="relative overflow-hidden bg-accent text-on-accent">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-60"
+        style={{ background: 'radial-gradient(60% 90% at 85% 10%, color-mix(in oklab, var(--color-accent-glow) 45%, transparent), transparent 70%)' }}
+      />
+      <div className="container-x relative py-24 md:py-36">
+        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-on-accent/70">(Your turn)</p>
+        <LineReveal className="mt-8 text-[clamp(3rem,8.5vw,8.75rem)] font-medium leading-[0.88] tracking-[-0.055em]" lines={['Your brief', <Serif>goes here.</Serif>]} />
+        <form onSubmit={submit} className="mt-12 flex max-w-[880px] flex-col gap-2 rounded-[22px] bg-ink/90 p-2 text-fg shadow-[0_40px_100px_-40px_rgb(0_0_0_/_0.8)] sm:flex-row sm:items-center sm:rounded-full">
+          <label className="sr-only" htmlFor="your-brief">
+            What should your first post be about?
+          </label>
+          <input
+            id="your-brief"
+            value={brief}
+            onChange={(e) => setBrief(e.target.value)}
+            placeholder="A launch, a story from this week, tonight’s special…"
+            className="h-12 min-w-0 flex-1 bg-transparent px-4 text-[16px] outline-none placeholder:text-dim"
+          />
+          <button type="submit" className="group flex h-12 items-center justify-center gap-2 rounded-full bg-fg px-6 text-[14px] font-medium text-ink transition-colors hover:bg-white">
+            Write it with FlowAI
+            <ArrowRight className="size-4 transition-transform duration-500 ease-expo group-hover:-rotate-45" strokeWidth={1.75} />
+          </button>
+        </form>
+        <p className="mt-4 text-[13px] text-on-accent/70">It opens in the Composer with your brief filled in. New here? You’ll make an account first, and it will be waiting after.</p>
+      </div>
+    </section>
+  )
+}

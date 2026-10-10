@@ -33,7 +33,7 @@ export function Security() {
     <section id="security" className="relative py-28 md:py-40">
       <div className="container-x grid gap-16 lg:grid-cols-12 lg:gap-10">
         <div className="lg:col-span-5">
-          <SectionLabel index="13">Control</SectionLabel>
+          <SectionLabel index="14">Control</SectionLabel>
           <LineReveal
             className="mt-10 text-[clamp(2.6rem,6vw,6.25rem)] font-medium leading-[0.92] tracking-[-0.05em]"
             lines={['Your content.', <Serif>Your control.</Serif>]}

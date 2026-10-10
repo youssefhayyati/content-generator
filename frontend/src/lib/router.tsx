@@ -94,7 +94,7 @@ export function Router({ children }: { children: ReactNode }) {
       const next = parse(to)
       const instant =
         reduce || phase !== 'idle' || next.path === location.path || (isAppPath(next.path) && isAppPath(location.path))
-      if (instant) return commit(to, 'none')
+      if (instant) return commit(to, 'none', next.path === location.path)
       pending.current = { to, push: false, replace: false }
       setTarget(to)
       setPhase('cover')

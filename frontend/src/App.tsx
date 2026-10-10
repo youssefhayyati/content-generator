@@ -13,6 +13,7 @@ import { Cookies, Privacy, Terms } from './pages/Legal'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 import ResetPassword from './pages/ResetPassword'
+import Showcase from './pages/Showcase'
 import Signup from './pages/Signup'
 
 // The studio is its own chunk: people reading the landing page never download it.
@@ -22,6 +23,7 @@ const ROUTES: Record<string, ComponentType> = {
   '/': Home,
   '/login': Login,
   '/signup': Signup,
+  '/showcase': Showcase,
   '/forgot-password': ForgotPassword,
   '/reset-password': ResetPassword,
   '/privacy': Privacy,

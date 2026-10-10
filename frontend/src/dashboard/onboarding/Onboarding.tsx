@@ -10,7 +10,6 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, apiStream, type User } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { ease, easeInOut } from '../../lib/motion'
-import { useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import { count, firstName, useInvalidate } from '../data'
 import { Flap } from '../live/Flap'
@@ -49,7 +48,6 @@ const SLIDE = { type: 'spring', stiffness: 420, damping: 36 } as const
 
 export function Onboarding() {
   const { user, setUser } = useSession()
-  const { navigate } = useRouter()
   const invalidate = useInvalidate()
   const toast = useToast()
   const lenis = useLenis()
@@ -277,10 +275,8 @@ export function Onboarding() {
     try {
       const done = await api<User>('/user', { method: 'PATCH', body: { preferences: { onboarding: 'done' } } })
       invalidate()
-      if (finished) {
-        navigate('/dashboard')
-        if (draft.current) toast('Your first post is waiting in Drafts.')
-      }
+      // Stay where they arrived: the dashboard, or the studio page a showcase case sent them to.
+      if (finished && draft.current) toast('Your first post is waiting in Drafts.')
       // Leaving onboarding unmounts this, which plays the exit below.
       setUser(done)
     } catch (e) {

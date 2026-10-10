@@ -398,6 +398,7 @@ export function Modal({
   children,
   className,
   full,
+  wide,
 }: {
   open: boolean
   onClose: () => void
@@ -406,6 +407,8 @@ export function Modal({
   className?: string
   /** Nearly the whole page, for looking at a picture or a video: lay it out with Viewer. */
   full?: boolean
+  /** A wide sheet that scrolls inside, for browsing a set of things. */
+  wide?: boolean
 }) {
   useEffect(() => {
     if (!open) return
@@ -432,7 +435,11 @@ export function Modal({
             data-lenis-prevent
             className={cn(
               'relative w-full overflow-hidden rounded-xl border border-line-2 bg-panel-2 shadow-[0_40px_120px_-30px_rgb(0_0_0_/_0.95)]',
-              full ? 'flex h-[calc(100dvh-2rem)] flex-col md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]' : 'max-w-md',
+              full
+                ? 'flex h-[calc(100dvh-2rem)] flex-col md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]'
+                : wide
+                  ? 'flex max-h-[calc(100dvh-2rem)] max-w-5xl flex-col md:max-h-[calc(100dvh-3rem)]'
+                  : 'max-w-md',
               className,
             )}
             initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -446,7 +453,7 @@ export function Modal({
                 <X className="size-4" />
               </button>
             </div>
-            <div className={cn('p-5', full && 'min-h-0 flex-1 overflow-y-auto')}>{children}</div>
+            <div className={cn('p-5', (full || wide) && 'min-h-0 flex-1 overflow-y-auto')}>{children}</div>
           </motion.div>
         </motion.div>
       )}

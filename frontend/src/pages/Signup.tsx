@@ -18,7 +18,7 @@ import { authApi, isEmail } from '../lib/auth'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
 import { useDocumentTitle, useEntryDelay, useRouter } from '../lib/router'
-import { useRedirectIfSignedIn, useSession } from '../lib/session'
+import { nextPath, useRedirectIfSignedIn, useSession } from '../lib/session'
 
 const ORDER: PlatformId[] = ['instagram', 'tiktok', 'x', 'linkedin', 'facebook', 'youtube', 'pinterest']
 const FORMATS: Array<{ id: PostFormat; label: string; icon: LucideIcon }> = [
@@ -46,7 +46,7 @@ export default function Signup() {
   useDocumentTitle('Sign up — FlowAI')
   useRedirectIfSignedIn()
   const entry = useEntryDelay()
-  const { navigate } = useRouter()
+  const { navigate, search } = useRouter()
   const { setUser } = useSession()
   const lenis = useLenis()
 
@@ -246,7 +246,7 @@ export default function Signup() {
                   </Enter>
                 </form>
                 <Enter i={10} className="mt-8 text-[14px] text-muted">
-                  Already have an account? <AuthLink to="/login">Log in</AuthLink>
+                  Already have an account? <AuthLink to={`/login${search}`}>Log in</AuthLink>
                 </Enter>
               </>
             )}
@@ -361,7 +361,7 @@ export default function Signup() {
                 email={email}
                 platforms={[...platforms]}
                 formats={FORMATS.filter((f) => formats.has(f.id)).map((f) => f.label)}
-                onContinue={() => navigate('/dashboard')}
+                onContinue={() => navigate(nextPath(search))}
               />
             )}
           </motion.div>

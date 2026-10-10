@@ -34,7 +34,9 @@ export function Menu({
   const go = (e: MouseEvent<HTMLAnchorElement>, href: string) => {
     e.preventDefault()
     onClose()
-    if (path !== '/') {
+    // A page of its own (the showcase) rather than a section of this one.
+    if (href.startsWith('/')) navigate(href)
+    else if (path !== '/') {
       queueSection(href)
       navigate('/')
     } else if (lenis) {

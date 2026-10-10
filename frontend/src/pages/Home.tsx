@@ -11,6 +11,7 @@ import { Features } from '../components/Features'
 import { FinalCTA } from '../components/FinalCTA'
 import { Footer } from '../components/Footer'
 import { Hero } from '../components/Hero'
+import { MadeWith } from '../components/MadeWith'
 import { MultiPlatform } from '../components/MultiPlatform'
 import { Navbar } from '../components/Navbar'
 import { Problem } from '../components/Problem'
@@ -77,6 +78,7 @@ export default function Home() {
             <Features />
           </PaperChapter>
           <UseCases />
+          <MadeWith />
           <Security />
           <FinalCTA />
         </main>

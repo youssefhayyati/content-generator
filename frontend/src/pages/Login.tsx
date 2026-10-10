@@ -142,7 +142,7 @@ export default function Login() {
       </form>
 
       <Enter i={10} className="mt-8 text-[14px] text-muted">
-        New to FlowAI? <AuthLink to="/signup">Create an account</AuthLink>
+        New to FlowAI? <AuthLink to={`/signup${search}`}>Create an account</AuthLink>
       </Enter>
     </AuthLayout>
   )

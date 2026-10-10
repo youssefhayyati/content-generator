@@ -11,6 +11,7 @@ const COLUMNS: Array<{ title: string; links: Array<[label: string, href: string]
   {
     title: 'Product',
     links: [
+      ['Showcase', '/showcase'],
       ['Features', '#features'],
       ['Automations', '#automations'],
       ['Platforms', '#platforms'],
