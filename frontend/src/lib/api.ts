@@ -780,6 +780,12 @@ export async function api<T = unknown>(path: string, options: Options = {}): Pro
   return (await res.json().catch(() => null)) as T
 }
 
+/** GET a binary reply (an image, a file) with its headers; failures throw like `api()`. */
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<{ blob: Blob; headers: Headers }> {
+  const res = await send(path, { signal })
+  return { blob: await res.blob(), headers: res.headers }
+}
+
 /**
  * Upload files as multipart, reporting progress (0–1) as they go up: fetch can't, so this
  * uses XMLHttpRequest. Errors come back as ApiError, like everything else.

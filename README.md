@@ -177,6 +177,15 @@ FLOWAI_URL=http://<studio>:8002 AGENT_TOKEN=… DEVICE_REF=<serial> DRIVER=adb .
 (On a remote VM, run the agent on the laptop the phone plugs into and tunnel the API:
 `ssh -L 8002:127.0.0.1:8002 <server>`.)
 
+**Scan and drive by hand.** With the phone plugged in (USB debugging on) and `adb start-server`
+running on the machine, *Phones → Scan for phones* lists it and adds it in one click. **Live**
+shows its screen and lets you touch, swipe, scroll and type into it. The live video comes from the
+`phone-bridge` service: run `docker compose up -d phone-bridge`. It uses scrcpy's server (bundled
+as `phone-bridge/scrcpy-server-v4.1`), runs at up to 60 fps, and sends touches straight to the
+phone. Without the bridge, the view falls back to screenshots, about one a second. The controls
+are locked while a publishing run is driving the phone. Both reach the host's adb server at
+`host.docker.internal:5037`.
+
 ## Real models
 
 Keys go in `backend/.env`, then `docker compose restart api`:

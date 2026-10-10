@@ -103,6 +103,23 @@ services:
       - api
     restart: unless-stopped
 
+  # Live phone screens for the Phones page (phone-bridge/server.js): scrcpy's H.264 video from a
+  # phone plugged into this machine, and touches back, through the host's adb server. The Vite
+  # proxy serves it at /phone-bridge/. It checks the API's signed tickets with APP_KEY, read
+  # from backend/.env.
+  phone-bridge:
+    image: node:22-alpine
+    working_dir: /app
+    command: node server.js
+    volumes:
+      - ./phone-bridge:/app:ro
+      - ./backend:/laravel:ro
+    environment:
+      ADB_SERVER_HOST: host.docker.internal
+    ports:
+      - "127.0.0.1:${PHONE_BRIDGE_PORT:-8004}:8004"
+    restart: unless-stopped
+
   # Catches every email the API sends. Inbox at http://localhost:8025
   mailpit:
     image: axllent/mailpit

@@ -22,6 +22,13 @@ const assistant = {
   rewrite: (p: string) => p.replace(/^\/assistant/, ''),
 }
 
+// The phone bridge (docker compose service phone-bridge) on :8004: live phone screens, over a WebSocket.
+const phoneBridge = {
+  target: process.env.PHONE_BRIDGE_ORIGIN ?? 'http://localhost:8004',
+  ws: true,
+  rewrite: (p: string) => p.replace(/^\/phone-bridge/, ''),
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
@@ -33,6 +40,7 @@ export default defineConfig({
       '/sanctum': api,
       '/oauth': api,
       '/assistant': assistant,
+      '/phone-bridge': phoneBridge,
     },
   },
 })

@@ -114,10 +114,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Where posts go: accounts, and the phones that publish to them.
     Route::apiResource('accounts', AccountController::class);
+    Route::get('devices/scan', [DeviceController::class, 'scan']);
     Route::apiResource('devices', DeviceController::class)->except('show');
     Route::post('devices/{device}/pause', [DeviceController::class, 'pause']);
     Route::post('devices/{device}/resume', [DeviceController::class, 'resume']);
     Route::get('devices/{device}/screenshot', [DeviceController::class, 'screenshot']);
+    Route::get('devices/{device}/live', [DeviceController::class, 'live']);
+    Route::post('devices/{device}/control', [DeviceController::class, 'control']);
+    Route::post('devices/{device}/stream', [DeviceController::class, 'stream']);
 
     // The publishing engine: the records, the stop button, the operator's recovery moves,
     // and the token the automation service signs its calls with.
