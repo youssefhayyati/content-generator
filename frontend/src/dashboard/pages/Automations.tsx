@@ -229,7 +229,7 @@ export default function Automations() {
       <AnimatePresence>
         {dirty && (
           <motion.div
-            className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 lg:pl-[236px]"
+            className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 lg:pl-[var(--sidebar-w)]"
             initial={{ y: 80, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 80, opacity: 0 }}

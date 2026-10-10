@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronLeft, ChevronRight, Clock3, Copy, MousePointerClick, PenLine, Plus, Trash2, Undo2 } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Clock3, Copy, MousePointerClick, PenLine, Plus, Smartphone, Trash2, Undo2 } from 'lucide-react'
 import { PLATFORMS, PlatformIcon } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
-import { api, type Page, type Post } from '../../lib/api'
+import { api, type Page, type Post, type PostRun } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
@@ -243,9 +243,12 @@ export default function Calendar() {
                     <p className="mt-2 line-clamp-[10] whitespace-pre-wrap text-[13.5px] leading-relaxed text-fg/85">{selected.body}</p>
                     {postState(selected, now.getTime()) === 'due' && (
                       <p className="mt-5 rounded-md border border-warn/25 bg-warn/[0.06] px-3 py-2.5 text-[12.5px] leading-snug text-warn">
-                        Its time has passed. Publishing to the networks isn’t connected yet, so post it yourself and mark it published.
+                        {selected.account?.automation
+                          ? 'Its time has passed: its phone picks it up within a minute.'
+                          : 'Its time has passed, and no phone publishes for this account. Post it yourself and mark it published, or turn on automation for the account.'}
                       </p>
                     )}
+                    <PublishProof post={selected} className="mt-5" />
                     <div className="mt-6 grid grid-cols-2 gap-2">
                       <Btn icon={PenLine} onClick={() => navigate(`/dashboard/create?post=${selected.id}`)}>
                         Edit
@@ -307,6 +310,39 @@ export default function Calendar() {
 }
 
 /* ------------------------------------------------------------------ */
+
+const PROOF: Record<PostRun['outcome'], { label: string; tone: string }> = {
+  confirmed: { label: 'Published from the phone', tone: 'text-ok' },
+  uncertain: { label: 'Not confirmed: check the account', tone: 'text-warn' },
+  failed: { label: 'The phone couldn’t post it', tone: 'text-fail' },
+  running: { label: 'The phone is posting it', tone: 'text-accent-soft' },
+}
+
+/** How the phone's last run on a post went, with the screenshot it ended on as the proof. */
+export function PublishProof({ post, className }: { post: Post; className?: string }) {
+  const run = post.run
+  if (!run) return null
+  const look = PROOF[run.outcome]
+  return (
+    <div className={cn('rounded-lg border border-line bg-white/[0.02] p-3', className)}>
+      <p className={cn('flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]', look.tone)}>
+        <Smartphone className="size-3" />
+        {look.label}
+      </p>
+      <p className="mt-1 font-mono text-[10.5px] text-dim">
+        {run.ended_at ? fmtDateTime(run.ended_at) : 'Still going'}
+        {run.attempt > 1 && ` · attempt ${run.attempt}`}
+        {run.steps > 0 && ` · ${run.steps} steps`}
+      </p>
+      {run.screenshot_url && (
+        <a href={run.screenshot_url} target="_blank" rel="noreferrer" title="Open the screenshot" className="mt-2.5 block overflow-hidden rounded-md border border-line">
+          <img src={run.screenshot_url} alt="The phone’s screen when it finished" loading="lazy" className="max-h-72 w-full object-cover object-top" />
+        </a>
+      )}
+      {run.note && <p className="mt-2 line-clamp-4 text-[11.5px] leading-snug text-muted">{run.note}</p>}
+    </div>
+  )
+}
 
 export function WeekGrid({
   days,

@@ -22,9 +22,9 @@ const assistant = {
   rewrite: (p: string) => p.replace(/^\/assistant/, ''),
 }
 
-// The phone bridge (docker compose service phone-bridge) on :8004: live phone screens, over a WebSocket.
+// The phone bridge (docker compose service phone-bridge) on :8006: live phone screens, over a WebSocket.
 const phoneBridge = {
-  target: process.env.PHONE_BRIDGE_ORIGIN ?? 'http://localhost:8004',
+  target: process.env.PHONE_BRIDGE_ORIGIN ?? 'http://localhost:8006',
   ws: true,
   rewrite: (p: string) => p.replace(/^\/phone-bridge/, ''),
 }

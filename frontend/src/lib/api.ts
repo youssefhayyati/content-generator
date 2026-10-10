@@ -37,11 +37,24 @@ export type Post = {
   /** Proof it went live: set by a confirmed run, or by someone taking over by hand. */
   post_url: string | null
   error: string | null
+  /** Its latest publishing run (a phone posting it): how it went and the screenshot it ended on. */
+  run?: PostRun | null
   scheduled_at: string | null
   published_at: string | null
   created_at: string
   updated_at: string
   campaign?: { id: number; name: string | null } | null
+}
+
+/** A post's latest publishing run, as the calendar shows it. */
+export type PostRun = {
+  id: number
+  outcome: 'running' | 'confirmed' | 'failed' | 'uncertain'
+  attempt: number
+  ended_at: string | null
+  note: string | null
+  steps: number
+  screenshot_url: string | null
 }
 
 /** An image or video in the media library. */

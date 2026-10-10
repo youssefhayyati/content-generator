@@ -8,7 +8,8 @@ Website actions are not listed here one by one: the assistant delegates a whole 
 the browser agent (backend/browser_agent.py), which has its own tools and skills. Pictures
 and videos are made by ComfyUI workflows on the RunPod pod (backend/media.py). Posts for
 Instagram and X are drafts (backend/studio.py), made by following a content skill
-(skills/content/*.md), and saved to FlowAI through its API (backend/flowai.py).
+(skills/content/*.md), and saved to FlowAI through its API (backend/flowai.py). They are published
+from the team's phone (backend/phone.py), whose own agent follows a phone skill (skills/phone/*.md).
 """
 
 import asyncio
@@ -75,7 +76,8 @@ def get_current_time():
 
 @tool(
     "wait",
-    "Pause for a number of seconds, e.g. while a page loads.",
+    "Pause for a number of seconds, e.g. while a page loads. Never to wait for the phone, a picture or a website "
+    "task: you are told when those finish.",
     {
         "type": "object",
         "properties": {"seconds": {"type": "number", "description": "Seconds to wait (max 10)"}},
@@ -121,7 +123,7 @@ async def cancel_browser_task(session):
 # --- Images and video (ComfyUI on the RunPod pod) --------------------------------
 
 MEDIA_TOOLS = {"generate_media", "media_status", "cancel_media", "list_media_workflows",
-               "search_workflow_templates", "add_media_workflow", "edit_area"}
+               "search_workflow_templates", "add_media_workflow", "edit_area", "swap_face"}
 
 
 @tool(
@@ -195,7 +197,8 @@ async def search_workflow_templates(query: str, session):
 @tool(
     "add_media_workflow",
     "Add a new workflow to the pod from a built-in template, a workflow file the user attached, or a URL "
-    "of a workflow JSON. Installing its nodes and models runs in the background and can take minutes.",
+    "of a workflow JSON, or one that comes with the assistant (face_swap, face_swap_video: give only its name "
+    "and description). Installing its nodes and models runs in the background and can take minutes.",
     {
         "type": "object",
         "properties": {
@@ -215,9 +218,87 @@ async def add_media_workflow(name: str, session, description: str = "", template
     return await session.media.add_workflow(name, description, template, file, url, bool(replace))
 
 
+# --- Voices, dubbing and face swaps (backend/dub.py) -----------------------------
+
+LIPSYNC_TOOLS = {"dub_video"}  # with LIPSYNC_URL
+
+@tool(
+    "clone_voice",
+    "Clone a voice from a recording in this conversation: an audio file, or a video's sound (5 to 20 seconds of "
+    "one person speaking is best). The voice is then one of the ready voices: it can read videos (make_video's "
+    "or dub_video's voice) or be the one you speak in. Only a voice the user has the right to use: their own, "
+    "or someone's who agreed.",
+    {
+        "type": "object",
+        "properties": {
+            "media": {"type": "integer", "description": "Number of the audio or video file (default: the latest)"},
+            "name": {"type": "string", "description": "What to call the voice, e.g. 'Sarah' or 'My voice'"},
+            "speak": {"type": "boolean", "description": "Also speak in it yourself from now on (only if asked)"},
+        },
+    },
+)
+async def clone_voice(session, media: int | None = None, name: str = "", speak: bool = False):
+    return await session.clone_voice(media, name, bool(speak))
+
+
+@tool(
+    "transcribe_media",
+    "What is said in a video or audio file in this conversation, how long it lasts, and about how many words fit "
+    "in that time. Use it before dub_video, to write new words that take about as long as the old ones.",
+    {
+        "type": "object",
+        "properties": {"media": {"type": "integer", "description": "Number of the file (default: the latest video "
+                                                                   "or audio)"}},
+    },
+)
+async def transcribe_media(session, media: int | None = None):
+    return await session.transcribe_media(media)
+
+
+@tool(
+    "dub_video",
+    "Make the person in a video say other words: the words are read in their own voice, cloned from the video "
+    "(or in another voice), and a lip-sync model redraws their mouth to match. The result is a new video. It "
+    "runs in the background for a few minutes; you are told when it is ready.",
+    {
+        "type": "object",
+        "properties": {
+            "video": {"type": "integer", "description": "Number of the video (default: the latest)"},
+            "script": {"type": "string", "description": "Exactly what they say now, in the language to speak, as "
+                                                        "plain spoken words. About as long as the video: see "
+                                                        "transcribe_media"},
+            "voice": {"type": "string", "description": "Leave out for the speaker's own voice. Else a voice id "
+                                                       "(find_voices, clone_voice), a description of a voice, or "
+                                                       "'mine' for the one you speak in"},
+        },
+        "required": ["script"],
+    },
+)
+async def dub_video(session, script: str, video: int | None = None, voice: str | None = None):
+    return await session.dub_video(video, script, voice)
+
+
+@tool(
+    "swap_face",
+    "Put the face from one picture onto the person in another picture or in a video (face swap, inswapper). The "
+    "result is a new picture or video; it runs in the background and you are told when it is ready. Only with "
+    "the consent of the person whose face it is.",
+    {
+        "type": "object",
+        "properties": {
+            "face": {"type": "integer", "description": "Number of the picture with the face to use"},
+            "target": {"type": "integer", "description": "Number of the picture or video to put it on"},
+        },
+        "required": ["face", "target"],
+    },
+)
+async def swap_face(session, face: int, target: int):
+    return await session.swap_face(face, target)
+
+
 # --- Post drafts for Instagram and X (backend/studio.py) -------------------------
 
-_DRAFT = {"type": "integer", "description": "Draft number (default: the latest)"}
+_DRAFT = {"type": "integer", "description": "Draft number (default: the draft on the user's screen)"}
 _LOOK = {
     "position": {"type": "string", "enum": POSITIONS, "description": "Where on the picture (default bottom)"},
     "size": {"type": "string", "description": f"{', '.join(SIZES)}, or a size in pixels (default large); "
@@ -242,7 +323,7 @@ _POST = {
 }
 
 STUDIO_TOOLS = {"create_draft", "update_draft", "add_text", "edit_text", "remove_text", "undo_draft",
-                "show_draft", "load_skill", "make_video"}
+                "draft_versions", "show_draft", "load_skill", "make_video", "find_voices"}
 
 
 @tool(
@@ -264,8 +345,9 @@ def load_skill(name: str):
 
 @tool(
     "create_draft",
-    "Make a post draft for Instagram or X, in one go: caption, the words on its slides and the pictures to make. "
-    "It is drawn and shown on the user's screen after every change, with the platform's checks.",
+    "Make a new post draft for Instagram or X, in one go: caption, the words on its slides and the pictures to "
+    "make. It is drawn and shown on the user's screen after every change, with the platform's checks. Only for a "
+    "new post the user asked for: to change a draft, change that draft.",
     {
         "type": "object",
         "properties": {
@@ -280,8 +362,9 @@ def load_skill(name: str):
                          "description": "One picture prompt per slide, slide 1 first: each is made in the draft's "
                                         "shape and goes in by itself when ready"},
             "workflow": {"type": "string", "description": "Workflow for the pictures (default: text to image)"},
-            "from_draft": {"type": "integer", "description": "Copy this draft's pictures, texts and caption, e.g. "
-                                                             "to adapt an Instagram post for X"},
+            "from_draft": {"type": "integer", "description": "Copy this draft's pictures, texts and caption into "
+                                                             "a second post, e.g. to adapt an Instagram post for X "
+                                                             "when the user wants both"},
         },
         "required": ["platform"],
     },
@@ -307,8 +390,8 @@ async def update_draft(session, draft: int | None = None, placement: str | None 
 
 @tool(
     "add_text",
-    "Put text on a slide of a draft: a headline, an offer, a call to action. It is drawn crisply and wrapped "
-    "to fit; never ask the image model for words.",
+    "Put text on a slide of a draft, a picture or a video: a headline, an offer, a call to action. It is drawn "
+    "crisply and wrapped to fit (on a video, over the whole video); never ask the image model for words.",
     {
         "type": "object",
         "properties": {
@@ -368,6 +451,20 @@ async def undo_draft(session, draft: int | None = None):
 
 
 @tool(
+    "draft_versions",
+    "A draft's history: every version, what each changed and which one is on screen. With version, the draft goes "
+    "back to that version; a change after that starts a new branch from it, and the other versions stay there "
+    "to come back to.",
+    {"type": "object", "properties": {"draft": _DRAFT,
+                                      "version": {"type": "integer", "description": "Go back to this version"}}},
+)
+async def draft_versions(session, draft: int | None = None, version: int | None = None):
+    if version in (None, ""):
+        return session.studio.history(draft)
+    return await session.studio.checkout(draft, version)
+
+
+@tool(
     "edit_area",
     "Change only the area of a slide's picture that the user painted over on screen; the rest of the picture "
     "stays exactly as it is. Use it whenever an area is painted and the user says what to do with it.",
@@ -393,15 +490,16 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
 
 @tool(
     "make_video",
-    "Make a draft's pictures (one or several) into a short video: your voice reads a line per picture in the "
-    "user's voice while each picture slowly zooms or pans, with captions, music and an end card with a call to "
-    "action. It goes into a draft of its own (an Instagram reel or an X post), made in the background; asked "
-    "again, of either draft, that same video is made again with the changes.",
+    "Make a draft's pictures (one or several) into a short video: a voice that suits the video reads a line per "
+    "picture while each picture slowly zooms or pans, with captions, music and an end card with a call to "
+    "action. It is made in the background and takes the place of the pictures in the same draft (as an Instagram "
+    "reel or an X post); the pictures stay in the draft's history. Asked again, the video is made again in that "
+    "draft with the changes. The reply says which voice reads it.",
     {
         "type": "object",
         "properties": {
-            "draft": {"type": "integer", "description": "The draft with the pictures, or the video's own draft to "
-                                                        "make it again (default: the latest)"},
+            "draft": {"type": "integer", "description": "The draft to make into a video, or whose video to make "
+                                                        "again (default: the draft on the user's screen)"},
             "lines": {"type": "array", "items": {"type": "string"},
                       "description": "What the voice says over each picture: exactly one entry per picture, in "
                                      "order (a one-picture post has one entry). An entry can be one to three short "
@@ -412,22 +510,62 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
                                                      "'Order yours', 'Book a table'; empty for no end card"},
             "cta_line": {"type": "string", "description": "The call to action the voice says on the end card, e.g. "
                                                           "'Order yours today, the link is in our bio.'"},
-            "music": {"type": "string", "enum": [*MOODS, "none"],
-                      "description": "Background music: " + ", ".join(f"{k} ({v})" for k, v in MOODS.items())},
+            "music": {"type": "string",
+                      "description": "Background music. When songs are on, leave it out: the first video gets "
+                                     "an instrumental song written for the post, and a video made again keeps its "
+                                     "song. To change the song, describe the music for the music model, in English "
+                                     "(genre, instruments, mood and energy, tempo in bpm, e.g. 'upbeat acoustic "
+                                     "pop, ukulele and hand claps, catchy, 112 bpm'), or pass 'song' for a new one "
+                                     "written for the post. Only when the user asks for one, or songs are off: one "
+                                     "of the composer's moods, " + ", ".join(f"{k} ({v})" for k, v in MOODS.items())
+                                     + ". Or none for no music"},
             "captions": {"type": "boolean", "description": "Show the spoken words (default true)"},
             "motion": {"type": "string", "enum": ["auto", "pan", *MOTIONS],
                        "description": "How the pictures move (default auto: a different move for each; pan: "
                                       "side to side, one way then the other)"},
             "placement": {"type": "string", "description": "Instagram: reel (default), story or feed. X: post"},
             "color": {"type": "string", "description": "The end card button's colour (default: the post's own)"},
+            "voice": {"type": "string", "description": "Who reads it, in English: a description of the voice that "
+                                                       "suits the post and its audience, e.g. 'female, young adult, "
+                                                       "moderate pitch, american accent, warm, social' or 'male, "
+                                                       "middle-aged, low pitch, british accent, calm, narration' (the "
+                                                       "closest voice is used), a voice id from find_voices, or "
+                                                       "'mine' for the voice you speak in. Leave out to keep the last "
+                                                       "video's voice; the first video gets one cast for the post"},
         },
     },
 )
 async def make_video(session, draft: int | None = None, lines: list | None = None, cta: str | None = None,
                      cta_line: str | None = None, music: str | None = None, captions: bool | None = None,
-                     motion: str | None = None, placement: str | None = None, color: str | None = None):
+                     motion: str | None = None, placement: str | None = None, color: str | None = None,
+                     voice: str | None = None):
     return await session.make_video(draft, lines=lines, cta=cta, cta_line=cta_line, music=music, captions=captions,
-                                    motion=motion, placement=placement, color=color)
+                                    motion=motion, placement=placement, color=color, voice=voice)
+
+
+@tool(
+    "find_voices",
+    "The voices that best fit a description, best first, to read a video (make_video's voice). Use it when the "
+    "user wants to choose among a few, or to check a voice exists before using it.",
+    {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string", "description": "In English: gender, age, pitch, accent, how it is "
+                                                             "said, what for, e.g. 'female, elderly, warm, narration'"},
+            "language": {"type": "string", "description": "The language it speaks, in English, e.g. 'French' "
+                                                          "(default: any)"},
+        },
+        "required": ["description"],
+    },
+)
+async def find_voices(session, description: str, language: str = ""):
+    tts = session.m.tts
+    if not tts.choosable:
+        return {"voices": await asyncio.to_thread(tts.profiles),
+                "note": "these are all the voices (no VoiceStudio server): its own and the ones cloned here"}
+    found = await asyncio.to_thread(tts.match, description, language, 8)
+    return {"voices": [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found],
+            "note": "pass a voice's id as make_video's voice"}
 
 
 @tool(
@@ -562,3 +700,95 @@ async def use_assets(assets: list, session):
 )
 async def schedule_post(when: str, session, draft: int | None = None):
     return await session.flowai.schedule(draft, when)
+
+
+# --- The team's phone: posting from its Instagram and X apps (backend/phone.py) ----
+
+PHONE_TOOLS = {"post_on_phone", "post_feedback", "phone_task", "phone_status", "answer_phone", "cancel_phone_task"}
+
+
+@tool(
+    "post_on_phone",
+    "Publish drafts for real, from the Instagram or X app on the team's phone: each one's pictures or video go to "
+    "the phone, then the phone posts it with its caption. Publishing is public and can't be undone: only when the "
+    "user has just said to post these drafts now (not save or schedule them). Several go up one after another by "
+    "themselves. It runs in the background for a few minutes each; you are told as each one is up (the user sees "
+    "the screenshot it ended on), so don't check on it. Also tries a post that failed again.",
+    {
+        "type": "object",
+        "properties": {
+            "draft": _DRAFT,
+            "drafts": {"type": "array", "items": {"type": "integer"},
+                       "description": "Several drafts to post, in this order (instead of draft)"},
+            "again": {"type": "boolean", "description": "Post a draft that is already up (or may be) once more: "
+                                                        "only when the user said so"},
+        },
+    },
+)
+async def post_on_phone(session, draft: int | None = None, drafts: list[int] | None = None, again: bool = False):
+    return await session.phone.post(drafts or draft, bool(again))
+
+
+@tool(
+    "post_feedback",
+    "Check how a post published from the phone is doing: likes, comments, shares, saves, views and the latest "
+    "comments, and what changed since the last check. It runs on the phone in the background; you are told.",
+    {
+        "type": "object",
+        "properties": {
+            "post": {"type": "integer", "description": "Phone post number from this conversation (default: the latest)"},
+            "flowai_post": {"type": "integer", "description": "Or a FlowAI post that went up by itself at its "
+                                                              "scheduled time (phone_status lists them)"},
+        },
+    },
+)
+async def post_feedback(session, post: int | None = None, flowai_post: int | None = None):
+    return await session.phone.feedback(post, flowai_post)
+
+
+@tool(
+    "phone_task",
+    "Do something else on the team's Android phone (it has the Instagram and X apps): e.g. check which accounts "
+    "are logged in, reply to a comment, read the notifications. Not for posting a draft (post_on_phone does that, "
+    "and tries a failed one again). Give a complete, self-contained instruction. It runs in the background and you "
+    "are told the result.",
+    {
+        "type": "object",
+        "properties": {
+            "instruction": {"type": "string", "description": "What to do on the phone, in plain language"},
+            "skill": {"type": "string", "description": "A phone skill to follow, from the list in your instructions"},
+        },
+        "required": ["instruction"],
+    },
+)
+async def phone_task(instruction: str, session, skill: str | None = None):
+    return await session.phone.task(instruction, skill)
+
+
+@tool("phone_status", "What the phone is doing, what it last said, and the posts made from it (here and FlowAI's "
+                      "scheduled ones) with their numbers. Only when the user asks: you are told by yourself when "
+                      "a job on the phone finishes.")
+def phone_status(session):
+    return session.phone.status()
+
+
+@tool(
+    "answer_phone",
+    "Answer the phone when it asks something or waits for the user's OK: approve true/false for an approval "
+    "(only as the user said, and only when you were told it waits for one), or text to tell it more, or to correct "
+    "what it just did.",
+    {
+        "type": "object",
+        "properties": {
+            "approve": {"type": "boolean", "description": "The user's answer to what the phone wants to do"},
+            "text": {"type": "string", "description": "What to tell the phone"},
+        },
+    },
+)
+async def answer_phone(session, approve: bool | None = None, text: str | None = None):
+    return await session.phone.answer(text, approve)
+
+
+@tool("cancel_phone_task", "Stop what the phone is doing, and the posts waiting their turn.")
+async def cancel_phone_task(session):
+    return await session.phone.cancel()

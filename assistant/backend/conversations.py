@@ -2,7 +2,8 @@
 page can list them, switch between them and pick one up again later, or after a restart.
 
 A conversation stays in memory while a connection shows it, or while a picture or video is still
-being made for it (it goes into its draft even if the user has moved on); otherwise only its file
+being made for it (it goes into its draft even if the user has moved on), or something is being done
+or is due on the phone for it (a post, its feedback check); otherwise only its file
 is kept: DATA_DIR/conversations/<owner>/<id>.json, plus index.json per owner for the list, and
 prefs.json for what holds across their conversations (the voice). The owner is the FlowAI user
 it belongs to ("local" when FlowAI is off). When FlowAI can't say who the
@@ -19,11 +20,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .config import ROOT, settings
 from .media import MediaSession
+from .phone import PhoneSession
 from .studio import StudioSession
 
 if TYPE_CHECKING:
     from .comfyui import ComfyClient
+    from .phone import PhoneClient
     from .session import VoiceSession
 
 log = logging.getLogger(__name__)
@@ -31,7 +35,7 @@ log = logging.getLogger(__name__)
 ID_RE = re.compile(r"[a-f0-9]{12}")
 OWNER_RE = re.compile(r"[a-z0-9-]{1,40}")
 SAVE_DELAY = 1.0  # seconds: a burst of changes (a whole carousel) is one write
-STATE_EVENTS = {"draft", "media", "saved", "approval", "linked"}  # sent when something worth keeping changed
+STATE_EVENTS = {"draft", "media", "saved", "approval", "linked", "phone_post"}  # sent when something worth keeping changed
 HISTORY_SHOWN = 200  # log lines the page gets when a conversation is reopened
 TITLE_CHARS = 60
 
@@ -93,6 +97,11 @@ class Conversation:
         self.uploaded: set[int] = set()
         self.media = MediaSession(store.comfy, store.media_dir, store.timeout_s, self.send, self.notify, self.remember)
         self.studio = StudioSession(self.media, store.media_dir, store.fonts_dir, self.send, f"{self.id}-")
+        # Posting its drafts from the team's phone, and how those posts do (backend/phone.py)
+        self.phone = PhoneSession(store.phone, self.studio, ROOT / settings.phone_skills_dir, self.send, self.notify,
+                                  self.remember, self.changed, settings.phone_mode, settings.phone_post_mode,
+                                  settings.phone_max_steps, settings.phone_feedback_after_minutes,
+                                  store.media_dir / "phone", settings.phone_auto_approve_posts)
         self.dirty = False
         self.restoring = False
         self._saving: asyncio.Task | None = None
@@ -178,7 +187,7 @@ class Conversation:
 
         return {"id": self.id, "title": self.title, "created": self.created, "updated": self.updated,
                 "campaign": self.campaign, "messages": [_jsonable(m) for m in self.messages], "notes": self.notes,
-                "media": self.media.dump(), "studio": self.studio.dump(),
+                "media": self.media.dump(), "studio": self.studio.dump(), "phone": self.phone.dump(),
                 "flowai": dump_links(self.saved, self.linked, self.approvals, self.uploaded)}
 
     async def restore(self, data: dict):
@@ -190,6 +199,7 @@ class Conversation:
         self.messages, self.notes = data.get("messages", []), data.get("notes", [])
         self.media.restore(data.get("media", {}))
         await self.studio.restore(data.get("studio", {}))
+        self.phone.restore(data.get("phone", {}))
         self.saved, self.linked, self.approvals, self.uploaded = restore_links(data.get("flowai", {}))
         self.restoring = False
 
@@ -220,9 +230,11 @@ class Conversation:
 class ConversationStore:
     """Every user's conversations: the ones in memory, and the files of the others."""
 
-    def __init__(self, root: Path, comfy: "ComfyClient | None", media_dir: Path, fonts_dir: Path, timeout_s: float):
+    def __init__(self, root: Path, comfy: "ComfyClient | None", media_dir: Path, fonts_dir: Path, timeout_s: float,
+                 phone: "PhoneClient | None" = None):
         self.root = root
         self.comfy = comfy
+        self.phone = phone
         self.media_dir, self.fonts_dir, self.timeout_s = media_dir, fonts_dir, timeout_s
         self.live: dict[tuple[str, str], Conversation] = {}
         self.lock = asyncio.Lock()  # one write at a time: index.json is read, changed and written
@@ -290,7 +302,8 @@ class ConversationStore:
 
     def release(self, conv: Conversation):
         """Out of memory once nothing shows it, nothing is being made for it and it's saved."""
-        if not conv.sessions and not conv.media.busy and not conv.dirty and self.live.get(conv.key) is conv:
+        if not conv.sessions and not conv.media.busy and not conv.phone.busy and not conv.dirty \
+                and self.live.get(conv.key) is conv:
             del self.live[conv.key]
 
     async def list(self, owner: str) -> list[dict]:
@@ -317,6 +330,7 @@ class ConversationStore:
         conv.owner = None  # never saved again, even by a generation still running
         self.live.pop((owner, cid), None)
         await conv.media.close()
+        await conv.phone.close()
         files = [i.path for i in conv.media.items.values() if i.path] + \
                 [p for d in conv.studio.drafts.values() for p, _ in d.files] + \
                 list(self.media_dir.glob(f"{cid}-draft*"))

@@ -12,6 +12,8 @@ use Symfony\Component\HttpFoundation\Response;
  * The voice assistant's token (AssistantController) reaches what its tools use
  * (assistant/backend/flowai.py) and nothing else: no settings, no deleting posts, no publishing,
  * and no approving at a campaign's gates. Requests signed in the usual way pass straight through.
+ * It does record a run: what the team's phone already posted when the person told it to, with the
+ * screenshot proving it (phone-run); that publishes nothing itself.
  */
 class LimitAssistantToken
 {
@@ -30,6 +32,8 @@ class LimitAssistantToken
         'GET api/assets/{asset}/poster',
         'DELETE api/assets/{asset}',
         'GET api/queue-slots',
+        // What the phone posted at the person's word, with its proof: the run on FlowAI's record.
+        'POST api/posts/{post}/phone-run',
         // Campaigns, to change their posts: a changed version goes back to gate 6B for a person.
         'GET api/campaigns',
         'GET api/campaigns/{campaign}',

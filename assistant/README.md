@@ -200,6 +200,59 @@ The list is refreshed from the pod every minute, so workflows saved in the Comfy
 integration. Run `deploy.ps1` once so the pod gets it. Until then, "stop" only stops waiting, and the pod
 finishes the job.
 
+### Dubbing a video and swapping faces
+
+The assistant can make the person in a video say other words, in their own voice and with lips that match,
+and put a face from one picture onto someone in another picture or a video. `backend/dub.py` does the
+ffmpeg steps here; the models run elsewhere:
+
+| What | Model | Runs on |
+|---|---|---|
+| Lip sync | LatentSync 1.6 (ByteDance, Apache-2.0) | a service of its own, `content-generator/lipsync/`, on the RunPod pod (`LIPSYNC_URL`) |
+| Face swap | ReActor with `inswapper_128.onnx`, CodeFormer to restore the face | the ComfyUI pod: `face_swap` (pictures), `face_swap_video` (videos, the sound kept) |
+
+| You say | What happens |
+|---|---|
+| (attach a video) "Make him say: the sale ends Friday" | `transcribe_media` (what's said now, how many words fit), then `dub_video` |
+| "Same, but in Spanish" / "in a deeper voice" | `dub_video` again, with the new words, or with `voice` |
+| "Put the face from picture 2 on video 5" | `swap_face(face=2, target=5)` |
+| "Clone my voice from this recording" | `clone_voice` (see [Voice](#voice)) |
+
+A dub follows the usual recipe: the video's sound is taken out (24 kHz mono) and its speaker's voice is
+cloned from the first 20 seconds of it, as a voice of the same TTS the assistant speaks with (kept with the
+video, so a second dub reuses it). The new words are read in that voice and asked to last as long as the
+video (VoiceStudio's `duration`); a read that still runs long is sped up by at most 1.3×, a short one is padded
+with silence. The video goes to the lip sync service at 25 fps (what LatentSync works at), at most 1920 px,
+with the speech; it redraws the mouth (a longer speech plays the video back and forth), and the sound is laid
+under the result if it comes back without. Videos are 60 seconds at most, and every frame needs a face.
+
+**The lip sync service** (`content-generator/lipsync/`) is LatentSync behind a job API: `POST /v1/lipsync` (the
+video and the speech), then `GET /v1/lipsync/{id}` until it's done, and `GET /v1/lipsync/{id}/video`. Jobs run
+one at a time and nothing waits on a long request, so it works behind RunPod's proxy. It runs on the RunPod pod,
+next to ComfyUI and VoiceStudio, on port 8004 (`LIPSYNC_URL=https://<pod-id>-8004.proxy.runpod.net` and
+`LIPSYNC_API_KEY` in `.env`): `lipsync/runpod/setup.sh` installs it on the pod the first time and starts it (run
+it again after the pod restarts), with the same kit layout as the others (`/workspace/lipsync-kit`: the script,
+`app.py`, the requirements and `env` with the key). On the pod's A40 it runs LatentSync 1.6 (faces at 512 px,
+18 GB of GPU memory); `LATENTSYNC_VERSION=1.5` (256 px, 8 GB) is the smaller one. The first start downloads the
+model (about 5 GB); it loads on the first dub and waits on the CPU between dubs, so the GPU it shares is free
+meanwhile. Its `/health` says whether it's ready, and so does the agent's (`"lipsync"`). The same service also
+runs on this machine's GPU (`docker compose --profile lipsync up -d lipsync`, `LIPSYNC_URL=http://lipsync:8000`),
+but it needs about 8 GB free: on a 6 GB card next to the speech recognition, Windows lets the GPU borrow system
+memory and a 10-second dub takes most of an hour. Without `LIPSYNC_URL` the assistant doesn't offer dubbing.
+
+**The face swaps** come with the assistant as workflow bundles (`comfyui/workflows/`). Say "set up face
+swapping": the assistant calls `add_media_workflow` with the workflow's name, and the pod installs ReActor and
+downloads `inswapper_128.onnx` in the background. Or register them by hand: `curl -X POST
+"$BASE/workflows/face_swap" -H "X-API-Key: $KEY" -H "Content-Type: application/json" --data-binary
+@comfyui/workflows/face_swap.json`. Each bundle's `ui` only lists the custom node to install; the graph that runs
+is its `api`.
+
+**Transcripts.** Cloning needs the words of the recording. They come from VoiceStudio's speech recognition
+when it has a speech-to-text model, else from FlowAI Sound's Whisper (`SOUND_URL`; both understand any
+language), else from this machine's ASR, which only knows English.
+
+Clone a voice, dub someone or swap a face only for people who agreed to it. The assistant is told the same.
+
 ## Content studio (posts for Instagram and X)
 
 The assistant makes posts as **drafts** and changes them when you ask. A draft is shaped like a
@@ -213,7 +266,7 @@ check, plus one of ours: no `[placeholder]` left in), and shown on the page with
 | "Make an Instagram post for our linen shirt launch" | one `create_draft` with the caption, the texts and a picture prompt; the picture is made in the draft's 4:5 shape and drops in when ready |
 | "Remove the cup on the table" | `generate_media(flux2_klein_edit, draft=1)`: edits that slide's current picture and puts the result back in the draft |
 | (paint over the cup on the slide) "remove this" / "make it gold" / "put a vase there" | `edit_area`: only the painted part changes, the rest of the picture stays exactly as it was (see [Changing part of a picture](#changing-part-of-a-picture)) |
-| "Make it a reel with a voiceover and an Order now button" | `make_video`: the pictures move, your voice reads a line over each, captions, music, an end card (see [Videos with the voice](#videos-with-the-voice)) |
+| "Make it a reel with a voiceover and an Order now button" | `make_video`: the pictures move, a voice that suits the post reads a line over each, captions, music, an end card (see [Videos with the voice](#videos-with-the-voice)) |
 | "Make the headline yellow and move it to the bottom" / "Drop the second line" | `edit_text` / `remove_text` |
 | (click a text on the page) "make this bigger" | the click tells the assistant which text "this" is |
 | "Shorter caption, fewer hashtags" | `update_draft(caption=...)` |
@@ -292,8 +345,9 @@ Results vary from run to run: if a removal leaves a smudge, run it again or pain
 
 `make_video` (`reel.py`) turns a draft's pictures, one or several, into a short video:
 
-- **Voice:** the assistant writes a line per picture and reads it in the user's chosen voice (the
-  TTS, VoiceStudio or local). A line of several sentences is a shot per sentence.
+- **Voice:** the assistant writes a line per picture, read by a voice of the video's own, not the
+  one the assistant speaks in. A line of several sentences is a shot per sentence. See
+  [The video's voice](#the-videos-voice).
 - **Motion:** each shot moves the whole time it's on screen (a slow zoom in or out, or a pan), so a
   still looks filmed. A new picture fades in over the last one. The same picture again comes in
   with a straight cut and a new framing, like an edit.
@@ -302,9 +356,9 @@ Results vary from run to run: if a removal leaves a smudge, run it again or pain
 - **End card:** optionally, the call to action on a button in the post's colour that pops in
   ("Order now"), over the last picture blurred, with the voice saying it ("Order yours today, the
   link is in our bio").
-- **Music:** one of FlowAI Sound's six moods (`SOUND_URL`): Golden hour unless asked otherwise, or
-  none. It steps aside whenever the voice speaks (sidechain compression), and the mix is levelled to
-  -14 LUFS for social video.
+- **Music:** a song written for the video (`MUSIC_URL`, see [The video's music](#the-videos-music)),
+  or one of FlowAI Sound's six moods (`SOUND_URL`), or none. It steps aside whenever the voice speaks
+  (sidechain compression), and the mix is levelled to -14 LUFS for social video.
 
 Frames are drawn with Pillow and encoded by ffmpeg (`imageio-ffmpeg` brings a static build) as
 H.264 + AAC at the placement's size (1080 × 1920 for a reel). A 15-second video takes about
@@ -313,7 +367,47 @@ story or feed on request; an X post for X), which passes the platform check (siz
 known). Asked again, of either draft ("other music", "say it shorter", "the button says Shop
 now"), that same video draft is made again with the changes, and Undo goes back to the previous
 video. On the page, the draft's **Video with voice** section does the same by hand: a line per
-picture, the end card, music, motion, captions and format, with a progress bar while it's made.
+picture, the end card, music, motion, captions, format and voice, with a progress bar while it's made.
+
+#### The video's voice
+
+With VoiceStudio (`TTS_URL`), each video is read by the voice that suits it:
+
+- **Cast for the post:** the first time, if nobody named a voice, the LLM reads the post (platform,
+  title, caption, words on the pictures, the lines) and describes its narrator in the catalog's
+  words, e.g. "male, middle-aged, low pitch, british accent, calm, narration", plus the language.
+  `VoiceStudioTTS.match` then finds the closest voice among the ready profiles and the catalog. A
+  gender asked for is a must, the language is a must when some voices speak it, and every other word
+  counts towards the fit. The description is asked once per content, so asking again costs nothing.
+- **Asked for:** `make_video`'s `voice` is a description ("upbeat young woman for an ad"), a voice id
+  (`find_voices` lists the ones that fit a description), or "mine" for the assistant's own voice.
+- **Kept:** the voice goes into the video's recipe, so making the video again uses it until it's changed.
+
+On the page, the **Voice** row of the Video section shows who reads it, with a sample to hear.
+**Change** lists the voices that suit the post (with the description they were matched to), or the
+closest to words you type, and the assistant's own voice. The voice you pick is used on the next
+**Make the video**. With the local OmniVoice there is one voice, so videos use it.
+
+#### The video's music
+
+With a music model (`MUSIC_URL`: ACE-Step 1.5, MIT, trained on licensed music; `content-generator/music/`
+runs it next to FlowAI), each video gets an instrumental song written for it:
+
+- **Written for the post:** the casting call that describes the voice also describes the music, for
+  the music model: genre, two or three instruments, mood and energy, tempo, e.g. "upbeat acoustic
+  pop, bright ukulele, hand claps and shaker, feel-good and catchy, 112 bpm" for a bakery, "dark
+  cinematic trap, deep 808 bass, sharp hi-hats, 140 bpm" for a gym. No vocals: it sits under the voice.
+- **Asked for:** `make_video`'s `music` is a description of the music, `song` for a new one written
+  for the post, a mood for the composer's, or none.
+- **Kept:** the description and the seed go into the recipe, so making the video again with other
+  words keeps the same song (its length follows the voiceover). A new description, or `song`, is a
+  new song.
+- **Fallback:** if the music service doesn't answer, the composer's Golden hour plays instead.
+
+`backend/music.py` talks to ACE-Step's own API (`/release_task`, `/query_result`, `/v1/audio`), so
+the same code works with ACE-Step on a RunPod pod: point `MUSIC_URL` there (plus `MUSIC_API_KEY`
+if it has `ACESTEP_API_KEY` set). On the page, the Music menu's **A song written for it** shows the
+description, which you can change; **New take** makes the same description again with another seed.
 
 ### Content skills
 
@@ -323,6 +417,124 @@ whole, which saves the assistant a round of reading one before every new post. P
 each skill's name and description and loads the steps with `load_skill`, like the browser agent's
 skills. Copy `skills/content/_template.md` to add one (a brand's rules, a recurring format, a
 client's house style). Edits apply on the next turn, without a restart.
+
+## Posting from the team's phone
+
+With `PHONE_API_URL` and `PHONE_API_KEY` set (the hackathon Phone API and the team key), the assistant
+publishes drafts for real from the Instagram and X apps on the team's Android phone, and reads back how
+they do. The phone has an agent of its own; `backend/phone.py` makes its job easy and checks on it:
+
+1. **The media goes first.** The draft's slides, as rendered (texts drawn on), are uploaded to the
+   phone last slide first, a second apart, so the app's gallery shows them newest first in slide order:
+   the agent just picks the first N.
+2. **The caption is made typable.** The phone's input board types printable ASCII only, with no line
+   breaks: accents become plain letters, curly quotes straight ones, and emoji are left out (the
+   assistant says which). The agent gets the caption as numbered lines to type, with enter between them.
+3. **A phone skill is the goal.** `skills/phone/post-<platform>-<placement>.md` (or `post-<platform>.md`)
+   says where to tap in that app, step by step, with the draft's details filled in (`{{caption}}`,
+   `{{count}}`, ... see `skills/phone/_template.md`). Edits apply to the next post, without a restart.
+4. **It is followed live.** Every step and the phone's screen show on the Assistant page (above the
+   composer, with a Stop button) and in the test console's task panel. Posting runs in the phone's
+   `pro` mode, which checks independently that the post went up.
+5. **Plain input needs no one.** While typing a caption the phone asks an OK for Enter in a field it
+   can't read; inside a post you asked for, that (and other plain input: taps, typing, keys) is given
+   by itself (`PHONE_AUTO_APPROVE_POSTS`). Anything else, and every OK in other phone tasks, waits for
+   you: the assistant asks and passes your answer on (`answer_phone`).
+6. **A phone that drops out is tried again.** If the phone's link or input board fails (`TargetLost`,
+   `PolicyViolation`, the API down) before the post was shared, the same job goes to it again, twice
+   at most, told to carry on from where the app is; the files are already on the phone. If it dropped
+   after the share tap, it's never tried again: the post is *unsure* (it may be up), so it never goes
+   up twice. When only our link to the API dropped and the phone carried on, it's followed again.
+7. **The screen it ended on is the proof.** The screenshot the phone's run names as its evidence (what
+   `pro`'s check looked at; else its last step's, else the screen then) is kept in
+   `media/phone/<task>.jpg`. The Assistant page shows it in the conversation when the post is up (and
+   on the draft), and so does FlowAI.
+8. **It goes on FlowAI's record.** While the phone posts, the draft is saved as a FlowAI post (with the
+   platform's account when FlowAI has exactly one; else without one); when it's done, the run is added
+   with its steps and the screenshot (`POST /api/posts/{post}/phone-run`). Confirmed, the post is
+   **published at the time it went up**, so FlowAI's calendar (and the Assistant page's Calendar tab)
+   shows it there, with the screenshot; unsure, FlowAI's Inbox asks a person to check; failed, it stays
+   a draft with the reason. If FlowAI isn't open in the conversation's page when it finishes, it's
+   recorded the next time it is.
+
+**Several at once.** "Post them all now" posts the drafts one after another (`post_on_phone` with
+`drafts`): each starts by itself when the phone is free, and the assistant is told as each one is up,
+so it never has to keep checking. A failed post is tried again with `post_on_phone`; one that's up
+(or may be) is posted again only when you say so.
+
+**Feedback.** `post_feedback` opens the post in the app (by its caption's first words) and returns its
+likes, comments, shares, saves, views and latest comments as JSON (`feedback-<platform>.md`); every
+check is kept with the post, so the next one says what changed. One runs by itself
+`PHONE_FEEDBACK_AFTER_MINUTES` after posting (60 by default; it keeps the conversation in memory until
+then, and a restart re-plans it when the conversation is opened again).
+
+What you can say: "post draft two on Instagram now", "how is my last post doing?", "what's the phone
+doing?", "check which accounts the phone is logged in to" (the `check-accounts` skill), "stop the phone".
+Publishing is public, so the assistant only posts when you have said to post that draft now.
+
+Before the first post, Instagram (com.instagram.android) and X (com.twitter.android) must be installed
+and logged in on the phone: do that yourself (the console at https://172.26.0.32/team shows the phone
+live); the agent never types passwords. One task runs on the phone at a time, from any conversation.
+
+**When the phone's agent is out of service.** The phone's agent runs on the organisers' model account;
+when that runs dry, its tasks hang with no steps or fail with `LLM error ... 429 ... insufficient
+balance`. Who drives the phone is a switch on the Assistant page, in each draft's **From the phone**
+panel (next to its **Post now** button, which asks once more before posting publicly): **Phone agent**
+(with a box for direct control to take over if it fails) or **Direct control**. It applies to every
+post from the phone from the next job on, FlowAI's scheduled ones too, and stays set across restarts
+(`data/phone/driver.json`). Until it's first used, `PHONE_DRIVER` decides:
+
+- `agent` (the default): only the phone's agent.
+- `auto`: the phone's agent starts each job. If it fails, or sends nothing for 75 s, before anything
+  public happened, its task is stopped (and must have ended) and **our own agent**
+  (`backend/phone_direct.py`) takes the job over from where the app is.
+  - It works on the phone's direct controls: it takes a screenshot, asks a vision model on our Ollama
+    account (`PHONE_VISION_MODEL`, `kimi-k3` by default) what to do, then taps, types, presses keys or
+    swipes, and looks again.
+  - It uses the same skills. Apps the phone won't start by name (Instagram, X) are opened from the app
+    list.
+  - Before a post counts as up, it checks the screen it ended on once more (`PHONE_VERIFY_POSTS`).
+  - If the phone's agent had no model to think with, ours starts every job for the next
+    `PHONE_AGENT_RETRY_MINUTES` (30); after that the phone's agent gets the next one again.
+  - No handover after a share tap (the post may be up), after someone stopped the task, or when the phone
+    itself dropped out (that's a retry, as above).
+- `direct`: always our own agent.
+
+Our agent needs no OK for Enter. It doesn't do anything the task doesn't ask for: no payments, deletions,
+settings changes, messages, likes or follows, and no passwords. When a task would need one, it stops and
+says so. The Assistant page and `phone_status` say which agent drives the phone.
+
+### FlowAI's scheduled posts
+
+The assistant is also FlowAI's automation service (`backend/publisher.py`): when an approved post's
+time comes, FlowAI books a run on the phone, and the assistant picks it up
+(`GET /api/agent/next-job`) and posts it **the same way, with the same phone skills** as
+`post_on_phone`: the post's media from FlowAI onto the phone, the caption made typable,
+`post-<platform>-<placement>.md` as the goal. Change how posting works in one place, the skill,
+and both paths follow.
+
+- Every action of the phone's agent is a step on FlowAI's run record (within its 40-step budget);
+  a tap meant to share the post is recorded as `tap:post-button`.
+- The run ends **confirmed** with the screenshot the phone ended on as proof (the calendar shows it on
+  the post), **failed** if it never got as far as sharing (FlowAI tries again after 5, 15 and 30
+  minutes), or **uncertain** if it may be up (FlowAI's Inbox asks a person to look), so a post never
+  goes up twice. A run seen again after a restart is ended uncertain for the same reason (runs taken are
+  kept in `data/phone/published.json`). A phone that drops out before sharing is given the run again,
+  within what's left of its step budget.
+- If the phone asks for an OK while publishing, it is given: the post was approved in FlowAI.
+- Its numbers are checked like a draft's: `PHONE_FEEDBACK_AFTER_MINUTES` later, and whenever you ask
+  ("how is FlowAI post 12 doing?": `post_feedback` with `flowai_post`). `phone_status` lists the latest.
+
+Setting it up, once:
+1. In FlowAI's **Phones** page, add a phone: *Automation service*, device ID `heracles-phone`.
+2. On each Instagram and X account, pick that phone and turn automation on.
+3. Copy the token from the Phones page into `FLOWAI_AGENT_TOKEN` in `.env` (or leave it empty and set
+   `FLOWAI_EMAIL` and `FLOWAI_PASSWORD`: the assistant fetches it), and restart the assistant.
+   `/health` says whether it's publishing.
+
+Then schedule as usual (`schedule_post`, the Composer, a campaign): the post publishes itself from the
+phone at its time. While the phone is busy with something the assistant asked for, a due post waits;
+if it waits over 10 minutes FlowAI counts it as failed and tries again later.
 
 ## The agent page and FlowAI
 
@@ -408,6 +620,13 @@ unless it is given a recording to clone, so the agent always passes one:
   becomes a profile the first time it is picked (about 3 s), and picking it again gives the same
   profile.
 
+**Cloning a voice.** Under the ready voices, **Clone a voice** records 5 to 20 seconds with the mic, or
+takes an audio or video file, and makes a voice of it once you confirm it's yours or the person agreed (the
+`clone_voice` message, answered with `cloned`). The same is in the video's **Voice** panel, where the clone
+then reads the video. By voice, `clone_voice` clones from a file in the conversation. With VoiceStudio, a
+clone is a profile of kind `clone`; locally, OmniVoice keeps it in `voices/` (`cloned-<key>.pt`). Either way
+it's one of the ready voices from then on, to speak in, to read videos, or to dub with.
+
 The pick is kept per user in `prefs.json`, next to their conversations, so it's the voice in all
 of them and after a reload. If the pod is replaced and the profile is gone, the agent sets the
 catalog voice up again on the next connection, and it sounds the same, because VoiceStudio
@@ -418,7 +637,8 @@ its sample, which stops what is being said).
 ### Inside FlowAI
 
 FlowAI (`content-generator/`) has a copy of this repo in `assistant/`. It runs as its `assistant`
-service: `docker compose --profile assistant up -d`, or `--profile assistant-cpu` without a GPU.
+service, which `docker compose up -d` starts with the rest (without a GPU:
+`docker compose --profile assistant-cpu up -d --scale assistant=0`).
 Its page is the dashboard's **Assistant** tab (`frontend/src/dashboard/assistant/`), served
 through the Vite proxy at `/assistant/`. Beyond this page, it adds:
 - **Sign-in as the person who opened it.** The tab asks FlowAI for a token
@@ -442,7 +662,7 @@ After changing the agent here, copy it over and rebuild:
 rsync -a --delete --exclude __pycache__ --exclude comfyui/outputs --exclude comfyui/pod.env \
   backend web skills fonts comfyui requirements.txt Dockerfile .dockerignore .env.example .gitignore README.md \
   content-generator/assistant/
-cd content-generator && docker compose --profile assistant up -d --build assistant
+cd content-generator && docker compose up -d --build assistant
 ```
 
 ## Adding plain tools
@@ -481,11 +701,17 @@ backend/
   studio.py    post drafts: slides, texts drawn with Pillow, colours and readability, versions and undo
   retouch.py   changing only the painted part of a picture (cut out, edited, pasted back seamlessly)
   reel.py      a draft's pictures as a video: motion, the voice, captions, end card, music, ffmpeg
+  dub.py       dubbing (sound out, speech fitted, lips synced, sound back in) and face swaps
+  lipsync.py   the lip sync service for dubs (LatentSync, LIPSYNC_URL)
+  music.py     songs written for videos by ACE-Step (MUSIC_URL)
   platforms.py Instagram and X specs and the pre-export check (mirrors FlowAI's)
   flowai.py    FlowAI: accounts and voice, saving, finding, opening and scheduling posts, campaigns
+  phone.py     the team's phone (hackathon Phone API): posting from its apps, feedback checks
+  publisher.py FlowAI's automation service: publishes scheduled posts from the phone, with the same skills
   conversations.py  conversations kept on disk: list, reopen, switch, delete
 skills/        browser agent skills (markdown)
   content/     content skills: how to make each kind of post
+  phone/       phone skills: how to post and read feedback in the Instagram and X apps
 fonts/         fonts for text on pictures, by style (fonts.yaml), with their licences
 comfyui/       RunPod kit (manager.py, setup scripts, workflow bundles) + descriptions.yaml
 media/         generated and attached files (served at media/, next to the page)
@@ -545,5 +771,8 @@ web/           the agent page (index.html, agent.js), the test console (console.
 - `COMFYUI_TIMEOUT_MINUTES`: how long to wait for one generation (a video queued behind others can take a while).
 - `SOUND_URL`: FlowAI Sound (e.g. `http://sound:8000`, set in FlowAI's compose) for music under the videos
   `make_video` makes. Empty: the videos have only the voice.
+- `MUSIC_URL`, `MUSIC_API_KEY`: an ACE-Step 1.5 API (`http://music:8000` in FlowAI's compose, or a pod's) for a
+  song written for each video. Empty: the composer's moods only. `MUSIC_TIMEOUT_SECONDS` (default 300) covers
+  the first song, which also loads the model.
 - `LLM_MAX_TOOL_ROUNDS`: tool-calling rounds per reply (default 12). A post or a carousel takes one; the rest is
   room for longer chains (find a post, open it, change it, save it).

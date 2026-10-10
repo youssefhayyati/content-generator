@@ -102,8 +102,12 @@ Images are PNG. Videos are MP4 (H.264) with `subfolder=video` and `metadata` hol
 | `flux2_klein_edit` | Image + prompt → edited image (FLUX.2 Klein 4B) | **`image`**, `prompt`, `megapixels` 1, `steps` 4, `seed`, `batch_size` | ~7 s |
 | `wan_t2v` | Text to video (Wan 2.2 5B) | `prompt`, `negative_prompt`, `width` 1280, `height` 704, `length` 121, `fps` 24, `steps` 20, `cfg` 5, `seed`, `denoise`, `batch_size` | ~5 min |
 | `wan_i2v` | Image + prompt → video (Wan 2.2 5B) | **`image`**, `prompt`, `negative_prompt`, `megapixels` 0.9, `length` 121, `fps` 24, `steps` 20, `cfg` 5, `seed`, `denoise`, `batch_size` | ~5 min |
+| `face_swap` | Picture + face → picture (ReActor, inswapper_128, CodeFormer) | **`image`** (to change), **`image_2`** (the face), `faces` "0" | ~5 s |
+| `face_swap_video` | Video + face → video, sound kept (ReActor, inswapper_128) | **`video`**, **`image`** (the face), `faces` "0" | ~1 min per 10 s |
 
 - Edit and image-to-video outputs keep the input image's aspect ratio. `megapixels` sets the size.
+- The face swaps come with the voice agent (`workflows/*.json`) and aren't on a pod until registered. Their
+  custom node (ComfyUI-ReActor) is installed from the bundle's `ui`, which lists only that.
 - Wan `length` is the frame count and must be 4n+1. At 24 fps, 49 frames is about 2 s, 81 is about 3.4 s and 121 is about 5 s. Fewer frames render faster.
 
 ---

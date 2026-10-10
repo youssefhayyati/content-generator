@@ -80,6 +80,30 @@ function note(text, cls = "sys") {
   return add(cls, text);
 }
 
+// The screenshot a job on the phone ended on, as its proof: small in the log, whole in a new tab
+function proof(title, text, src) {
+  const box = el("div", "proof");
+  if (src) {
+    const a = el("a");
+    a.href = src;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    a.title = "Open the screenshot";
+    const img = el("img");
+    img.src = src;
+    img.alt = "The phone's screen when it finished";
+    a.appendChild(img);
+    box.appendChild(a);
+  }
+  const body = el("div");
+  body.append(el("b", null, title), text || "");
+  box.appendChild(body);
+  log.appendChild(box);
+  scrollLog();
+}
+
+const phonePosts = {}; // post number -> its last status, to show each outcome once
+
 function handle(platform) {
   return accounts.find((a) => a.platform === platform)?.handle || "yourbrand";
 }
@@ -162,6 +186,26 @@ function onEvent(msg) {
     case "browser_task":
       note(`Website task ${msg.status}${msg.text ? ": " + msg.text : ""}`, "act");
       break;
+    case "phone_task": {
+      const over = ["done", "failed", "cancelled"].includes(msg.status);
+      const what = msg.kind === "post" ? "posting" : msg.kind === "feedback" ? "feedback check" : "task";
+      if (over && msg.kind === "post") break; // its outcome comes with the post (phone_post)
+      if (over && msg.proof && msg.status !== "cancelled") proof(`Phone ${what} ${msg.status}`, msg.text, msg.proof);
+      else note(`Phone ${what} ${msg.status}${msg.text ? ": " + msg.text : ""}`, "act");
+      break;
+    }
+    case "phone_post": {
+      const before = phonePosts[msg.post];
+      phonePosts[msg.post] = msg.status;
+      if (msg.replay || msg.status === "posting" || (before !== undefined && before !== "posting")) {
+        if (msg.recorded && before === msg.status && !msg.replay) note(`Post ${msg.post} is on FlowAI's calendar`, "act");
+        break;
+      }
+      const title = { posted: "Posted from the phone", unsure: "Maybe posted: check the account", failed: "Not posted" }[msg.status];
+      proof(`${title} · ${msg.title || "draft " + msg.draft} (${msg.what})`,
+        (msg.status === "failed" ? msg.detail || msg.proof_note : msg.proof_note) || "", msg.proof);
+      break;
+    }
   }
 }
 
@@ -187,6 +231,10 @@ function describe(name, a) {
     case "find_assets": return "Looking through the gallery";
     case "use_assets": return "Bringing in pictures from the gallery";
     case "browser_task": return `Website task: ${a.instruction}`;
+    case "post_on_phone": return "Posting from the phone";
+    case "post_feedback": return "Checking how the post is doing";
+    case "phone_task": return `Phone: ${a.instruction}`;
+    case "answer_phone": return a.approve === false ? "Telling the phone no" : "Answering the phone";
     case "get_current_time": return "Checking the time";
     default: return name.replaceAll("_", " ");
   }

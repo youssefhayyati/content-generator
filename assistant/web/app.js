@@ -23,6 +23,33 @@ function add(cls, text) {
   return el;
 }
 
+// The screenshot a job on the phone ended on, as its proof: small in the log, whole in a new tab
+function addProof(title, text, src) {
+  const el = document.createElement("div");
+  el.className = "proof";
+  if (src) {
+    const a = document.createElement("a");
+    a.href = src;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    a.title = "Open the screenshot";
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "The phone's screen when it finished";
+    a.appendChild(img);
+    el.appendChild(a);
+  }
+  const body = document.createElement("div");
+  const b = document.createElement("b");
+  b.textContent = title;
+  body.append(b, text || "");
+  el.appendChild(body);
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+const phonePosts = {}; // post number -> its last status, to show each outcome once
+
 function updateState() {
   $("dot").className = "dot " + link.state;
   $("state").textContent = link.state;
@@ -73,6 +100,28 @@ function onEvent(msg) {
     case "browser_step":
       onBrowserStep(msg);
       break;
+    case "phone_task":
+      onPhoneTask(msg);
+      break;
+    case "phone_step":
+      onBrowserStep(msg);
+      break;
+    case "phone_post": {
+      const before = phonePosts[msg.post];
+      phonePosts[msg.post] = msg.status;
+      if (msg.replay) break;
+      const n = msg.last_check || {};
+      const nums = ["likes", "comments", "shares", "saves", "views"].filter((k) => n[k] != null).map((k) => `${n[k]} ${k}`);
+      if (msg.status !== "posting" && (before === undefined || before === "posting")) {
+        const title = { posted: "📱 Posted from the phone", unsure: "📱 Maybe posted: check the account", failed: "📱 Not posted" }[msg.status];
+        addProof(`${title} · ${msg.title || "draft " + msg.draft} (${msg.what})`,
+          (msg.status === "failed" ? msg.detail || msg.proof_note : msg.proof_note) || "", msg.proof);
+      } else {
+        add("tool", `📱 post ${msg.post} (${msg.what}, draft ${msg.draft}): ${msg.waiting ? "waiting its turn" : msg.status}`
+          + (msg.recorded ? " · on FlowAI's calendar" : "") + (nums.length ? " · " + nums.join(", ") : ""));
+      }
+      break;
+    }
     case "media_job":
       onMediaJob(msg);
       break;
@@ -262,7 +311,10 @@ $("file").onchange = async () => {
 acceptFiles(upload);
 // ---------- Browser agent panel ----------
 
+let panel = "browser"; // whose steps the task panel shows: the browser's or the phone's
+
 function onBrowserTask(msg) {
+  panel = "browser";
   $("browser").hidden = false;
   const status = $("bstatus");
   status.className = "badge " + (msg.status === "started" ? "running" : msg.status);
@@ -288,7 +340,33 @@ function onBrowserStep(msg) {
   }
 }
 
-$("bcancel").onclick = () => link.send({ type: "cancel_task" });
+// A job on the team's phone, in the same panel: posting a draft, reading its feedback, or another task
+function onPhoneTask(msg) {
+  panel = "phone";
+  $("browser").hidden = false;
+  const running = msg.status === "started" || msg.status === "awaiting approval";
+  const status = $("bstatus");
+  status.className = "badge " + (running ? "running" : msg.status);
+  status.textContent = msg.status === "started" ? "running" : msg.status;
+  $("bcancel").hidden = !running;
+  if (msg.status === "started") {
+    $("btask").textContent = `📱 #${msg.id} ${msg.text}`;
+    $("steps").innerHTML = "";
+    $("bshot").hidden = true;
+  }
+  const over = ["done", "failed", "cancelled"].includes(msg.status);
+  if (over && msg.proof && $("bshot")) {
+    $("bshot").src = msg.proof; // the screen it ended on
+    $("bshot").hidden = false;
+  }
+  if (over && msg.kind !== "post" && msg.proof && msg.status !== "cancelled") {
+    addProof(`📱 phone ${msg.kind} #${msg.id} ${msg.status}`, msg.text || "", msg.proof);
+  } else if (!(over && msg.kind === "post")) {  // a post's outcome comes with its card (phone_post)
+    add("tool", `📱 phone ${msg.kind} #${msg.id} ${msg.status}${msg.text ? ": " + msg.text : ""}`);
+  }
+}
+
+$("bcancel").onclick = () => link.send({ type: panel === "phone" ? "cancel_phone" : "cancel_task" });
 
 // ---------- Microphone ----------
 

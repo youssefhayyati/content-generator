@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AtSign, Clapperboard, FolderOpen, ImagePlus, LoaderCircle, MessageSquarePlus, Plus, Sparkles, Upload, Wand2 } from 'lucide-react'
+import { AtSign, Clapperboard, FolderOpen, ImagePlus, LoaderCircle, MessageSquarePlus, Plus, ScanFace, Sparkles, Speech, Upload, Wand2 } from 'lucide-react'
 import type { Asset, Page } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
@@ -164,6 +164,15 @@ function PictureModal({ p, onClose }: { p: Picture | null; onClose: () => void }
     a.link.ensureAudio()
     void a.say(text)
   }
+  /** Starts a sentence in the composer to finish there; at: where the cursor goes (default the end). */
+  const write = (text: string, at = text.length) => {
+    onClose()
+    a.setInput(text)
+    window.setTimeout(() => {
+      a.inputRef.current?.focus()
+      a.inputRef.current?.setSelectionRange(at, at)
+    })
+  }
   return (
     <Modal open={!!p} onClose={onClose} title={p ? `Picture ${p.id}` : ''} className="max-w-2xl">
       {p && (
@@ -210,6 +219,16 @@ function PictureModal({ p, onClose }: { p: Picture | null; onClose: () => void }
                     Edit it…
                   </Btn>
                 </>
+              )}
+              {a.dubbing && p.kind === 'video' && (
+                <Btn size="sm" icon={Speech} onClick={() => write(`Dub video ${p.id} so they say: `)}>
+                  Change what they say…
+                </Btn>
+              )}
+              {a.generation && (
+                <Btn size="sm" icon={ScanFace} onClick={() => write(`Put the face from picture  on ${p.kind === 'video' ? 'video' : 'picture'} ${p.id}`, 'Put the face from picture '.length)}>
+                  Swap a face…
+                </Btn>
               )}
               <Btn
                 size="sm"

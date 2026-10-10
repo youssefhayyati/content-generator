@@ -13,6 +13,7 @@ per sentence, each with its own camera move) comes in with a straight cut, like 
 """
 
 import base64
+import io
 import logging
 import re
 import shutil
@@ -424,6 +425,61 @@ def _write_wav(path: Path, audio: np.ndarray):
         w.setsampwidth(2)
         w.setframerate(VOICE_RATE)
         w.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
+
+
+# --- texts drawn on a video (studio.py) ---------------------------------------------------
+
+def _fill(size: tuple[int, int]) -> str:
+    """ffmpeg's filter for fitting a video to a size the way ImageOps.fit fits a picture: scaled to
+    cover it, the middle kept."""
+    W, H = size
+    return f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1"
+
+
+def probe(path: Path) -> dict:
+    """A video's width, height and duration (seconds), read from what ffmpeg says about it; {} when
+    it can't tell."""
+    proc = subprocess.run([ffmpeg(), "-hide_banner", "-i", str(path)], capture_output=True, text=True,
+                          errors="replace", timeout=60)
+    out = {}
+    if m := re.search(r"Duration: (\d+):(\d\d):(\d\d(?:\.\d+)?)", proc.stderr):
+        out["duration"] = round(int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]), 2)
+    if m := re.search(r"Video: .*?, (\d{2,5})x(\d{2,5})", proc.stderr):
+        out["width"], out["height"] = int(m[1]), int(m[2])
+    return out
+
+
+def still(path: Path, size: tuple[int, int], at: float = 0.0) -> Image.Image:
+    """One frame of a video, fitted to size: what texts drawn on it are checked against."""
+    cmd = [ffmpeg(), "-loglevel", "error", "-ss", f"{max(at, 0):.2f}", "-i", str(path), "-frames:v", "1",
+           "-vf", _fill(size), "-f", "image2pipe", "-c:v", "png", "pipe:1"]
+    proc = subprocess.run(cmd, capture_output=True, timeout=120)
+    if proc.returncode != 0 or not proc.stdout:
+        if at > 0:  # shorter than we thought: its first frame
+            return still(path, size)
+        raise RuntimeError(f"no frame could be read from {path.name}: {proc.stderr.decode(errors='replace')[-200:]}")
+    with Image.open(io.BytesIO(proc.stdout)) as img:
+        return img.convert("RGB")
+
+
+def burn(path: Path, overlay: Image.Image, out: Path):
+    """The video fitted to the overlay's size with the overlay (RGBA: a slide's texts) drawn on every
+    frame, as H.264 and AAC; its sound is kept."""
+    W, H = overlay.size[0] // 2 * 2, overlay.size[1] // 2 * 2  # H.264 wants even sizes
+    with tempfile.TemporaryDirectory(prefix="burn-") as tmp:
+        layer_png = Path(tmp) / "texts.png"
+        overlay.resize((W, H)).save(layer_png)
+        part = out.with_name(out.stem + ".part.mp4")
+        cmd = [ffmpeg(), "-y", "-loglevel", "error", "-i", str(path), "-loop", "1", "-i", str(layer_png),
+               "-filter_complex", f"[0:v]{_fill((W, H))}[v];[v][1:v]overlay=0:0:shortest=1,format=yuv420p[out]",
+               "-map", "[out]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+               "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(part)]
+        proc = subprocess.run(cmd, capture_output=True, timeout=900)
+        if proc.returncode != 0:
+            part.unlink(missing_ok=True)
+            err = proc.stderr.decode(errors="replace").strip()
+            raise RuntimeError(f"ffmpeg failed: {err.splitlines()[-1] if err else 'no output'}")
+        part.replace(out)
 
 
 def music_wav(data: str) -> bytes:

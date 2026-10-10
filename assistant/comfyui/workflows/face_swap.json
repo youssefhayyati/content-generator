@@ -1,0 +1,119 @@
+{
+ "api": {
+  "1": {
+   "class_type": "LoadImage",
+   "inputs": {
+    "image": "none.png"
+   }
+  },
+  "2": {
+   "class_type": "LoadImage",
+   "inputs": {
+    "image": "none.png"
+   }
+  },
+  "3": {
+   "class_type": "ReActorFaceSwap",
+   "inputs": {
+    "input_image": [
+     "1",
+     0
+    ],
+    "source_image": [
+     "2",
+     0
+    ],
+    "enabled": true,
+    "swap_model": "inswapper_128.onnx",
+    "facedetection": "retinaface_resnet50",
+    "face_restore_model": "codeformer-v0.1.0.pth",
+    "face_restore_visibility": 1,
+    "codeformer_weight": 0.5,
+    "detect_gender_input": "no",
+    "detect_gender_source": "no",
+    "input_faces_index": "0",
+    "source_faces_index": "0",
+    "console_log_level": 1
+   }
+  },
+  "4": {
+   "class_type": "SaveImage",
+   "inputs": {
+    "images": [
+     "3",
+     0
+    ],
+    "filename_prefix": "face_swap"
+   }
+  }
+ },
+ "models": [
+  {
+   "name": "inswapper_128.onnx",
+   "directory": "insightface",
+   "url": "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx"
+  },
+  {
+   "name": "codeformer-v0.1.0.pth",
+   "directory": "facerestore_models",
+   "url": "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/codeformer-v0.1.0.pth"
+  }
+ ],
+ "mapping": {
+  "faces": [
+   "3.input_faces_index"
+  ]
+ },
+ "ui": {
+  "last_node_id": 2,
+  "last_link_id": 0,
+  "nodes": [
+   {
+    "id": 1,
+    "type": "Note",
+    "pos": [
+     0,
+     0
+    ],
+    "size": [
+     420,
+     160
+    ],
+    "flags": {},
+    "order": 0,
+    "mode": 0,
+    "properties": {},
+    "widgets_values": [
+     "Not a workflow to edit: it only lists the custom nodes the pod installs for this workflow (ReActor, github.com/Gourieff/ComfyUI-ReActor). The graph that runs is the bundle's api, in assistant/comfyui/workflows/ of the voice agent. Saving over this file here would replace it."
+    ]
+   },
+   {
+    "id": 2,
+    "type": "ReActorFaceSwap",
+    "pos": [
+     460,
+     0
+    ],
+    "size": [
+     320,
+     100
+    ],
+    "flags": {},
+    "order": 1,
+    "mode": 0,
+    "inputs": [],
+    "outputs": [],
+    "properties": {
+     "Node name for S&R": "ReActorFaceSwap",
+     "aux_id": "Gourieff/ComfyUI-ReActor"
+    },
+    "widgets_values": []
+   }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+ }
+}

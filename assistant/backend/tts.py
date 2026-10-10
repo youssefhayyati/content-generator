@@ -2,6 +2,8 @@
 
 import difflib
 import hashlib
+import io
+import json
 import logging
 import re
 import threading
@@ -28,9 +30,11 @@ def _words(text: str) -> list[str]:
 
 class TTSEngine:
     """One voice, designed from TTS_VOICE_INSTRUCT or cloned from TTS_REF_AUDIO: nothing to pick
-    (voicestudio.py offers a choice). The voice calls match VoiceStudioTTS's."""
+    (voicestudio.py offers a choice). The voice calls match VoiceStudioTTS's. Voices cloned from a
+    recording (clone) are kept in voices/ as cloned-<key>.pt with a .json naming them."""
 
     choosable = False
+    clonable = True
 
     def __init__(self, model_id: str, device: str, dtype: torch.dtype, num_step: int, speed: float,
                  voice_instruct: str, ref_audio: str = "", ref_text: str = "",
@@ -44,6 +48,13 @@ class TTSEngine:
         self.voice = self._load_voice(voice_instruct, ref_audio, ref_text)
         self.default = {"id": "local", "name": "This computer’s voice", "language": "", "archetype": None,
                         "description": "Cloned from your recording" if ref_audio else voice_instruct}
+        self.clones: dict[str, tuple[dict, VoiceClonePrompt]] = {}  # id -> (profile, prompt)
+        for about in sorted(VOICES_DIR.glob("cloned-*.json")):
+            try:
+                profile = json.loads(about.read_text(encoding="utf-8"))
+                self.clones[profile["id"]] = profile, VoiceClonePrompt.load(str(about.with_suffix(".pt")))
+            except Exception as exc:
+                log.warning("cloned voice %s couldn't be loaded: %s", about.name, exc)
         self.synthesize("Warming up.")  # first call pays CUDA init costs
         log.info("TTS loaded (%s)", model_id)
 
@@ -86,25 +97,64 @@ class TTSEngine:
             log.warning("Best designed voice only scored %.2f; consider TTS_REF_AUDIO", best_score)
         return best
 
-    def synthesize(self, text: str, voice: str | None = None) -> np.ndarray:
-        """Returns float32 mono audio at 24 kHz, always in the one voice."""
+    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None) -> np.ndarray:
+        """Returns float32 mono audio at 24 kHz, in the one voice or a cloned one. seconds is
+        VoiceStudio's: here a dub's speech is fitted to its video afterwards (dub.fit)."""
+        prompt = self.clones[voice][1] if voice in self.clones else self.voice
         with self.lock, torch.inference_mode():
             audio = self.model.generate(
-                text=text, voice_clone_prompt=self.voice, num_step=self.num_step, speed=self.speed
+                text=text, voice_clone_prompt=prompt, num_step=self.num_step, speed=self.speed
             )[0]
         return np.asarray(audio, dtype=np.float32)
 
+    def clone(self, name: str, wav: bytes, text: str = "") -> dict:
+        """A voice cloned from a recording (a WAV of one person speaking), kept in voices/."""
+        key = hashlib.sha1(wav).hexdigest()[:10]
+        if f"clone-{key}" in self.clones:
+            return self.clones[f"clone-{key}"][0]
+        VOICES_DIR.mkdir(exist_ok=True)
+        path = VOICES_DIR / f"cloned-{key}.wav"
+        path.write_bytes(wav)
+        text = text or self.listen(wav)
+        with self.lock:
+            prompt = self.model.create_voice_clone_prompt(ref_audio=str(path), ref_text=text)
+        prompt.save(str(path.with_suffix(".pt")))
+        profile = {"id": f"clone-{key}", "name": name, "description": "Cloned from a recording", "language": "",
+                   "archetype": None, "cloned": True}
+        path.with_suffix(".json").write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
+        self.clones[profile["id"]] = profile, prompt
+        return profile
+
+    def listen(self, wav: bytes) -> str:
+        """What a recording says, heard by the ASR (English only); empty without it."""
+        if self.transcribe is None:
+            return ""
+        audio, rate = sf.read(io.BytesIO(wav), dtype="float32", always_2d=True)
+        audio = audio.mean(axis=1)
+        if rate != SAMPLE_RATE:
+            n = int(len(audio) * SAMPLE_RATE / rate)
+            audio = np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio).astype(np.float32)
+        return self.transcribe(audio)
+
     def profiles(self) -> list[dict]:
-        return [self.default]
+        return [self.default, *(profile for profile, _ in self.clones.values())]
 
     def catalog(self, q: str = "", lang: str = "", exclude: set[str] = frozenset()) -> tuple[list[dict], int, list[str]]:
         return [], 0, []
+
+    def find(self, wanted: str) -> tuple[dict, bool] | None:
+        wanted = wanted.strip()
+        found = next((v for v in self.profiles() if wanted == v["id"] or wanted.lower() == v["name"].lower()), None)
+        return (found, False) if found else None
+
+    def match(self, description: str, lang: str = "", limit: int = 0) -> list[dict]:
+        return [{**v, "catalog": False} for v in self.profiles()]
 
     def adopt(self, archetype: str) -> dict:
         raise ValueError("voices can only be picked with a VoiceStudio server (TTS_URL)")
 
     def sample(self, voice: str | None = None, archetype: str | None = None) -> np.ndarray:
-        return self.synthesize(REFERENCE_TEXT)
+        return self.synthesize(REFERENCE_TEXT, voice)
 
 
 _MARKDOWN = re.compile(r"[*_`#>|~]+|\[([^\]]*)\]\([^)]*\)")

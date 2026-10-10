@@ -7,7 +7,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { addDays, fmtDateTime, postState, sameDay, startOfWeek, STATE, titleOf, useApi, useInvalidate, type PostState } from '../data'
-import { Agenda, WeekGrid } from '../pages/Calendar'
+import { Agenda, PublishProof, WeekGrid } from '../pages/Calendar'
 import { useToast } from '../toast'
 import { Btn, Label, Platforms, StateBadge } from '../ui'
 import { useAssistant } from './store'
@@ -141,6 +141,7 @@ export function CalendarView() {
                   </p>
                 )}
                 <p className="mt-4 line-clamp-6 whitespace-pre-wrap text-[12.5px] leading-relaxed text-fg/85">{selected.body}</p>
+                <PublishProof post={selected} className="mt-4" />
                 <div className="mt-5 grid gap-2">
                   {selected.platforms.some((p) => p === 'instagram' || p === 'x') && (
                     <Btn
