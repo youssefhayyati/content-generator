@@ -40,7 +40,9 @@ export type VideoRecipe = {
   lines: string[]
   cta: string
   cta_line: string
+  /** A mood (the composer's), 'song' (written for the video from the description in song) or null. */
   music: string | null
+  song?: string
   captions: boolean
   motion: string
   placement: string
@@ -217,6 +219,8 @@ type State = {
   videoVoices: VideoVoices | null
   /** The fonts texts can use, by style. */
   fonts: FontList | null
+  /** Videos can get a song written for them (a music model is there), besides the composer's moods. */
+  songs: boolean
 }
 
 const EMPTY_SESSION = {
@@ -238,6 +242,7 @@ const INITIAL: State = {
   conversations: [],
   kept: false,
   switching: false,
+  songs: false,
   log: [],
   seq: 0,
   open: null,
@@ -435,6 +440,8 @@ function onEvent(s: State, m: AssistantEvent): State {
       return { ...s, voice: m as unknown as Voice, voicePending: null, voices: s.voices && { ...s.voices, current: String(m.id) } }
     case 'fonts':
       return { ...s, fonts: { styles: (m.styles as FontList['styles']) ?? [], fonts: ((m.fonts as FontInfo[]) ?? []).map((f) => ({ ...f, url: assistantUrl(f.url) })) } }
+    case 'ready':
+      return { ...s, songs: !!m.songs }
     case 'voices':
       return { ...s, voices: m as unknown as VoiceList }
     case 'video_voices':
@@ -539,6 +546,9 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   setInput: (text: string) => void
   inputRef: RefObject<HTMLTextAreaElement | null>
   micOn: boolean
+  /** Replies spoken (true) or text only; kept in this browser. */
+  speech: boolean
+  setSpeech: (on: boolean) => void
   bargeIn: boolean
   setBargeIn: (on: boolean) => void
   /** Approvals being booked right now. */
@@ -546,6 +556,7 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
 }
 
 const LAST = 'flowai.assistant.conversation'
+const SPEECH = 'flowai.assistant.speech'
 
 /** The conversation last on screen, to pick up again after a reload (the assistant checks it's this person's). */
 function readConversation() {
@@ -559,6 +570,23 @@ function readConversation() {
 function writeConversation(id: string) {
   try {
     window.localStorage.setItem(LAST, id)
+  } catch {
+    /* private mode: it just isn't remembered */
+  }
+}
+
+/** Whether replies are spoken: on unless this browser turned it off. */
+function readSpeech() {
+  try {
+    return window.localStorage.getItem(SPEECH) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+function writeSpeech(on: boolean) {
+  try {
+    window.localStorage.setItem(SPEECH, on ? 'on' : 'off')
   } catch {
     /* private mode: it just isn't remembered */
   }
@@ -593,6 +621,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [micOn, setMicOn] = useState(false)
   const [bargeIn, setBargeInState] = useState(true)
+  const [speech, setSpeechState] = useState(readSpeech)
+  /** The same, for the hello sent from the link's callbacks. */
+  const speechRef = useRef(speech)
   const [booking, setBooking] = useState<number[]>([])
   const [generation, setGeneration] = useState(false)
   const wanted = useRef(false)
@@ -678,7 +709,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       switch (m.type) {
         case 'ready':
           dispatch({ type: 'conn', conn: 'online' })
-          link.send({ type: 'hello', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, token: session.current?.token, conversation: conversation.current })
+          link.send({ type: 'hello', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, token: session.current?.token, conversation: conversation.current, speech: speechRef.current })
           if (queued.current) {
             dispatch({ type: 'switching' })
             link.send(queued.current)
@@ -818,6 +849,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       sample: state.sample,
       videoVoices: state.videoVoices,
       fonts: state.fonts,
+      songs: state.songs,
       link,
       start,
       newConversation: (campaign) => switchTo({ type: 'new', ...(campaign ? { campaign } : {}) }),
@@ -877,6 +909,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setInput,
       inputRef,
       micOn,
+      speech,
+      setSpeech: (on) => {
+        speechRef.current = on
+        setSpeechState(on)
+        writeSpeech(on)
+        if (!on) link.stopPlayback() // what was being said stops too
+        link.send({ type: 'speech', on })
+      },
       bargeIn,
       setBargeIn: (on) => {
         link.bargeIn = on
@@ -884,7 +924,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, bargeIn, booking, generation],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation],
   )
 
   return (

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, Toggle } from '../ui'
@@ -413,11 +413,18 @@ function Composer({ onVoice }: { onVoice: () => void }) {
         />
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1">
-        <label className="flex items-center gap-2 text-[11.5px] text-dim">
-          <Toggle on={a.bargeIn} onChange={a.setBargeIn} label="Talk over the assistant" />
-          <Headphones className="size-3.5" strokeWidth={1.75} />
-          Talk over it {a.bargeIn ? '(best with headphones)' : '(the mic pauses while it speaks)'}
+        <label className="flex items-center gap-2 text-[11.5px] text-dim" title={a.speech ? 'Replies are read aloud' : 'Replies are only written: just chat'}>
+          <Toggle on={a.speech} onChange={a.setSpeech} label="Speak the replies" />
+          {a.speech ? <Volume2 className="size-3.5" strokeWidth={1.75} /> : <VolumeX className="size-3.5" strokeWidth={1.75} />}
+          {a.speech ? 'Spoken replies' : 'Text only'}
         </label>
+        {a.speech && (
+          <label className="flex items-center gap-2 text-[11.5px] text-dim">
+            <Toggle on={a.bargeIn} onChange={a.setBargeIn} label="Talk over the assistant" />
+            <Headphones className="size-3.5" strokeWidth={1.75} />
+            Talk over it {a.bargeIn ? '(best with headphones)' : '(the mic pauses while it speaks)'}
+          </label>
+        )}
         <button
           type="button"
           onClick={onVoice}

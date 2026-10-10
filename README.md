@@ -14,7 +14,7 @@ end-to-end and still produce run records with proof.
 
 ```sh
 # 1. Everything: the dashboard (:5173), the API (Laravel, :8002), queue worker, scheduler,
-#    FlowAI Sound, the voice assistant (:8003), Mailpit (:8025), Ollama
+#    FlowAI Sound, the voice assistant (:8003), its music model (:8004), Mailpit (:8025), Ollama
 docker compose up -d
 docker compose exec ollama ollama pull llama3.2:1b        # once; 3b/8b need more RAM than ~2.5 GB free
 
@@ -28,8 +28,9 @@ FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=x-phone
 ```
 
 The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models
-(about 6 GB), and the dashboard installs its packages. The assistant needs an NVIDIA GPU; without
-one, `docker compose --profile assistant-cpu up -d --scale assistant=0` runs it on the CPU. Its
+(about 6 GB), the music model downloads ACE-Step, and the dashboard installs its packages. The
+assistant and the music model need an NVIDIA GPU; without one, `docker compose --profile
+assistant-cpu up -d --scale assistant=0 --scale music=0` runs the assistant on the CPU. Its
 settings (Ollama cloud key, ComfyUI, VoiceStudio) are in `assistant/.env`, from
 `assistant/.env.example`. To run the dashboard outside Docker instead: `docker compose stop
 frontend`, then `cd frontend && npm install && API_ORIGIN=http://localhost:8002 npm run dev`.
@@ -124,8 +125,9 @@ can also be changed by hand on the page:
 - **Part of a picture:** **Paint to change part of it**, paint over something, then remove it,
   replace it, change it or improve it, or just say "remove this". Only the painted part changes.
 - **Video with voice:** a draft's pictures, one or several, become a reel. They slowly zoom and
-  pan while the assistant's voice reads a line over each, with captions, music from FlowAI Sound
-  and an end card ("Order now"). It's kept as its own draft, which can be made again.
+  pan while a voice that suits the post reads a line over each, with captions, an instrumental
+  song written for it (ACE-Step 1.5, `music/`; describe another, or pick one of FlowAI Sound's
+  moods) and an end card ("Order now"). It's kept as its own draft, which can be made again.
 - **Media:** the conversation's numbered pictures and your gallery.
 - **Calendar:** your week. Drop a draft on a slot to book it there, or click an empty slot to ask for
   a post at that time.
@@ -207,6 +209,7 @@ docker compose exec api php artisan migrate     # after adding a migration
 - `publishing-agent/` — the phone-driving worker (`agent.py`, Python)
 - `publishing-studio/` — the device layer it uses (adb + simulator, Instagram/X recipes, named targets)
 - `sound/` — FlowAI Sound: voices, listening and the composer (Python, CPU)
+- `music/` — ACE-Step 1.5 for songs under the assistant's videos (GPU; MIT, licensed training data)
 - `assistant/` — the voice assistant behind the Assistant page (Python, GPU; copied from the gamechange repo, where it's developed)
 - `demo/` — the one-command full cycle
 - `deploy/` — production stack for the VPS (nginx + PHP-FPM + Postgres)

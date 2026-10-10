@@ -1,7 +1,7 @@
 # Everything at once: docker compose up -d
-#   dashboard http://localhost:5173 · API :8002 · assistant :8003 · Mailpit :8025
-# Without an NVIDIA GPU, run the assistant on the CPU instead:
-#   docker compose --profile assistant-cpu up -d --scale assistant=0
+#   dashboard http://localhost:5173 · API :8002 · assistant :8003 · music :8004 · Mailpit :8025
+# Without an NVIDIA GPU, run the assistant on the CPU instead, and the videos' songs elsewhere (or not):
+#   docker compose --profile assistant-cpu up -d --scale assistant=0 --scale music=0
 services:
   # The dashboard (React + Vite) on http://localhost:5173, the address the API trusts for its
   # session cookie. It proxies /api, /sanctum and /oauth to the API and /assistant/ to the
@@ -88,7 +88,10 @@ services:
       FLOWAI_URL: http://api:8000
       FLOWAI_DASHBOARD_URL: http://localhost:5173
       BROWSER_ENABLED: "false"
-      SOUND_URL: http://sound:8000  # music under the videos it makes from posts
+      SOUND_URL: http://sound:8000  # the composer's moods under the videos it makes from posts
+      # Songs written for each video (ACE-Step, below). Another one, e.g. on a RunPod pod: set MUSIC_URL
+      # (and MUSIC_API_KEY in assistant/.env) in the shell or in .env next to this file
+      MUSIC_URL: ${MUSIC_URL:-http://music:8000}
     ports:
       - "${ASSISTANT_PORT:-8003}:8000"
     volumes: &assistant-volumes
@@ -135,6 +138,25 @@ services:
       - api
     restart: unless-stopped
 
+  # Songs for the assistant's videos: ACE-Step 1.5 (MIT), written from a description of the music
+  # ("upbeat acoustic pop, ukulele, hand claps, 112 bpm"). It shares the NVIDIA GPU with the
+  # assistant: its models wait on the CPU between songs. The first start downloads them (a few GB)
+  # into music-models; the API is on :8004 (POST /release_task, GET /health).
+  music:
+    build: ./music
+    ports:
+      - "${MUSIC_PORT:-8004}:8000"
+    volumes:
+      - music-models:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
   # Catches every email the API sends. Inbox at http://localhost:8025
   mailpit:
     image: axllent/mailpit
@@ -157,3 +179,4 @@ volumes:
   assistant-media:
   assistant-voices:
   assistant-data:
+  music-models:

@@ -303,9 +303,9 @@ Results vary from run to run: if a removal leaves a smudge, run it again or pain
 - **End card:** optionally, the call to action on a button in the post's colour that pops in
   ("Order now"), over the last picture blurred, with the voice saying it ("Order yours today, the
   link is in our bio").
-- **Music:** one of FlowAI Sound's six moods (`SOUND_URL`): Golden hour unless asked otherwise, or
-  none. It steps aside whenever the voice speaks (sidechain compression), and the mix is levelled to
-  -14 LUFS for social video.
+- **Music:** a song written for the video (`MUSIC_URL`, see [The video's music](#the-videos-music)),
+  or one of FlowAI Sound's six moods (`SOUND_URL`), or none. It steps aside whenever the voice speaks
+  (sidechain compression), and the mix is levelled to -14 LUFS for social video.
 
 Frames are drawn with Pillow and encoded by ffmpeg (`imageio-ffmpeg` brings a static build) as
 H.264 + AAC at the placement's size (1080 × 1920 for a reel). A 15-second video takes about
@@ -334,6 +334,27 @@ On the page, the **Voice** row of the Video section shows who reads it, with a s
 **Change** lists the voices that suit the post (with the description they were matched to), or the
 closest to words you type, and the assistant's own voice. The voice you pick is used on the next
 **Make the video**. With the local OmniVoice there is one voice, so videos use it.
+
+#### The video's music
+
+With a music model (`MUSIC_URL`: ACE-Step 1.5, MIT, trained on licensed music; `content-generator/music/`
+runs it next to FlowAI), each video gets an instrumental song written for it:
+
+- **Written for the post:** the casting call that describes the voice also describes the music, for
+  the music model: genre, two or three instruments, mood and energy, tempo, e.g. "upbeat acoustic
+  pop, bright ukulele, hand claps and shaker, feel-good and catchy, 112 bpm" for a bakery, "dark
+  cinematic trap, deep 808 bass, sharp hi-hats, 140 bpm" for a gym. No vocals: it sits under the voice.
+- **Asked for:** `make_video`'s `music` is a description of the music, `song` for a new one written
+  for the post, a mood for the composer's, or none.
+- **Kept:** the description and the seed go into the recipe, so making the video again with other
+  words keeps the same song (its length follows the voiceover). A new description, or `song`, is a
+  new song.
+- **Fallback:** if the music service doesn't answer, the composer's Golden hour plays instead.
+
+`backend/music.py` talks to ACE-Step's own API (`/release_task`, `/query_result`, `/v1/audio`), so
+the same code works with ACE-Step on a RunPod pod: point `MUSIC_URL` there (plus `MUSIC_API_KEY`
+if it has `ACESTEP_API_KEY` set). On the page, the Music menu's **A song written for it** shows the
+description, which you can change; **New take** makes the same description again with another seed.
 
 ### Content skills
 
@@ -502,6 +523,7 @@ backend/
   studio.py    post drafts: slides, texts drawn with Pillow, colours and readability, versions and undo
   retouch.py   changing only the painted part of a picture (cut out, edited, pasted back seamlessly)
   reel.py      a draft's pictures as a video: motion, the voice, captions, end card, music, ffmpeg
+  music.py     songs written for videos by ACE-Step (MUSIC_URL)
   platforms.py Instagram and X specs and the pre-export check (mirrors FlowAI's)
   flowai.py    FlowAI: accounts and voice, saving, finding, opening and scheduling posts, campaigns
   conversations.py  conversations kept on disk: list, reopen, switch, delete
@@ -566,5 +588,8 @@ web/           the agent page (index.html, agent.js), the test console (console.
 - `COMFYUI_TIMEOUT_MINUTES`: how long to wait for one generation (a video queued behind others can take a while).
 - `SOUND_URL`: FlowAI Sound (e.g. `http://sound:8000`, set in FlowAI's compose) for music under the videos
   `make_video` makes. Empty: the videos have only the voice.
+- `MUSIC_URL`, `MUSIC_API_KEY`: an ACE-Step 1.5 API (`http://music:8000` in FlowAI's compose, or a pod's) for a
+  song written for each video. Empty: the composer's moods only. `MUSIC_TIMEOUT_SECONDS` (default 300) covers
+  the first song, which also loads the model.
 - `LLM_MAX_TOOL_ROUNDS`: tool-calling rounds per reply (default 12). A post or a carousel takes one; the rest is
   room for longer chains (find a post, open it, change it, save it).

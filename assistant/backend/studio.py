@@ -24,6 +24,7 @@ import copy
 import html
 import io
 import logging
+import random
 import re
 import uuid
 from collections.abc import Awaitable, Callable
@@ -485,15 +486,16 @@ class StudioSession:
 
     async def make_video(self, ref=None, lines=None, cta=None, cta_line=None, music=None, captions=None,
                          motion=None, placement=None, color=None, *, voice: dict, speak, compose=None,
-                         moods=()) -> dict:
+                         moods=(), songs=False, song="") -> dict:
         """The draft's pictures as a video, its lines read in `voice` (the video's own: session.py picks
         it). It goes into a draft of its own; asked again (of either draft), that same video draft is made
-        again with the changes. speak(text) -> 24 kHz audio in that voice; compose(mood, seconds) -> WAV
-        bytes or None (FlowAI Sound)."""
+        again with the changes. speak(text) -> 24 kHz audio in that voice; compose(recipe, seconds) -> WAV
+        bytes or None: the recipe's song (songs: a music model is there; song: the music that suits the
+        post, described) or mood (FlowAI Sound's composer)."""
         try:
             source, target = self.video_drafts(ref)
             recipe = self._recipe(source, dict(target.video) if target else {}, lines, cta, cta_line, music,
-                                  captions, motion, placement, color, moods, compose is not None)
+                                  captions, motion, placement, color, moods, compose is not None, songs, song)
         except StudioError as exc:
             return {"error": str(exc)}
         recipe["voice"] = {k: voice.get(k) for k in ("id", "name", "description", "language", "archetype")}
@@ -529,7 +531,7 @@ class StudioSession:
             if seconds > most:
                 raise StudioError(f"the voiceover makes it {seconds:.0f} seconds, and {platforms.label(platform, where)} "
                                   f"takes up to {most:g}; shorter lines would fit")
-            tune = compose(recipe["music"], seconds + 1) if recipe["music"] and compose else None
+            tune = compose(recipe, seconds + 1) if recipe["music"] and compose else None
             look = reel.Look(size, fonts["bold"].path if "bold" in fonts else None, background, recipe["captions"],
                              accent, safe)
             data, meta = reel.render(shots, look, tune, lambda share: progress(0.15 + 0.85 * share))
@@ -545,12 +547,13 @@ class StudioSession:
             reply.update(source=source.id, into=f"draft {target.id}, made again" if target else "a new draft",
                          post=platforms.label(platform, where), size=f"{size[0]}x{size[1]}",
                          voice=f"{voice['name']} ({voice['description']})" if voice.get("description") else voice["name"],
+                         music=f"a song: {recipe['song']}" if recipe["music"] == "song" else recipe["music"] or "none",
                          expected_time=f"about {max(15, said // 12)} seconds",
                          note="it is made in the background and shown when ready; you'll be told")
         return reply
 
     def _recipe(self, source: Draft, recipe: dict, lines, cta, cta_line, music, captions, motion, placement,
-                color, moods, has_music) -> dict:
+                color, moods, has_music, songs=False, song="") -> dict:
         """How the video is made: what was asked now over what it was made with before."""
         if not source.slides:
             raise StudioError(f"draft {source.id} has no pictures to make a video of")
@@ -574,16 +577,26 @@ class StudioSession:
             recipe["cta"] = _plain(cta)[:40]
         if cta_line is not None:
             recipe["cta_line"] = _plain(cta_line)[:MAX_LINE]
+        # music: a mood (the composer's), "song" (written for this video from a description of it) or None
         if music is not None:
-            mood = re.sub(r"[\s_]+", "-", str(music).strip().lower())
+            said = " ".join(str(music).split())
+            mood = re.sub(r"[\s_]+", "-", said.lower())
             if mood in ("", "none", "no", "off", "false", "silence"):
                 recipe["music"] = None
-            elif moods and mood not in moods:
-                raise StudioError(f"music is one of {', '.join(moods)}, or none")
-            else:
+            elif mood in moods or not (moods or songs):
                 recipe["music"] = mood
+            elif songs:
+                described = song if mood == "song" else said
+                if not described:
+                    raise StudioError("describe the music: genre, instruments, mood and tempo")
+                recipe.update(music="song", song=described[:300], seed=random.randrange(2 ** 31))  # a new song
+            else:
+                raise StudioError(f"music is one of {', '.join(moods)}, or none")
         elif "music" not in recipe:
-            recipe["music"] = "golden-hour" if has_music else None
+            if songs and song:
+                recipe.update(music="song", song=song[:300], seed=random.randrange(2 ** 31))
+            else:
+                recipe["music"] = "golden-hour" if has_music else None
         if captions is not None:
             recipe["captions"] = str(captions).strip().lower() not in ("false", "0", "no", "off")
         recipe.setdefault("captions", True)
@@ -853,7 +866,7 @@ class StudioSession:
         problems = [f"{c['status']}, {c['label'].lower()}: {c['detail']}" for c in d.check.get("checks", [])
                     if c["status"] != "pass"]
         video = {"made_from": f"draft {d.video['from']}", **{k: d.video[k] for k in ("lines", "cta", "cta_line",
-                 "music", "captions", "motion") if d.video.get(k) not in (None, "")},
+                 "music", "song", "captions", "motion") if d.video.get(k) not in (None, "")},
                  **({"voice": d.video["voice"]["name"]} if d.video.get("voice") else {})} if d.video else None
         return {"draft": d.id, "version": d.version, "post": d.label, "size": f"{w}x{h}", "title": d.title,
                 **({"video": video} if video else {}),

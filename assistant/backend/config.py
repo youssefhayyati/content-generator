@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # Music under videos made with make_video (backend/reel.py): FlowAI Sound's composer, e.g.
     # http://sound:8000 next to FlowAI; empty = videos have only the voice
     sound_url: str = ""
+    # Songs written for each video (backend/music.py): an ACE-Step 1.5 API, e.g. http://music:8000 next to
+    # FlowAI (content-generator/music/) or a pod's; empty = only the composer's moods
+    music_url: str = ""
+    music_api_key: str = ""  # its ACESTEP_API_KEY, when it has one
+    music_timeout_seconds: int = 300  # the first song also loads the model
 
     # FlowAI (content-generator/): where drafts are saved as posts and scheduled (backend/flowai.py)
     flowai_url: str = ""  # its API, e.g. http://localhost:8002; empty = off

@@ -14,6 +14,7 @@ from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import ConversationStore
 from .llm import LLM
+from .music import SongWriter
 from .session import Models, VoiceSession
 from .tts import SAMPLE_RATE as TTS_RATE
 from .tts import TTSEngine
@@ -76,6 +77,9 @@ async def lifespan(app: FastAPI):
             log.error("Browser failed to start, website tools disabled: %s", str(exc).splitlines()[0])
             log.error("If Chromium is missing system libraries, run: sudo .venv/bin/playwright install-deps chromium")
             await browser.close()
+    if settings.music_url:
+        app.state.models.music = SongWriter(settings.music_url, settings.music_api_key, settings.music_timeout_seconds)
+        log.info("Songs for videos: ACE-Step at %s", settings.music_url)
     if settings.comfyui_url:
         comfy = ComfyClient(settings.comfyui_url, settings.comfyui_api_key, ROOT / settings.comfyui_descriptions)
         app.state.models.comfy = comfy

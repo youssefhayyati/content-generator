@@ -11,11 +11,14 @@ Wire protocol
             {"type": "upload", "name": "x.json", "workflow": {...}}
                                                attach a ComfyUI workflow file
             {"type": "reset"}                  start a new conversation (the old one is kept)
-            {"type": "hello", "timezone": "Europe/Paris", "token": "...", "conversation": "..."}
+            {"type": "hello", "timezone": "Europe/Paris", "token": "...", "conversation": "...", "speech": true}
                                                the user's time zone, for scheduling; token (optional):
                                                the page's FlowAI sign-in (POST /api/assistant/session),
                                                so the assistant acts as that user; conversation
-                                               (optional): the one to pick up again
+                                               (optional): the one to pick up again; speech (optional):
+                                               as {"type": "speech"}
+            {"type": "speech", "on": false}    replies as text only, not spoken (true: spoken again);
+                                               samples of voices still play
             {"type": "conversations"}          the list of the user's conversations
             {"type": "new", "campaign": 3}     a new conversation; with campaign, that FlowAI campaign's
                                                posts in it as drafts
@@ -52,7 +55,9 @@ Wire protocol
                                                the draft's pictures as a video read in a voice: voice is
                                                a voice's id (a ready one's or the catalog's), a
                                                description of one, or "mine" for the assistant's;
-                                               left out, the last video's, or one that suits the post
+                                               left out, the last video's, or one that suits the post;
+                                               music is a mood, "none", or a description of a song for
+                                               the music model ("song": a new one written for the post)
             {"type": "approve" | "decline", "id": 3, "conversation": "..."}
                                                the user's answer to an approval (scheduling, a campaign
                                                version); with "done": true the page did it itself
@@ -116,6 +121,7 @@ from .conversations import Conversation, ConversationStore
 from .flowai import FlowAIClient, FlowAISession
 from .llm import LLM
 from .media import MediaSession
+from .music import SongWriter
 from .skills import catalogue, load_skills
 from .studio import LOOK, StudioError, StudioSession, fonts_event, fonts_prompt
 from .tts import SAMPLE_RATE as TTS_RATE
@@ -127,13 +133,17 @@ log = logging.getLogger(__name__)
 SKILLS_INLINE_CHARS = 8000  # content skills up to this size go in the prompt instead of load_skill
 MY_VOICE = {"mine", "yours", "your", "assistant", "you", "same", "current", "default", "own"}
 CASTING = (
-    "You cast the voice that reads a short social media video. Reply with JSON only, no other words: "
-    '{"voice": "...", "language": "..."}. voice: 5 to 12 words in English, in this order: gender (male or '
+    "You cast the voice that reads a short social media video, and the music under it. Reply with JSON only, "
+    'no other words: {"voice": "...", "language": "...", "music": "..."}. voice: 5 to 12 words in English, in this order: gender (male or '
     "female), age (child, teenager, young adult, middle-aged or elderly), pitch (low, moderate or high), an "
     "accent only if the post calls for one (american, british, australian...), then how it is said (warm, "
     "energetic, calm, luxurious, playful, confident...) and what for (advertisement, social or narration). "
     "Pick what suits the brand, the product and who it speaks to. language: the language the words are in, "
-    "in English (English, French, Spanish...).")
+    "in English (English, French, Spanish...). music: the instrumental track under the voice, for a music model, "
+    "10 to 25 words in English: the genre, two or three instruments, the mood and energy, and a tempo in bpm, e.g. "
+    "'upbeat acoustic pop, bright ukulele, hand claps and shaker, feel-good and catchy, 112 bpm' or 'dark "
+    "cinematic trap, deep 808 bass, sharp hi-hats, confident and hard-hitting, 140 bpm'. Make it catchy and "
+    "right for the brand and its audience; no vocals, no song or artist names.")
 
 
 @dataclass
@@ -144,6 +154,7 @@ class Models:
     browser: Browser | None = None
     browser_llm: LLM | None = None
     comfy: ComfyClient | None = None
+    music: SongWriter | None = None  # songs written for videos (ACE-Step), when MUSIC_URL is set
     conversations: ConversationStore | None = None  # set once comfy is
 
 
@@ -169,6 +180,7 @@ class VoiceSession:
         self.conv = self.store.new(None if settings.flowai_url else "local")
         self.conv.sessions.add(self)
         self.voice: dict = models.tts.default  # every sentence in this voice (load_voice)
+        self.speech = True  # replies spoken; off: text only (the page's speech switch)
         self.flowai = self.new_flowai()
         self.flowai_loading: asyncio.Task | None = None
         self.switching = asyncio.Lock()  # one conversation change at a time
@@ -281,7 +293,12 @@ class VoiceSession:
             "is said), or pass the voice the user asked for; find_voices lists the ones that fit a description. "
             "Say which voice it is, so the user can ask for another. It is made in the background into its "
             "own draft; asking again (other words, music, button, voice) makes that same video again. "
-            "Make independent changes together in one step. Change only what the user named (the headline is one "
+            + ("Its music is a song written for it: leave music out and the first video gets one that suits the "
+               "post. To change it, describe the music in music (genre, instruments, mood and energy, tempo in "
+               "bpm, no vocals), or pass 'song' for a new one written for the post; a mood of the composer's only "
+               "when the user asks for one. "
+               if self.m.music else "")
+            + "Make independent changes together in one step. Change only what the user named (the headline is one "
             "text) and keep everything else. Never leave a placeholder such as [date] or [link] in a caption or "
             "text: write the real words (\"this Friday\") or ask. The user sees every new version, so say in a few "
             "words what changed instead of reading captions aloud, and mention any problem the platform check "
@@ -297,6 +314,10 @@ class VoiceSession:
         # The date, not the time, so the prompt stays the same all day (the time is a tool call away)
         today = datetime.now(self.flowai.tz if self.flowai else None)
         prompt += f"\n\nToday is {today:%A} {today.day} {today:%B %Y}."
+        if not self.speech:
+            prompt += ("\n\nSpeech is off right now: the user reads your replies on screen instead of hearing "
+                       "them, so a reply can be a little longer when that helps (a few options, exact names "
+                       "and numbers), still in plain text.")
         return prompt
 
     # --- sending ------------------------------------------------------------------
@@ -329,7 +350,7 @@ class VoiceSession:
             self.flowai_loading = asyncio.create_task(self.flowai.load())
 
     async def run(self):
-        await self.send(type="ready", tts_sample_rate=TTS_RATE, asr_mode=settings.asr_mode)
+        await self.send(type="ready", tts_sample_rate=TTS_RATE, asr_mode=settings.asr_mode, songs=self.m.music is not None)
         await self.send(**fonts_event(ROOT / settings.fonts_dir))
         try:
             while True:
@@ -364,6 +385,8 @@ class VoiceSession:
             case "upload":
                 await self.on_upload(msg)
             case "hello":
+                if "speech" in msg:
+                    self.speech = msg["speech"] is not False
                 if self.flowai:
                     self.flowai.set_timezone(msg.get("timezone", ""))
                     if msg.get("token") and not self.flowai_loading:
@@ -391,6 +414,11 @@ class VoiceSession:
                 self.spawn(self.set_voice(msg))
             case "preview_voice":
                 self.spawn(self.preview_voice(msg))
+            case "speech":
+                self.speech = msg.get("on") is not False
+                log.info("speech %s", "on" if self.speech else "off")
+                if not self.speech:
+                    self.speaking_until = 0.0  # the page stopped playing what was left
             case "video_voices":
                 self.spawn(self.send_video_voices(msg))
 
@@ -635,10 +663,16 @@ class VoiceSession:
     # the voice that fits that description best is used). The assistant keeps speaking in self.voice.
 
     async def make_video(self, draft=None, voice=None, **asked) -> dict:
-        """make_video in the video's voice, with FlowAI Sound's music if it's there."""
+        """make_video in the video's voice, over a song written for it (ACE-Step) or FlowAI Sound's
+        composer, whichever is there."""
+        songs, song = self.m.music, ""
         try:
             source, target = self.studio.video_drafts(draft)
             before = (target.video or {}).get("voice") if target else None
+            # A song suited to the post: for the first video, or when a new one is asked for
+            if songs and (str(asked.get("music") or "").strip().lower() == "song"
+                          or (asked.get("music") is None and not target)):
+                song = (await self.cast(source, asked.get("lines")))["music"]
             if voice not in (None, ""):
                 chosen = await self.video_voice(str(voice))
             elif before:
@@ -652,7 +686,17 @@ class VoiceSession:
             chosen = self.voice
         tts, speaker = self.m.tts, chosen["id"]
 
-        def compose(mood: str, seconds: float) -> bytes | None:  # in the render's thread
+        def compose(recipe: dict, seconds: float) -> bytes | None:  # in the render's thread
+            mood = recipe["music"]
+            if mood == "song":
+                if songs:
+                    try:
+                        return songs.song(recipe["song"], seconds, recipe.get("seed"))
+                    except Exception as exc:
+                        log.warning("no song for the video, the composer's music instead: %s", exc)
+                mood = "golden-hour"
+            if not settings.sound_url:
+                return None
             try:
                 r = httpx.post(f"{settings.sound_url.rstrip('/')}/v1/music", timeout=120,
                                json={"mood": mood, "seconds": round(min(max(seconds, 5), 180), 1)})
@@ -664,7 +708,8 @@ class VoiceSession:
 
         return await self.studio.make_video(draft, **asked, voice=chosen,
                                             speak=lambda text: tts.synthesize(text, speaker),
-                                            compose=compose if settings.sound_url else None, moods=tuple(reel.MOODS))
+                                            compose=compose if settings.sound_url or songs else None,
+                                            moods=tuple(reel.MOODS), songs=songs is not None, song=song)
 
     async def video_voice(self, wanted: str) -> dict:
         """A voice asked for by id (a ready one's or the catalog's), by name, or by a description of it."""
@@ -683,8 +728,8 @@ class VoiceSession:
         return await asyncio.to_thread(tts.adopt, v["id"]) if catalog else v
 
     async def cast(self, source, lines=None) -> dict:
-        """The voice that suits a post, described: {"voice": "female, young adult, ...", "language": "..."}.
-        Asked of the LLM once per content."""
+        """The voice and music that suit a post, described: {"voice": "female, young adult, ...",
+        "language": "...", "music": "upbeat acoustic pop, ..."}. Asked of the LLM once per content."""
         lines = [str(x) for x in lines] if isinstance(lines, list) else (source.video or {}).get("lines") or []
         texts = [t.text for sl in source.slides for t in sl.texts]
         post = "\n".join(filter(None, [
@@ -693,12 +738,13 @@ class VoiceSession:
             any(lines) and f"What the voice says: {' / '.join(x for x in lines if x)}"]))
         if post in self.castings:
             return self.castings[post]
-        described = {"voice": "", "language": ""}
+        described = {"voice": "", "language": "", "music": ""}
         try:
             reply = await self.m.llm.chat([{"role": "system", "content": CASTING}, {"role": "user", "content": post}], [])
             text = reply.content or ""
             found = json.loads(text[text.index("{"):text.rindex("}") + 1])
-            described = {"voice": str(found.get("voice") or "")[:160], "language": str(found.get("language") or "")[:40]}
+            described = {"voice": str(found.get("voice") or "")[:160], "language": str(found.get("language") or "")[:40],
+                         "music": " ".join(str(found.get("music") or "").split())[:300]}
         except Exception as exc:
             log.warning("no voice described for draft %s: %s", source.id, exc)
         if described["voice"]:
@@ -938,6 +984,8 @@ class VoiceSession:
 
     async def speak(self, sentences: asyncio.Queue, turn: int):
         while (text := await sentences.get()) is not None:
+            if not self.speech:  # text only: the words are on screen already
+                continue
             t0 = time.perf_counter()
             audio = await asyncio.to_thread(self.m.tts.synthesize, text, self.voice["id"])
             dur = len(audio) / TTS_RATE

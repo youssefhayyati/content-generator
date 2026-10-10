@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Clapperboard, Film, LoaderCircle, Play, Search, Sparkles, Square } from 'lucide-react'
+import { Clapperboard, Film, LoaderCircle, Music2, Play, Search, Sparkles, Square } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, inputClass, Label, Segmented, Skeleton, Toggle } from '../ui'
@@ -9,20 +9,22 @@ import { describe, VoiceRow } from './Voices'
 
 /*
  * A post's pictures as a short video with a voice over them (assistant/backend/reel.py): a line per
- * picture, the pictures slowly moving, captions, music from FlowAI Sound and an end card with a call
- * to action. The video has a voice of its own: one that suits the post unless the person picks
- * another (session.py, cast_voice), kept for when it's made again. It's made into a draft of its own;
- * making it again changes that same draft.
+ * picture, the pictures slowly moving, captions, music and an end card with a call to action. The
+ * video has a voice of its own: one that suits the post unless the person picks another (session.py,
+ * cast_voice), kept for when it's made again. Its music is a song written for it from a description
+ * (ACE-Step, assistant/backend/music.py), the post's own unless the person describes another, or one
+ * of FlowAI Sound's moods. It's made into a draft of its own; making it again changes that same draft.
  */
 
+const SONG = { value: 'song', label: 'A song written for it' }
 const MUSIC = [
-  { value: 'none', label: 'No music' },
   { value: 'golden-hour', label: 'Golden hour · warm lo-fi' },
   { value: 'linen', label: 'Linen · airy ambient' },
   { value: 'atelier', label: 'Atelier · bright acoustic' },
   { value: 'pulse', label: 'Pulse · upbeat house' },
   { value: 'night-drive', label: 'Night drive · synthwave' },
   { value: 'bloom', label: 'Bloom · dreamy, cinematic' },
+  { value: 'none', label: 'No music' },
 ]
 const MOTION = [
   { value: 'auto', label: 'Mixed' },
@@ -44,6 +46,10 @@ type Form = {
   cta: string
   cta_line: string
   music: string
+  /** The song described (music 'song'); empty: one that suits the post. */
+  song: string
+  /** Make the same song again as a new take, not the one it has. */
+  retake: boolean
   captions: boolean
   motion: string
   placement: string
@@ -51,13 +57,15 @@ type Form = {
   voice: Voice | null
 }
 
-function formFrom(recipe: VideoRecipe | null | undefined, n: number, platform: string): Form {
+function formFrom(recipe: VideoRecipe | null | undefined, n: number, platform: string, songs: boolean): Form {
   const lines = [...(recipe?.lines ?? [])].slice(0, n)
   return {
     lines: [...lines, ...Array(Math.max(0, n - lines.length)).fill('')],
     cta: recipe?.cta ?? '',
     cta_line: recipe?.cta_line ?? '',
-    music: recipe ? (recipe.music ?? 'none') : 'golden-hour',
+    music: recipe ? (recipe.music ?? 'none') : songs ? 'song' : 'golden-hour',
+    song: recipe?.song ?? '',
+    retake: false,
     captions: recipe?.captions ?? true,
     motion: recipe?.motion ?? 'auto',
     placement: recipe?.placement ?? (platform === 'x' ? 'post' : 'reel'),
@@ -73,9 +81,9 @@ export function VideoMaker({ d }: { d: Draft }) {
   const made = d.video ? d : d.videos.length ? a.drafts[d.videos[d.videos.length - 1]] : undefined
   const recipe = made?.video
   const n = source?.slides.length ?? 0
-  const [form, setForm] = useState<Form>(() => formFrom(recipe, n, d.platform))
-  const key = `${source?.id}-${made?.id}-${made?.version}-${n}`
-  useEffect(() => setForm(formFrom(recipe, n, d.platform)), [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [form, setForm] = useState<Form>(() => formFrom(recipe, n, d.platform, a.songs))
+  const key = `${source?.id}-${made?.id}-${made?.version}-${n}-${a.songs}`
+  useEffect(() => setForm(formFrom(recipe, n, d.platform, a.songs)), [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const job = Object.values(a.jobs).find((j) => source && j.label === `Making the video of draft ${source.id}`)
   const pictures = source?.slides.filter((s) => s.kind === 'image').length ?? 0
@@ -94,13 +102,18 @@ export function VideoMaker({ d }: { d: Draft }) {
     )
   }
 
+  // The song it has stays as it is unless it's described anew or a new take is asked for
+  const described = form.song.trim()
+  const sameSong = recipe?.music === 'song' && described === (recipe.song ?? '') && !form.retake
+  // Songs off: a song it had is kept (the composer plays in its place), a new one is the composer's
+  const music = form.music !== 'song' ? form.music : !a.songs ? (recipe?.music === 'song' ? undefined : 'golden-hour') : sameSong ? undefined : described || 'song'
   const make = () =>
     a.action('make_video', {
       draft: d.id,
       lines: form.lines.map((l) => l.trim()),
       cta: form.cta.trim(),
       cta_line: form.cta_line.trim(),
-      music: form.music,
+      ...(music !== undefined ? { music } : {}),
       captions: form.captions,
       motion: form.motion,
       placement: form.placement,
@@ -108,7 +121,7 @@ export function VideoMaker({ d }: { d: Draft }) {
     })
   const writeForMe = () =>
     void a.say(
-      `Write a short voiceover for draft ${source.id}, one line per picture, with a call to action at the end, and make it into a video${form.music !== 'none' ? ` with ${form.music} music` : ' without music'}, ${form.voice ? `read by the voice ${form.voice.name} (voice ${form.voice.id})` : 'read by a voice that suits the post'}.`,
+      `Write a short voiceover for draft ${source.id}, one line per picture, with a call to action at the end, and make it into a video${form.music === 'song' ? (described ? ` with this music: ${described}` : ' with a song that suits the post') : form.music !== 'none' ? ` with ${form.music} music` : ' without music'}, ${form.voice ? `read by the voice ${form.voice.name} (voice ${form.voice.id})` : 'read by a voice that suits the post'}.`,
     )
 
   return (
@@ -192,7 +205,7 @@ export function VideoMaker({ d }: { d: Draft }) {
         <div className="min-w-[12rem] flex-1">
           <Label className="mb-1.5">Music</Label>
           <select value={form.music} onChange={(e) => set({ music: e.target.value })} aria-label="Music" className={cn(inputClass, 'h-8 px-2 text-[12px]')}>
-            {MUSIC.map((m) => (
+            {[...(a.songs || form.music === 'song' ? [SONG] : []), ...MUSIC].map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
@@ -214,6 +227,41 @@ export function VideoMaker({ d }: { d: Draft }) {
           Captions
         </label>
       </div>
+
+      <AnimatePresence initial={false}>
+        {form.music === 'song' && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.25, ease }} className="-mt-1 overflow-hidden">
+            <div className="flex items-center gap-3 pt-1">
+              <label className="relative block min-w-0 flex-1">
+                <Music2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
+                <input
+                  value={form.song}
+                  onChange={(e) => set({ song: e.target.value, retake: false })}
+                  maxLength={300}
+                  placeholder="upbeat acoustic pop, ukulele, hand claps, 112 bpm"
+                  aria-label="Describe the music"
+                  className={cn(inputClass, 'h-8 pl-8 text-[12.5px]')}
+                />
+              </label>
+              {recipe?.music === 'song' && described === (recipe.song ?? '') && (
+                <label className="flex h-8 shrink-0 items-center gap-2 text-[12px] text-muted">
+                  <Toggle on={form.retake} onChange={(retake) => set({ retake })} label="A new take of this song" />
+                  New take
+                </label>
+              )}
+            </div>
+            <p className="mt-1.5 text-[11px] leading-snug text-dim">
+              {!a.songs
+                ? 'Songs are off right now, so Golden hour plays instead. They come back once the music service is running.'
+                : sameSong
+                  ? 'Made again with the same song. Describe another, or ask for a new take.'
+                  : described
+                    ? 'Written for this video from your words: genre, instruments, mood and tempo work best. No vocals.'
+                    : 'Left empty, a song that suits the post is written for it.'}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence initial={false}>
         {job && (

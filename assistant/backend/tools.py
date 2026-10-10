@@ -412,8 +412,15 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
                                                      "'Order yours', 'Book a table'; empty for no end card"},
             "cta_line": {"type": "string", "description": "The call to action the voice says on the end card, e.g. "
                                                           "'Order yours today, the link is in our bio.'"},
-            "music": {"type": "string", "enum": [*MOODS, "none"],
-                      "description": "Background music: " + ", ".join(f"{k} ({v})" for k, v in MOODS.items())},
+            "music": {"type": "string",
+                      "description": "Background music. When songs are on, leave it out: the first video gets "
+                                     "an instrumental song written for the post, and a video made again keeps its "
+                                     "song. To change the song, describe the music for the music model, in English "
+                                     "(genre, instruments, mood and energy, tempo in bpm, e.g. 'upbeat acoustic "
+                                     "pop, ukulele and hand claps, catchy, 112 bpm'), or pass 'song' for a new one "
+                                     "written for the post. Only when the user asks for one, or songs are off: one "
+                                     "of the composer's moods, " + ", ".join(f"{k} ({v})" for k, v in MOODS.items())
+                                     + ". Or none for no music"},
             "captions": {"type": "boolean", "description": "Show the spoken words (default true)"},
             "motion": {"type": "string", "enum": ["auto", "pan", *MOTIONS],
                        "description": "How the pictures move (default auto: a different move for each; pan: "
