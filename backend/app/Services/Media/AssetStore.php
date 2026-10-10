@@ -8,6 +8,7 @@ use App\Services\Sound\AudioTools;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * Puts media in the library: uploads, generated images, videos and sound, phone screenshots.
@@ -38,6 +39,23 @@ class AssetStore
     {
         $path = $this->directory($user).'/'.Str::random(32).'.'.$this->extension($mime);
         Storage::disk('local')->put($path, $contents);
+
+        return $this->finish($user, $path, $mime, $name, $source, $meta);
+    }
+
+    /** Store a renderer's file without loading a potentially large video into PHP memory. */
+    public function fromPath(User $user, string $sourcePath, string $mime, string $name, string $source, array $meta = []): Asset
+    {
+        $path = $this->directory($user).'/'.Str::random(32).'.'.$this->extension($mime);
+        $stream = @fopen($sourcePath, 'rb');
+        if (! $stream) {
+            throw new RuntimeException('The rendered media could not be opened.');
+        }
+        try {
+            Storage::disk('local')->put($path, $stream);
+        } finally {
+            fclose($stream);
+        }
 
         return $this->finish($user, $path, $mime, $name, $source, $meta);
     }

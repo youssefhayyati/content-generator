@@ -28,6 +28,7 @@ use App\Http\Controllers\InboxController;
 use App\Http\Controllers\InboxNoteController;
 use App\Http\Controllers\InspirationController;
 use App\Http\Controllers\InvestigationController;
+use App\Http\Controllers\LinkClipController;
 use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
 use App\Http\Controllers\OverviewController;
@@ -87,6 +88,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // The voice assistant's session: a token it works with as this user (drafts only).
     Route::post('assistant/session', [AssistantController::class, 'session']);
+
+    // Turn a YouTube video or article link into a captioned vertical draft.
+    Route::get('clips', [LinkClipController::class, 'index']);
+    Route::post('clips', [LinkClipController::class, 'store'])->middleware(['verified', 'throttle:ai']);
+    Route::get('clips/{clip}', [LinkClipController::class, 'show']);
+    Route::post('clips/{clip}/retry', [LinkClipController::class, 'retry'])->middleware(['verified', 'throttle:ai']);
+    Route::delete('clips/{clip}', [LinkClipController::class, 'destroy']);
 
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);

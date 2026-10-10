@@ -1,0 +1,188 @@
+<?php
+
+namespace App\Services\Clips;
+
+use App\Enums\PostFormat;
+use App\Enums\PostStatus;
+use App\Models\ActionLog;
+use App\Models\Asset;
+use App\Models\LinkClip;
+use App\Services\Flows\SafeUrl;
+use App\Services\Media\AssetStore;
+use App\Services\Sound\AudioTools;
+use App\Services\Sound\Listener;
+use App\Services\Sound\ReelRenderer;
+use App\Services\Sound\SoundClient;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+/** The complete source-link → vertical video → draft workflow. */
+class LinkClipper
+{
+    public function __construct(
+        private readonly YouTubeDownloader $youtube,
+        private readonly ArticleReader $articles,
+        private readonly ClipPlanner $planner,
+        private readonly ClipRenderer $clips,
+        private readonly Listener $listener,
+        private readonly SoundClient $sound,
+        private readonly ReelRenderer $reels,
+        private readonly AudioTools $audio,
+        private readonly AssetStore $assets,
+    ) {}
+
+    public function run(LinkClip $clip): void
+    {
+        $clip->source_type === 'youtube' ? $this->youtube($clip) : $this->article($clip);
+    }
+
+    private function youtube(LinkClip $clip): void
+    {
+        $clip->update(['status' => 'downloading', 'error' => null]);
+        $source = $this->youtube->download($clip->source_url);
+        $rendered = null;
+        try {
+            $clip->update(['status' => 'analyzing', 'title' => $source['title']]);
+            $heard = $this->listener->file($source['path'], maxSeconds: YouTubeDownloader::MAX_SOURCE_SECONDS);
+            $wanted = (int) ($clip->settings['seconds'] ?? 30);
+            $plan = $this->planner->video($clip, $heard, $source['duration'], $wanted, $source['title']);
+            $seconds = max(3, $plan['end'] - $plan['start']);
+            $words = $this->inside($heard, $plan['start'], $plan['end']);
+
+            $clip->update(['status' => 'rendering', 'analysis' => [...$plan, 'source_title' => $source['title'], 'author' => $source['author']]]);
+            $rendered = $this->clips->render($source['path'], $plan['start'], $seconds, $words, $plan['title'], (string) ($clip->settings['accent'] ?? '#a5b4fc'));
+            $asset = $this->assets->fromPath($clip->user, $rendered, 'video/mp4', $plan['title'].'.mp4', 'generated', [
+                'generator' => 'link-clip',
+                'source_url' => $clip->source_url,
+                'source_title' => $source['title'],
+                'source_author' => $source['author'],
+                'clip_start' => $plan['start'],
+                'clip_end' => $plan['end'],
+                'words' => $words,
+            ]);
+            $this->finish($clip, $asset, $plan);
+        } finally {
+            @unlink((string) $rendered);
+            File::deleteDirectory($source['cleanup']);
+        }
+    }
+
+    private function article(LinkClip $clip): void
+    {
+        $clip->update(['status' => 'reading', 'error' => null]);
+        $article = $this->articles->read($clip->source_url);
+        $clip->update(['status' => 'writing', 'title' => $article['title']]);
+        $plan = $this->planner->article($clip, $article, (int) ($clip->settings['seconds'] ?? 30));
+
+        if (! $this->sound->up()) {
+            throw new RuntimeException('FlowAI Sound is needed to narrate an article reel. Start the sound service and try again.');
+        }
+        $voice = collect($this->sound->voices())->first();
+        if (! $voice) {
+            throw new RuntimeException('FlowAI Sound has no available narration voice.');
+        }
+        $spoken = $this->sound->speak($plan['script'], $voice['id'], 1.0, true);
+        $wav = tempnam(sys_get_temp_dir(), 'clip-voice').'.wav';
+        $image = null;
+        $rendered = null;
+        file_put_contents($wav, $spoken['wav']);
+        try {
+            $image = $this->image($article['image']);
+            $clip->update(['status' => 'rendering', 'analysis' => [...$plan, 'source_title' => $article['title']]]);
+            $rendered = $this->reels->render([
+                'voice' => $wav,
+                'words' => $spoken['words'],
+                'background' => $image,
+                'background_kind' => $image ? 'image' : null,
+                'style' => 'bold',
+                'accent' => (string) ($clip->settings['accent'] ?? '#a5b4fc'),
+                'title' => $plan['title'],
+                'captions' => true,
+            ], $this->audio);
+            $asset = $this->assets->fromPath($clip->user, $rendered, 'video/mp4', $plan['title'].'.mp4', 'generated', [
+                'generator' => 'article-reel',
+                'source_url' => $clip->source_url,
+                'source_title' => $article['title'],
+                'sound' => 'reel',
+                'voice' => $spoken['voice'],
+                'script' => $plan['script'],
+                'words' => $spoken['words'],
+                'lang' => $spoken['lang'],
+            ]);
+            $this->finish($clip, $asset, $plan);
+        } finally {
+            @unlink($wav);
+            @unlink((string) $image);
+            @unlink((string) $rendered);
+        }
+    }
+
+    private function finish(LinkClip $clip, Asset $asset, array $plan): void
+    {
+        $platform = in_array($clip->settings['platform'] ?? null, ['instagram', 'tiktok'], true) ? $clip->settings['platform'] : 'tiktok';
+        $post = $clip->user->posts()->create([
+            'title' => Str::limit($plan['title'], 110, ''),
+            'body' => Str::limit($plan['caption'], 2100, ''),
+            'format' => PostFormat::Video,
+            'placement' => $platform === 'instagram' ? 'reel' : 'video',
+            'platforms' => [$platform],
+            'status' => PostStatus::Draft,
+        ]);
+        $post->syncAssets([$asset->id]);
+        $clip->update(['status' => 'ready', 'title' => $plan['title'], 'asset_id' => $asset->id, 'post_id' => $post->id, 'error' => null]);
+        ActionLog::record($clip->user, 'agent:clipper', 'post.draft', $post, 'Turned a source link into a vertical video draft.', null, ['source_url' => $clip->source_url]);
+    }
+
+    /** Shift the source transcript so captions begin at zero in the rendered clip. */
+    private function inside(array $heard, float $start, float $end): array
+    {
+        $words = collect($heard['words'] ?? [])->filter(fn ($w) => (float) ($w['end'] ?? 0) > $start && (float) ($w['start'] ?? 0) < $end)->map(fn ($w) => [
+            'text' => trim((string) ($w['text'] ?? '')),
+            'start' => round(max(0, (float) $w['start'] - $start), 3),
+            'end' => round(min($end - $start, (float) $w['end'] - $start), 3),
+        ])->filter(fn ($w) => filled($w['text']) && $w['end'] > $w['start'])->values()->all();
+
+        return $words ?: $this->wordsFromSegments($heard['segments'] ?? [], $start, $end);
+    }
+
+    private function wordsFromSegments(array $segments, float $start, float $end): array
+    {
+        $out = [];
+        foreach ($segments as $segment) {
+            if (($segment['end'] ?? 0) <= $start || ($segment['start'] ?? 0) >= $end) {
+                continue;
+            }
+            $parts = preg_split('/\s+/u', trim((string) ($segment['text'] ?? ''))) ?: [];
+            $from = max($start, (float) $segment['start']);
+            $to = min($end, (float) $segment['end']);
+            $step = ($to - $from) / max(1, count($parts));
+            foreach ($parts as $i => $word) {
+                $out[] = ['text' => $word, 'start' => round($from - $start + $i * $step, 3), 'end' => round($from - $start + ($i + 1) * $step, 3)];
+            }
+        }
+
+        return $out;
+    }
+
+    private function image(?string $url): ?string
+    {
+        if (! $url || SafeUrl::problem($url)) {
+            return null;
+        }
+        $response = Http::timeout(20)->withOptions(['allow_redirects' => false])->withHeaders(['User-Agent' => 'FlowAI Clip Studio/1.0'])->get($url);
+        $mime = strtolower(strtok((string) $response->header('Content-Type'), ';'));
+        if (! $response->successful() || ! in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true) || strlen($response->body()) > 12_000_000) {
+            return null;
+        }
+        $path = tempnam(sys_get_temp_dir(), 'article-image').match ($mime) {
+            'image/png' => '.png',
+            'image/webp' => '.webp',
+            default => '.jpg',
+        };
+        file_put_contents($path, $response->body());
+
+        return $path;
+    }
+}

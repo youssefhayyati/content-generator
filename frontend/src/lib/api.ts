@@ -81,6 +81,26 @@ export type AssetSound = {
 
 export type TimedWord = { text: string; start: number; end: number }
 
+export type LinkClip = {
+  id: number
+  source_url: string
+  source_type: 'youtube' | 'article'
+  status: 'queued' | 'downloading' | 'reading' | 'analyzing' | 'writing' | 'rendering' | 'ready' | 'failed'
+  title: string | null
+  platform: 'instagram' | 'tiktok'
+  seconds: number
+  progress: number
+  start: number | null
+  end: number | null
+  reason: string | null
+  caption: string | null
+  asset: Asset | null
+  post_id: number | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
 /** GET /assets/{id}/words */
 export type AssetWords = {
   words: TimedWord[]

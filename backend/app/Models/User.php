@@ -68,6 +68,12 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(Asset::class);
     }
 
+    /** Source links being turned into vertical social clips. */
+    public function linkClips(): HasMany
+    {
+        return $this->hasMany(LinkClip::class);
+    }
+
     /**
      * @return HasMany<Account, $this>
      */
