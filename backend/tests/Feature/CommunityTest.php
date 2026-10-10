@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\PostStatus;
 use App\Models\Account;
+use App\Models\Asset;
 use App\Models\Comment;
 use App\Models\Post;
 use App\Models\Repost;
@@ -68,6 +69,7 @@ class CommunityTest extends TestCase
             'source_url' => 'https://x.com/slowmade/status/123',
             'author' => 'slowmade',
             'source_text' => 'We pour forty candles at a time. No more: the wax needs the room to cure.',
+            'asset_ids' => [Asset::factory()->for($this->user)->create()->id], // Instagram needs a photo
             ...$overrides,
         ])->assertCreated()->json();
     }
@@ -87,7 +89,7 @@ class CommunityTest extends TestCase
         $this->assertSame('dropped', $denied['status']);
         $this->spa()->actingAs($this->user)->postJson("/api/reposts/{$repost['id']}/adapt")->assertConflict();
 
-        // Only Instagram accounts take reposts.
+        // An X post goes to Instagram, not back to X.
         $x = Account::factory()->for($this->user)->create(['platform' => 'x']);
         $this->spa()->actingAs($this->user)->postJson('/api/reposts', [
             'account_id' => $x->id, 'source_url' => 'https://x.com/a/status/1', 'author' => 'a', 'source_text' => 'text',

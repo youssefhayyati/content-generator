@@ -287,17 +287,24 @@ export type AccountAutonomy = {
 
 export type PreviewItem = { kind: AutonomyAction; label: string; verdict: string }
 
-/** An X post picked for reuse on Instagram. */
+/** A post picked on X or Instagram for reuse on the other. */
 export type Repost = {
   id: number
+  source_platform: 'x' | 'instagram'
   source_url: string
   author: string
   source_text: string
+  /** The source's photos and video, saved to the library. */
+  media: Array<{ id: number; kind: 'image' | 'video' | 'audio'; url: string; poster_url: string | null }>
   permission: 'pending' | 'allowed' | 'denied'
   permission_note: string | null
-  status: 'captured' | 'adapted' | 'scheduled' | 'dropped'
+  status: 'fetching' | 'failed' | 'captured' | 'adapted' | 'scheduled' | 'dropped'
+  /** Why the source couldn't be read. */
+  error: string | null
   caption: string | null
   caption_with_credit: string | null
+  /** What will post: caption, credit and hashtags, within the target's limit. */
+  body: string | null
   hashtags: string[]
   attribution: boolean
   post_id: number | null

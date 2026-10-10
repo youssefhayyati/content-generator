@@ -201,6 +201,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Repost from X to Instagram: pick, record permission, adapt, credit, schedule.
     Route::get('reposts', [RepostController::class, 'index']);
     Route::post('reposts', [RepostController::class, 'store']);
+    Route::post('reposts/{repost}/fetch', [RepostController::class, 'fetch'])->middleware('throttle:20,1');
     Route::post('reposts/{repost}/permission', [RepostController::class, 'permission']);
     Route::post('reposts/{repost}/schedule', [RepostController::class, 'schedule']);
     Route::delete('reposts/{repost}', [RepostController::class, 'destroy']);
