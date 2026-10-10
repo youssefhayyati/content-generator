@@ -62,6 +62,7 @@ services:
       FLOWAI_URL: http://api:8000
       FLOWAI_DASHBOARD_URL: http://localhost:5173
       BROWSER_ENABLED: "false"
+      SOUND_URL: http://sound:8000  # music under the videos it makes from posts
     ports:
       - "${ASSISTANT_PORT:-8003}:8000"
     volumes: &assistant-volumes

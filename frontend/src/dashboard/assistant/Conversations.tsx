@@ -105,13 +105,17 @@ export function ConversationList({ open, onClose, onImport }: { open: boolean; o
   const [q, setQ] = useState('')
   const refresh = a.refreshConversations
 
+  // Once per opening: onClose is a new function on every render
+  useEffect(() => {
+    if (open) refresh()
+  }, [open, refresh])
+
   useEffect(() => {
     if (!open) return
-    refresh()
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, refresh])
+  }, [open, onClose])
 
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   const items = a.conversations.filter((c) => {

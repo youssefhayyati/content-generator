@@ -22,6 +22,8 @@ import {
   TriangleAlert,
   Type,
   Undo2,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
@@ -31,8 +33,12 @@ import { useRouter } from '../../lib/router'
 import { fromInputs, toInputs } from '../data'
 import { useUser } from '../Shell'
 import { Avatar, Btn, EmptyState, inputClass, Label, Menu, Segmented } from '../ui'
+import { FontPicker } from './Fonts'
 import { PICTURE_DRAG, ASSET_DRAG, MediaChooser } from './MediaView'
+import { TextColours } from './Palette'
+import { MaskBar, MaskCanvas, MaskProvider } from './Retouch'
 import { useAssistant, type Draft, type Linked, type Slide, type TextBox } from './store'
+import { VideoMaker } from './VideoMaker'
 
 const POSITIONS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']
 const SIZES = [
@@ -47,13 +53,6 @@ const STYLES = [
   { value: 'box', label: 'Box' },
   { value: 'plain', label: 'Plain' },
 ]
-const FONTS = [
-  { value: 'bold', label: 'Bold' },
-  { value: 'semibold', label: 'Semi' },
-  { value: 'serif', label: 'Serif' },
-  { value: 'mono', label: 'Mono' },
-]
-const COLORS = ['white', 'black', '#f2c14e', '#ff6b5b', '#7cc4ff', '#5ee39a', '#c4a7ff']
 
 /** The Draft tab: the post as it will look, and everything about it within reach. */
 export function DraftView() {
@@ -66,6 +65,18 @@ export function DraftView() {
   useEffect(() => {
     if (a.focus.draft && a.focus.slide) setShown((s) => ({ ...s, [a.focus.draft!]: a.focus.slide! - 1 }))
   }, [a.focus])
+
+  // Painting stays on the slide on screen: another slide, or another draft, starts it over or ends it
+  const shownIndex = d ? Math.min(shown[d.id] ?? 0, Math.max(0, d.slides.length - 1)) : 0
+  const { painting, paint } = a
+  useEffect(() => {
+    if (!painting) return
+    if (!d || painting.draft !== d.id || d.slides[shownIndex]?.kind !== 'image') paint(null)
+    else if (painting.slide !== shownIndex + 1) {
+      paint(null)
+      paint({ draft: d.id, slide: shownIndex + 1 })
+    }
+  }, [d, shownIndex, painting, paint])
 
   if (!d) {
     return (
@@ -114,15 +125,18 @@ export function DraftView() {
         <NewDraft compact />
       </div>
 
-      <div className="grid gap-4 @2xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-        <div className="space-y-3">
-          <div className="mx-auto w-full max-w-[400px] overflow-hidden rounded-xl border border-line bg-panel">
-            <Preview d={d} index={index} onShow={show} />
+      <MaskProvider>
+        <div className="grid gap-4 @2xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          <div className="space-y-3">
+            <div className="mx-auto w-full max-w-[400px] overflow-hidden rounded-xl border border-line bg-panel">
+              <Preview d={d} index={index} onShow={show} />
+            </div>
+            <MaskBar d={d} index={index} />
+            <Checks d={d} />
           </div>
-          <Checks d={d} />
+          <Inspector d={d} index={index} onShow={show} />
         </div>
-        <Inspector d={d} index={index} onShow={show} />
-      </div>
+      </MaskProvider>
     </div>
   )
 }
@@ -305,7 +319,9 @@ function SlideFrame({ d, i }: { d: Draft; i: number }) {
   const slide: Slide | undefined = d.slides[i]
   const [editing, setEditing] = useState<number | null>(null)
   const [over, setOver] = useState(false)
+  const [sound, setSound] = useState(false)
   const picked = a.focus.draft === d.id && a.focus.slide === i + 1 && !a.focus.text
+  const painting = a.painting?.draft === d.id && a.painting.slide === i + 1 && slide?.kind === 'image'
 
   const onDrop = (e: DragEvent) => {
     setOver(false)
@@ -331,7 +347,21 @@ function SlideFrame({ d, i }: { d: Draft; i: number }) {
       onDrop={onDrop}
     >
       {slide?.kind === 'video' ? (
-        <video src={slide.url} muted autoPlay loop playsInline className="size-full object-cover" />
+        <>
+          <video src={slide.url} muted={!sound} autoPlay loop playsInline className="size-full object-cover" />
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setSound((on) => !on)
+            }}
+            aria-label={sound ? 'Mute the video' : 'Play the video with sound'}
+            title={sound ? 'Mute' : 'Sound on'}
+            className="absolute bottom-2.5 right-2.5 z-10 grid size-8 place-items-center rounded-full bg-black/60 text-white backdrop-blur transition-colors hover:bg-black/80"
+          >
+            {sound ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
+          </button>
+        </>
       ) : slide ? (
         <img src={slide.url} alt={`Slide ${i + 1}`} className="size-full object-cover" draggable={false} />
       ) : (
@@ -372,6 +402,7 @@ function SlideFrame({ d, i }: { d: Draft; i: number }) {
         )
       })}
       {editing !== null && slide && <InlineText d={d} t={slide.texts.find((t) => t.id === editing)} onDone={() => setEditing(null)} />}
+      {painting && <MaskCanvas key={`${d.id}-${i}`} d={d} />}
     </div>
   )
 }
@@ -505,6 +536,12 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
         </Section>
       )}
 
+      {d.video && (
+        <Section title="Video with voice">
+          <VideoMaker d={d} />
+        </Section>
+      )}
+
       <Section title="Slides" aside={<span className="font-mono text-[10.5px] text-dim">{d.slides.length}/{d.max_slides} · drag to reorder</span>}>
         {/* Remounted when the panels above change shape, so the thumbnails don't fly in from where they were. */}
         <SlideStrip key={`${d.id}-${d.placement}`} d={d} index={index} onShow={onShow} />
@@ -513,6 +550,12 @@ function Inspector({ d, index, onShow }: { d: Draft; index: number; onShow: (i: 
       <Section title={slide ? `Texts on slide ${index + 1}` : 'Texts'}>
         <Texts d={d} index={index} />
       </Section>
+
+      {!d.video && d.slides.length > 0 && (
+        <Section title="Video with voice" aside={<span className="font-mono text-[10.5px] text-dim">{d.videos.length ? `${d.videos.length} made` : 'for reels and stories'}</span>}>
+          <VideoMaker d={d} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -722,10 +765,10 @@ function Texts({ d, index }: { d: Draft; index: number }) {
           })}
         </div>
       ) : (
-        <p className="text-[12px] text-dim">{isVideo ? 'Texts can’t be drawn on videos yet: use the caption.' : 'No texts on this slide.'}</p>
+        <p className="text-[12px] text-dim">{d.video ? `The words on this video come from draft ${d.video.from}: change them there, then make it again.` : isVideo ? 'Texts can’t be drawn on videos yet: use the caption.' : 'No texts on this slide.'}</p>
       )}
 
-      <AnimatePresence mode="wait">{selected && <TextEditor key={selected.id} d={d} t={selected} />}</AnimatePresence>
+      <AnimatePresence mode="wait">{selected && <TextEditor key={selected.id} d={d} t={selected} palette={slide?.palette ?? []} />}</AnimatePresence>
 
       {!isVideo && slide && (
         <form
@@ -748,7 +791,7 @@ function Texts({ d, index }: { d: Draft; index: number }) {
 }
 
 /** Every look a text can have, one click each. */
-function TextEditor({ d, t }: { d: Draft; t: TextBox }) {
+function TextEditor({ d, t, palette }: { d: Draft; t: TextBox; palette: string[] }) {
   const a = useAssistant()
   const set = (fields: Record<string, string>) => a.action('edit_text', { draft: d.id, text: t.id, ...fields })
 
@@ -788,34 +831,13 @@ function TextEditor({ d, t }: { d: Draft; t: TextBox }) {
               <Segmented id={`size-${t.id}`} label="Size" value={SIZES.some((s) => s.value === t.size) ? t.size : 'large'} onChange={(size) => set({ size })} options={SIZES} />
             </div>
             <div>
-              <Label className="mb-1.5">Font</Label>
-              <Segmented id={`font-${t.id}`} label="Font" value={FONTS.some((f) => f.value === t.font) ? t.font : 'bold'} onChange={(font) => set({ font })} options={FONTS} />
+              <Label className="mb-1.5">Style</Label>
+              <Segmented id={`style-${t.id}`} label="Style" value={t.style} onChange={(style) => set({ style })} options={STYLES} />
             </div>
           </div>
         </div>
-        <div>
-          <Label className="mb-1.5">Style</Label>
-          <Segmented id={`style-${t.id}`} label="Style" value={t.style} onChange={(style) => set({ style })} options={STYLES} />
-        </div>
-        <div>
-          <Label className="mb-1.5">Colour</Label>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-label={c}
-                onClick={() => set({ color: c })}
-                className={cn('size-6 rounded-full border transition-transform hover:scale-110', t.color === c ? 'border-accent-soft ring-2 ring-accent-soft/50 ring-offset-2 ring-offset-panel' : 'border-white/20')}
-                style={{ background: c }}
-              />
-            ))}
-            <label className="relative grid size-6 cursor-pointer place-items-center rounded-full border border-dashed border-white/30 text-dim hover:text-fg" title="Any colour">
-              <Plus className="size-3" />
-              <input type="color" className="absolute inset-0 opacity-0" onChange={(e) => set({ color: e.target.value })} />
-            </label>
-          </div>
-        </div>
+        <FontPicker t={t} onChange={set} />
+        <TextColours t={t} palette={palette} onChange={set} />
       </div>
     </motion.div>
   )

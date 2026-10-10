@@ -19,8 +19,33 @@ export type TextBox = {
   style: string
   box_color: string
   font: string
+  /** How light the picture is behind it: its darker and lighter parts (relative luminance, 0–1). */
+  bg?: [number, number]
+  /** Its contrast where it sits (1–21); under 2.2 it's flagged as hard to read. */
+  readability?: number
 }
-export type Slide = { url: string; kind: 'image' | 'video'; media: number | null; texts: TextBox[] }
+export type Slide = {
+  url: string
+  kind: 'image' | 'video'
+  media: number | null
+  texts: TextBox[]
+  /** Text colours that go with its picture: a pale tint, its vivid colours, a deep shade. */
+  palette?: string[]
+  /** Seconds, for a video. */
+  duration?: number
+}
+/** How a video draft was made (make_video): from which draft, what the voice says over each picture… */
+export type VideoRecipe = {
+  from: number
+  lines: string[]
+  cta: string
+  cta_line: string
+  music: string | null
+  captions: boolean
+  motion: string
+  placement: string
+  color: string | null
+}
 export type Check = { key: string; status: 'pass' | 'warn' | 'fail'; label: string; detail: string }
 export type Draft = {
   id: number
@@ -37,6 +62,10 @@ export type Draft = {
   placements: string[]
   max_slides: number
   slides: Slide[]
+  /** A video made from another draft's pictures: how. */
+  video: VideoRecipe | null
+  /** The video drafts made from this one. */
+  videos: number[]
   check: { ok: boolean; label: string; checks: Check[] }
 }
 /** A draft's post in FlowAI. */
@@ -87,6 +116,33 @@ export type ConversationSummary = {
   campaign: { id: number; name: string } | null
   preview: string
 }
+/** A voice the assistant can speak in (assistant/backend/voicestudio.py): a ready one, or one from the voice server's catalog. */
+export type Voice = {
+  id: string
+  name: string
+  /** "female, young adult, moderate pitch, american accent", or the voice's own description. */
+  description: string
+  language: string
+  /** A ready voice made from a catalog one: that one's id. */
+  archetype?: string | null
+  /** A catalog voice's use: narration, conversational, characters… */
+  use?: string
+}
+export type VoiceList = {
+  q: string
+  lang: string
+  current: string
+  /** False: this assistant has the one voice (no VoiceStudio server). */
+  choosable: boolean
+  ready: Voice[]
+  catalog: Voice[]
+  /** Catalog voices matching the search (or featured), of which the first ones are in catalog. */
+  total: number
+  languages: string[]
+}
+/** A font texts can use (assistant/fonts/fonts.yaml): its name, the style it's grouped under, what it suits. */
+export type FontInfo = { name: string; label: string; style: string; suits: string; url: string }
+export type FontList = { styles: Array<{ id: string; label: string }>; fonts: FontInfo[] }
 export type CurrentConversation = { id: string; title: string; kept: boolean; campaign: { id: number; name: string; stage: string } | null }
 /** A numbered picture or video in the conversation. */
 export type Picture = { id: number; kind: 'image' | 'video'; name: string; source: string; url: string; workflow: string; prompt: string }
@@ -94,6 +150,8 @@ export type Job = { id: number; label: string; started: number; status: string; 
 export type AssistantAccount = { id: number; platform: 'instagram' | 'x'; handle: string; label: string; name: string | null }
 /** What the person selected on screen: "this", "it". */
 export type Focus = { draft?: number; slide?: number; text?: number }
+/** The slide being painted on, to change part of its picture. */
+export type Painting = { draft: number; slide: number }
 
 export type LogItem =
   | { id: number; kind: 'user'; text: string; partial?: boolean }
@@ -126,7 +184,18 @@ type State = {
   accounts: AssistantAccount[]
   flowaiError: string
   focus: Focus
+  painting: Painting | null
   tab: AssistantTab
+  /** The voice it speaks in. */
+  voice: Voice | null
+  /** What there is to pick from, once asked. */
+  voices: VoiceList | null
+  /** The voice being set up (a catalog voice takes a few seconds). */
+  voicePending: string | null
+  /** The voice whose sample was asked for; loading until it starts playing. */
+  sample: { id: string; loading: boolean } | null
+  /** The fonts texts can use, by style. */
+  fonts: FontList | null
 }
 
 const EMPTY_SESSION = {
@@ -138,6 +207,7 @@ const EMPTY_SESSION = {
   pictures: [],
   jobs: {},
   focus: {},
+  painting: null,
 } satisfies Partial<State>
 
 const INITIAL: State = {
@@ -152,6 +222,11 @@ const INITIAL: State = {
   accounts: [],
   flowaiError: '',
   tab: 'draft',
+  voice: null,
+  voices: null,
+  voicePending: null,
+  sample: null,
+  fonts: null,
   ...EMPTY_SESSION,
 }
 
@@ -162,9 +237,12 @@ type Action =
   | { type: 'lost' }
   | { type: 'switching' }
   | { type: 'focus'; focus: Focus }
+  | { type: 'painting'; painting: Painting | null }
   | { type: 'current'; id: number }
   | { type: 'tab'; tab: AssistantTab }
   | { type: 'job-expired'; id: number }
+  | { type: 'voice-pending'; id: string }
+  | { type: 'sample'; id: string }
 
 type Unnumbered<T> = T extends unknown ? Omit<T, 'id'> : never
 const push = (s: State, item: Unnumbered<LogItem>): State => ({ ...s, seq: s.seq + 1, log: [...s.log, { ...item, id: s.seq + 1 }] })
@@ -190,6 +268,10 @@ export function describe(name: string, a: Record<string, unknown>): string {
       return 'Showing the draft'
     case 'generate_media':
       return a.draft != null ? (/edit/.test(String(a.workflow ?? '')) ? 'Editing the picture' : 'Making the picture') : 'Making a picture'
+    case 'edit_area':
+      return a.mode === 'remove' ? 'Removing the painted part' : a.mode === 'replace' ? `Putting ${a.prompt || 'something else'} there` : a.mode === 'improve' ? 'Improving the painted part' : 'Changing the painted part'
+    case 'make_video':
+      return 'Making the video'
     case 'save_draft':
       return 'Saving to FlowAI'
     case 'schedule_post':
@@ -221,15 +303,21 @@ function reduce(s: State, a: Action): State {
       return push(s, { kind: 'note', text: a.text, tone: a.tone ?? 'info' })
     case 'lost':
       // The conversation is kept on the assistant's side: reconnecting brings it back as it was.
-      return push({ ...s, conn: 'offline', open: null, switching: false }, { kind: 'note', text: s.kept ? 'Connection lost. Reconnecting…' : 'Connection lost. This conversation wasn’t kept.', tone: 'error' })
+      return push({ ...s, conn: 'offline', open: null, switching: false, voicePending: null, sample: null }, { kind: 'note', text: s.kept ? 'Connection lost. Reconnecting…' : 'Connection lost. This conversation wasn’t kept.', tone: 'error' })
     case 'switching':
       return { ...s, switching: true }
     case 'focus':
       return { ...s, focus: a.focus }
+    case 'painting':
+      return { ...s, painting: a.painting }
     case 'current':
       return { ...s, current: a.id }
     case 'tab':
       return { ...s, tab: a.tab }
+    case 'voice-pending':
+      return { ...s, voicePending: a.id }
+    case 'sample':
+      return { ...s, sample: { id: a.id, loading: true } }
     case 'job-expired': {
       const jobs = { ...s.jobs }
       delete jobs[a.id]
@@ -313,12 +401,20 @@ function onEvent(s: State, m: AssistantEvent): State {
       return { ...s, log: s.log.map((i) => (i === act ? { ...act, status: why ? 'failed' : 'done', why } : i)) }
     }
     case 'interrupt': {
-      if (!s.open) return s
-      const open = s.open
-      return { ...s, open: null, log: m.was_speaking ? s.log.map((i) => (i.id === open.id && i.kind === 'bot' ? { ...i, cut: true } : i)) : s.log }
+      // A voice's sample comes right after the interrupt that makes way for it
+      const t = s.sample?.loading ? { ...s, sample: { ...s.sample, loading: false } } : s
+      if (!t.open) return t
+      const open = t.open
+      return { ...t, open: null, log: m.was_speaking ? t.log.map((i) => (i.id === open.id && i.kind === 'bot' ? { ...i, cut: true } : i)) : t.log }
     }
     case 'error':
-      return push(s, { kind: 'note', text: String(m.message), tone: 'error' })
+      return push({ ...s, voicePending: null, sample: s.sample?.loading ? null : s.sample }, { kind: 'note', text: String(m.message), tone: 'error' })
+    case 'voice':
+      return { ...s, voice: m as unknown as Voice, voicePending: null, voices: s.voices && { ...s.voices, current: String(m.id) } }
+    case 'fonts':
+      return { ...s, fonts: { styles: (m.styles as FontList['styles']) ?? [], fonts: ((m.fonts as FontInfo[]) ?? []).map((f) => ({ ...f, url: assistantUrl(f.url) })) } }
+    case 'voices':
+      return { ...s, voices: m as unknown as VoiceList }
     case 'media': {
       if (m.kind !== 'image' && m.kind !== 'video') return s
       const pic: Picture = {
@@ -339,7 +435,8 @@ function onEvent(s: State, m: AssistantEvent): State {
       const before = s.jobs[id]
       if (m.status === 'started') {
         const started = Date.now() - Number(m.seconds ?? 0) * 1000 // still going in a conversation just reopened
-        return { ...s, jobs: { ...s.jobs, [id]: { id, label: m.makes === 'video' ? 'Making the video' : 'Making the picture', started, status: 'running', text: '' } } }
+        const label = String(m.label || (m.makes === 'video' ? 'Making the video' : 'Making the picture'))
+        return { ...s, jobs: { ...s.jobs, [id]: { id, label, started, status: 'running', text: '' } } }
       }
       if (!before) return s
       const jobs = { ...s.jobs }
@@ -350,6 +447,8 @@ function onEvent(s: State, m: AssistantEvent): State {
     case 'draft': {
       const d = { ...(m as unknown as Draft), slides: (m as unknown as Draft).slides.map((sl) => ({ ...sl, url: assistantUrl(sl.url) })) }
       const isNew = !s.drafts[d.id]
+      // Quiet: news about a draft in the background (its video list), not one to show
+      if (m.quiet && !isNew) return { ...s, drafts: { ...s.drafts, [d.id]: d } }
       return { ...s, drafts: { ...s.drafts, [d.id]: d }, current: d.id, tab: isNew ? 'draft' : s.tab }
     }
     case 'saved':
@@ -382,12 +481,22 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   deleteConversation: (id: string) => void
   /** Ask for the list again (it also comes by itself after every change). */
   refreshConversations: () => void
+  /** The voices to pick from; q and lang search the voice server's catalog. */
+  findVoices: (q?: string, lang?: string) => void
+  /** Speak in this voice from now on (kept for the person); catalog: it's from the catalog, set up first. */
+  chooseVoice: (v: Voice, catalog: boolean) => void
+  /** Hear a voice's sample (it stops what the assistant is saying). */
+  previewVoice: (v: Voice, catalog: boolean) => void
   /** A FlowAI campaign's posts into the conversation on screen. */
   importCampaign: (campaign: number) => void
   say: (text: string) => Promise<void>
   /** A button that skips the model: undo, save, edit… (assistant/backend/session.py). */
   action: (name: string, fields?: Record<string, unknown>) => void
   select: (focus: Focus) => void
+  /** Paint over part of a slide's picture (null: stop, and the painted area goes). */
+  paint: (p: Painting | null) => void
+  /** The painted area as a PNG data URL (painted pixels opaque), or null when there's none. */
+  sendMask: (p: Painting, data: string | null) => void
   setCurrent: (id: number) => void
   setTab: (tab: AssistantTab) => void
   toggleMic: () => Promise<void>
@@ -472,6 +581,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const conversation = useRef<string | null>(readConversation())
   /** Something to ask for as soon as the assistant is ready (the page opened with ?campaign=). */
   const queued = useRef<Record<string, unknown> | null>(null)
+  /** The voice list last asked for, to ask again once the voice changes. */
+  const voiceQuery = useRef<{ q: string; lang: string } | null>(null)
   const handlers = useRef<{ onEvent: (m: AssistantEvent) => void; onClose: () => void }>(null!)
 
   const link = useMemo(
@@ -553,6 +664,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           autoApprove.current.clear()
           if (m.kept) writeConversation(conversation.current)
           break
+        case 'voice':
+          // The list shows the one in use, and a catalog voice just set up is a ready one now
+          if (voiceQuery.current) link.send({ type: 'voices', ...voiceQuery.current })
+          break
         case 'saved':
           invalidate()
           break
@@ -618,6 +733,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     [link, start],
   )
 
+  // Stable, so a panel can ask on opening without asking again on every answer
+  const refreshConversations = useCallback(() => link.send({ type: 'conversations' }), [link])
+  const findVoices = useCallback(
+    (q = '', lang = '') => {
+      voiceQuery.current = { q, lang }
+      link.send({ type: 'voices', q, lang })
+    },
+    [link],
+  )
+
   const select = useCallback(
     (focus: Focus) => {
       dispatch({ type: 'focus', focus })
@@ -654,7 +779,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       accounts: state.accounts,
       flowaiError: state.flowaiError,
       focus: state.focus,
+      painting: state.painting,
       tab: state.tab,
+      voice: state.voice,
+      voices: state.voices,
+      voicePending: state.voicePending,
+      sample: state.sample,
+      fonts: state.fonts,
       link,
       start,
       newConversation: (campaign) => switchTo({ type: 'new', ...(campaign ? { campaign } : {}) }),
@@ -664,11 +795,28 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         if (id === conversation.current) dispatch({ type: 'switching' })
         link.send({ type: 'delete', id })
       },
-      refreshConversations: () => link.send({ type: 'conversations' }),
+      refreshConversations,
+      findVoices,
+      chooseVoice: (v, catalog) => {
+        if (!link.open) return dispatch({ type: 'note', text: 'The assistant is offline.', tone: 'error' })
+        dispatch({ type: 'voice-pending', id: v.id })
+        link.send({ type: 'voice', ...(catalog ? { archetype: v.id } : { id: v.id }) })
+      },
+      previewVoice: (v, catalog) => {
+        if (!link.open) return dispatch({ type: 'note', text: 'The assistant is offline.', tone: 'error' })
+        link.ensureAudio()
+        dispatch({ type: 'sample', id: v.id })
+        link.send({ type: 'preview_voice', ...(catalog ? { archetype: v.id } : { id: v.id }) })
+      },
       importCampaign: (campaign) => action('open_campaign', { campaign }),
       say,
       action,
       select,
+      paint: (p) => {
+        dispatch({ type: 'painting', painting: p })
+        if (!p) link.send({ type: 'mask' })
+      },
+      sendMask: (p, data) => link.send({ type: 'mask', ...p, ...(data ? { data } : {}) }),
       setCurrent: (id) => {
         dispatch({ type: 'current', id })
         select({ draft: id })
@@ -703,7 +851,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.tab, link, start, switchTo, say, action, select, toggleMic, approve, input, micOn, bargeIn, booking, generation],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.fonts, link, start, switchTo, refreshConversations, findVoices, say, action, select, toggleMic, approve, input, micOn, bargeIn, booking, generation],
   )
 
   return (

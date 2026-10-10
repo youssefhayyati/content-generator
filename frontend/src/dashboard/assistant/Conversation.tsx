@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, AudioWaveform, BadgeCheck, CalendarCheck, Check, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, Toggle } from '../ui'
 import { ConversationBar, ConversationList } from './Conversations'
+import { VoicePicker } from './Voices'
 import type { VoiceState } from './link'
 import { useAssistant, useAssistantLog, useVoiceState, type Approval, type LogItem } from './store'
 
@@ -30,6 +31,7 @@ export function Conversation({ className, onImport }: { className?: string; onIm
   const a = useAssistant()
   const [dropping, setDropping] = useState(false)
   const [listing, setListing] = useState(false)
+  const [voicing, setVoicing] = useState(false)
 
   const onDrop = (e: DragEvent) => {
     setDropping(false)
@@ -53,7 +55,8 @@ export function Conversation({ className, onImport }: { className?: string; onIm
       <VoiceBar />
       <Log />
       <Approvals />
-      <Composer />
+      <Composer onVoice={() => setVoicing(true)} />
+      <VoicePicker open={voicing} onClose={() => setVoicing(false)} />
       <ConversationList
         open={listing}
         onClose={() => setListing(false)}
@@ -317,7 +320,7 @@ function Approvals() {
 
 /* ------------------------------------------------------------------ */
 
-function Composer() {
+function Composer({ onVoice }: { onVoice: () => void }) {
   const a = useAssistant()
   const file = useRef<HTMLInputElement>(null)
   const d = a.focus.draft ? a.drafts[a.focus.draft] : undefined
@@ -352,7 +355,8 @@ function Composer() {
             className="overflow-hidden"
           >
             <p className="mb-2 flex items-center gap-2 rounded-md border border-accent/30 bg-accent/[0.06] px-2.5 py-1.5 text-[11.5px] text-accent-soft">
-              <span className="min-w-0 flex-1 truncate">
+              {/* w-0: long words mustn't widen the panel (truncating doesn't stop that on its own) */}
+              <span className="w-0 min-w-0 flex-1 truncate">
                 Selected: {selected}. Say what to change.
               </span>
               <button type="button" aria-label="Clear the selection" onClick={() => a.select(d ? { draft: d.id } : {})} className="text-accent-soft/70 hover:text-fg">
@@ -408,11 +412,24 @@ function Composer() {
           }}
         />
       </div>
-      <label className="mt-2.5 flex items-center gap-2 px-1 text-[11.5px] text-dim">
-        <Toggle on={a.bargeIn} onChange={a.setBargeIn} label="Talk over the assistant" />
-        <Headphones className="size-3.5" strokeWidth={1.75} />
-        Talk over it {a.bargeIn ? '(best with headphones)' : '(the mic pauses while it speaks)'}
-      </label>
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-1">
+        <label className="flex items-center gap-2 text-[11.5px] text-dim">
+          <Toggle on={a.bargeIn} onChange={a.setBargeIn} label="Talk over the assistant" />
+          <Headphones className="size-3.5" strokeWidth={1.75} />
+          Talk over it {a.bargeIn ? '(best with headphones)' : '(the mic pauses while it speaks)'}
+        </label>
+        <button
+          type="button"
+          onClick={onVoice}
+          aria-label={`Voice: ${a.voice?.name ?? 'pick one'}`}
+          title="The voice it speaks in"
+          className="-mx-1.5 ml-auto flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11.5px] text-dim transition-colors hover:bg-white/[0.04] hover:text-fg"
+        >
+          <AudioLines className="size-3.5 shrink-0" strokeWidth={1.75} />
+          <span className="max-w-[18ch] truncate">{a.voice?.name ?? 'Voice'}</span>
+          <ChevronRight className="size-3 shrink-0" />
+        </button>
+      </div>
     </div>
   )
 }
