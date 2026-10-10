@@ -57,7 +57,7 @@ export function useUser(): User {
   return user
 }
 
-export const workspaceName = (user: User) => `${firstName(user.name)}’s studio`
+export const workspaceName = (user: User) => user.preferences.studio?.trim() || `${firstName(user.name)}’s studio`
 
 /** Small UI choices that should survive a reload. Private windows may refuse storage; that's fine. */
 function remembered<T>(key: string, fallback: T): T {

@@ -7,6 +7,7 @@ import { useSession } from '../lib/session'
 import { AssistantDock } from './assistant/Dock'
 import { AssistantProvider } from './assistant/store'
 import { DataProvider } from './data'
+import { Onboarding } from './onboarding/Onboarding'
 import Accounts from './pages/Accounts'
 import Analytics from './pages/Analytics'
 import Assistant from './pages/Assistant'
@@ -80,6 +81,8 @@ export default function Dashboard() {
             <Pages />
           </Shell>
           <AssistantDock />
+          {/* A new account's first minute, over the studio it is setting up. */}
+          <AnimatePresence>{user.preferences.onboarding === 'pending' && <Onboarding key="onboarding" />}</AnimatePresence>
         </AssistantProvider>
       </ToastProvider>
     </DataProvider>

@@ -30,6 +30,7 @@ use App\Http\Controllers\InspirationController;
 use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
+use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\OverviewController;
 use App\Http\Controllers\PasswordController;
 use App\Http\Controllers\PostController;
@@ -149,6 +150,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('ai', [WritingController::class, 'options']);
     // Every request spends API credit: confirmed accounts only, and not too fast.
     Route::post('ai/write', [WritingController::class, 'write'])->middleware(['verified', 'throttle:ai']);
+    Route::post('onboarding/first-post', [OnboardingController::class, 'firstPost'])->middleware('throttle:ai');
 
     // Campaign intake. The interview also runs without AI (the standard question list), so only
     // the content kit insists on a confirmed account; every step that may call Claude is throttled.
