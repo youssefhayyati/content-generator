@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'framer-motion'
 import { useLenis } from 'lenis/react'
-import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Copy, X } from 'lucide-react'
 import { Footer } from '../components/Footer'
 import { Navbar } from '../components/Navbar'
 import { PlatformIcon } from '../components/ui/PlatformIcon'
@@ -12,8 +12,10 @@ import { ease, easeInOut } from '../lib/motion'
 import { ReadyContext, useArrival } from '../lib/ready'
 import { useDocumentTitle, useRouter } from '../lib/router'
 import { useSession } from '../lib/session'
-import { CASES, caseById, GROUPS, KIND_LABEL, MAKE_LABEL, makePath, type Case, type Group } from '../showcase/cases'
-import { Clip, FlowMap, FORMAT_ICON, monogram, Picture, PlanBoard, PostCard, PostText, platformName, Tag } from '../showcase/pieces'
+import { CASES, caseById, GROUPS, KIND_LABEL, MAKE_LABEL, makePath, VOICE_LABEL, type Case, type Group, type Voice } from '../showcase/cases'
+import { Clip, FlowMap, FORMAT_ICON, monogram, Picture, PostCard, PostText, platformName, Tag } from '../showcase/pieces'
+import { Stage } from '../showcase/stage'
+import { Chapters } from '../showcase/Chapters'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const kindTag = (c: Case) =>
@@ -37,6 +39,7 @@ function useMake() {
 /** /showcase: what FlowAI made for a handful of demo brands, each one open to see how, and to make your own. */
 export default function Showcase() {
   const ready = useArrival()
+  const make = useMake()
   const { search, navigate } = useRouter()
   const open = caseById(new URLSearchParams(search).get('case'))
   useDocumentTitle(open ? `${open.title} — FlowAI Showcase` : 'Showcase — Made with FlowAI')
@@ -70,9 +73,16 @@ export default function Showcase() {
       <div className="relative overflow-x-clip">
         <Navbar />
         <main>
-          <Hero ready={ready} />
+          <Hero ready={ready} onOpen={show} />
           <Briefs />
-          <section aria-label="Cases" className="container-x pb-28 md:pb-40">
+          <Chapters onOpen={(c) => show(c, null)} onMake={(c) => make(makePath(c.make))} />
+          <section aria-label="Cases" className="container-x pb-28 pt-28 md:pb-40 md:pt-40">
+            <p className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
+              <span className="text-fg">(Everything)</span>
+              <span className="h-px w-8 bg-current opacity-40" />
+              <span>{CASES.length} cases</span>
+            </p>
+            <LineReveal className="mt-8 text-[clamp(2.6rem,6vw,6.25rem)] font-medium leading-[0.92] tracking-[-0.05em]" lines={['Every case,', <Serif>in one place.</Serif>]} />
             <Filters group={group} onGroup={setGroup} />
             <Wall key={group} list={list} onOpen={show} />
           </section>
@@ -90,47 +100,135 @@ export default function Showcase() {
 /* Hero                                                                */
 /* ------------------------------------------------------------------ */
 
-function Hero({ ready }: { ready: boolean }) {
+function Hero({ ready, onOpen }: { ready: boolean; onOpen: (c: Case, from: Element | null) => void }) {
   // Every picture, clip, post, flow and plan on the page.
   const pieces = CASES.reduce((n, c) => n + (c.video ? 1 : (c.shots?.length ?? 0)) + (c.versions?.length ?? 0) + (c.flow ? 1 : 0) + (c.plan ? 1 : 0), 0)
   return (
-    <header className="container-x pt-32 md:pt-44">
-      <div className="grid gap-10 lg:grid-cols-12 lg:items-end">
-        <div className="lg:col-span-8">
-          <motion.p
-            className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-muted"
-            initial={{ opacity: 0, y: 12 }}
-            animate={ready ? { opacity: 1, y: 0 } : undefined}
-            transition={{ duration: 0.8, ease }}
-          >
-            <span className="text-fg">(Showcase)</span>
-            <span className="h-px w-8 bg-current opacity-40" />
-            <span>
-              {CASES.length} briefs · {pieces} pieces
-            </span>
-          </motion.p>
-          <LineReveal
-            as="h1"
-            play={ready}
-            className="mt-8 text-[clamp(3.6rem,15vw,7rem)] font-medium leading-[0.86] tracking-[-0.06em] md:text-[clamp(5rem,11vw,11.5rem)]"
-            lines={['Made with', <Serif>FlowAI.</Serif>]}
-          />
-        </div>
-        <motion.div
-          className="lg:col-span-4"
-          initial={{ opacity: 0, y: 16 }}
+    <header className="container-x grid items-center gap-12 pb-10 pt-32 lg:min-h-svh lg:grid-cols-12 lg:gap-8 lg:pb-16 lg:pt-28">
+      <div className="relative z-10 lg:col-span-6">
+        <motion.p
+          className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-muted"
+          initial={{ opacity: 0, y: 12 }}
           animate={ready ? { opacity: 1, y: 0 } : undefined}
-          transition={{ duration: 0.9, ease, delay: 0.25 }}
+          transition={{ duration: 0.8, ease }}
         >
-          <p className="max-w-[40ch] text-[16px] leading-relaxed text-muted">
-            Posts, pictures, reels, a flow and a launch plan, each from one brief. Open any of them to see the brief, what the studio did with it, and every version it became. Then make your own from it.
+          <span className="text-fg">(Showcase)</span>
+          <span className="h-px w-8 bg-current opacity-40" />
+          <span>
+            {CASES.length} briefs · {pieces} pieces
+          </span>
+        </motion.p>
+        <LineReveal
+          as="h1"
+          play={ready}
+          className="mt-8 text-[clamp(3.6rem,15vw,7rem)] font-medium leading-[0.86] tracking-[-0.06em] md:text-[clamp(5rem,9.5vw,10rem)]"
+          lines={['Made with', <Serif>FlowAI.</Serif>]}
+        />
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={ready ? { opacity: 1, y: 0 } : undefined} transition={{ duration: 0.9, ease, delay: 0.25 }}>
+          <p className="mt-10 max-w-[44ch] text-[16px] leading-relaxed text-muted">
+            Posts written in a brand’s own voice, pictures, reels, a flow and a launch plan, each from one brief. Scroll through four of them being made, then open any case to see exactly how, and make your own from it.
           </p>
-          <p className="mt-5 max-w-[44ch] border-l border-line-2 pl-3 text-[12.5px] leading-relaxed text-dim">
-            The brands are invented for this page. Everything else is what FlowAI returned from the brief or prompt on each case, left as it came out.
+          <p className="mt-5 max-w-[48ch] border-l border-line-2 pl-3 text-[12.5px] leading-relaxed text-dim">
+            The brands are invented for this page. Everything else is what FlowAI returned from the brief, voice or prompt on each case, left as it came out.
           </p>
         </motion.div>
       </div>
+      <Collage ready={ready} onOpen={onOpen} />
     </header>
+  )
+}
+
+/** Where each piece of the hero's collage sits, how it leans, and how far it floats (depth). */
+const COLLAGE: Array<{ id: string; left: number; top: number; w: number; rotate: number; depth: number; post?: boolean }> = [
+  { id: 'ember-fig', left: 2, top: 6, w: 33, rotate: -6, depth: 0.5 },
+  { id: 'dawn-miles', left: 38, top: 0, w: 26, rotate: 3, depth: 1 },
+  { id: 'pappardelle', left: 69, top: 9, w: 30, rotate: 6, depth: 0.7 },
+  { id: 'friday-stems', left: 7, top: 53, w: 27, rotate: 4, depth: 0.9 },
+  { id: 'month-end', left: 37, top: 49, w: 35, rotate: -3, depth: 0.6, post: true },
+  { id: 'the-pour', left: 76, top: 50, w: 22, rotate: -5, depth: 1.15 },
+]
+
+/**
+ * A pile of real output, pinned up like a mood board. Each piece leans toward the pointer by its
+ * depth and drifts up at its own speed as the page scrolls; a click opens its case.
+ */
+function Collage({ ready, onOpen }: { ready: boolean; onOpen: (c: Case, from: Element | null) => void }) {
+  const reduce = useReducedMotion()
+  const mx = useSpring(0, { stiffness: 60, damping: 18 })
+  const my = useSpring(0, { stiffness: 60, damping: 18 })
+  const { scrollY } = useScroll()
+  useEffect(() => {
+    if (reduce) return
+    const move = (e: PointerEvent) => {
+      mx.set(e.clientX / window.innerWidth - 0.5)
+      my.set(e.clientY / window.innerHeight - 0.5)
+    }
+    window.addEventListener('pointermove', move)
+    return () => window.removeEventListener('pointermove', move)
+  }, [mx, my, reduce])
+
+  return (
+    <div className="relative aspect-[1/0.95] w-full lg:col-span-6 lg:aspect-auto lg:h-[min(80svh,780px)]">
+      {COLLAGE.map((t, i) => {
+        const c = caseById(t.id)!
+        return <Piece key={t.id} t={t} c={c} i={i} ready={ready} mx={mx} my={my} scrollY={scrollY} onOpen={onOpen} />
+      })}
+    </div>
+  )
+}
+
+function Piece({
+  t,
+  c,
+  i,
+  ready,
+  mx,
+  my,
+  scrollY,
+  onOpen,
+}: {
+  t: (typeof COLLAGE)[number]
+  c: Case
+  i: number
+  ready: boolean
+  mx: MotionValue<number>
+  my: MotionValue<number>
+  scrollY: MotionValue<number>
+  onOpen: (c: Case, from: Element | null) => void
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const x = useTransform(mx, (v) => v * t.depth * 36)
+  const y = useTransform([my, scrollY], ([v, s]: number[]) => v * t.depth * 28 - s * t.depth * 0.28)
+  const shot = c.shots?.[0]
+  return (
+    <motion.div className="absolute" style={{ left: `${t.left}%`, top: `${t.top}%`, width: `${t.w}%`, x, y, zIndex: Math.round(t.depth * 10) }}>
+      <motion.button
+        ref={ref}
+        type="button"
+        onClick={() => onOpen(c, ref.current)}
+        aria-label={`${c.title}, for ${c.brand.name}`}
+        className={cn('group relative block w-full text-left', t.post && 'max-sm:hidden')}
+        initial={{ opacity: 0, y: 80, rotate: t.rotate * 2.5, scale: 0.85 }}
+        animate={ready ? { opacity: 1, y: 0, rotate: t.rotate, scale: 1 } : undefined}
+        whileHover={{ rotate: 0, scale: 1.04 }}
+        transition={{ type: 'spring', stiffness: 120, damping: 18, delay: ready ? 0.15 + i * 0.08 : 0 }}
+      >
+        {t.post && c.versions ? (
+          <PostCard c={c} version={c.versions[0]} clamp withShot={false} className="text-[12px]" />
+        ) : c.video ? (
+          <span className="block overflow-hidden rounded-[18px] border border-white/10 shadow-[0_40px_90px_-40px_rgb(0_0_0_/_0.95)]">
+            <Clip c={c} className="aspect-[9/16] w-full object-cover" />
+          </span>
+        ) : shot ? (
+          <span className="block overflow-hidden rounded-[18px] border border-white/10 shadow-[0_40px_90px_-40px_rgb(0_0_0_/_0.95)]">
+            <Picture shot={shot} size="sm" eager className="h-auto w-full" />
+          </span>
+        ) : null}
+        <span className="absolute -bottom-3 left-3 rounded-full bg-fg px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-ink opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+          {c.brand.name}
+        </span>
+      </motion.button>
+    </motion.div>
   )
 }
 
@@ -153,7 +251,7 @@ function Briefs() {
 
 function Filters({ group, onGroup }: { group: Group | 'all'; onGroup: (g: Group | 'all') => void }) {
   return (
-    <div className="sticky top-20 z-20 mt-14 flex justify-center md:top-24">
+    <div className="sticky top-20 z-20 mt-12 flex justify-center md:top-24">
       <div role="tablist" aria-label="Show" className="no-scrollbar flex max-w-full gap-1 overflow-x-auto rounded-full border border-line-2 bg-panel/80 p-1 backdrop-blur-xl">
         {GROUPS.map((g) => {
           const n = g.id === 'all' ? CASES.length : CASES.filter((c) => c.group === g.id).length
@@ -512,6 +610,21 @@ function Viewer({ c, origin, onClose, onStep }: { c: Case; origin: DOMRect | nul
                   )}
                 </Block>
 
+                {c.brand.voice && (c.versions || c.plan) && (
+                  <Block title="The brand’s voice">
+                    <dl className="space-y-2.5">
+                      {(Object.keys(VOICE_LABEL) as Array<keyof Voice>)
+                        .filter((k) => c.brand.voice?.[k])
+                        .map((k) => (
+                          <div key={k} className="grid grid-cols-[86px_minmax(0,1fr)] gap-3 text-[13px] leading-snug">
+                            <dt className="text-dim">{VOICE_LABEL[k]}</dt>
+                            <dd className="text-muted">{c.brand.voice?.[k]}</dd>
+                          </div>
+                        ))}
+                    </dl>
+                  </Block>
+                )}
+
                 {c.prompt && (
                   <Block title={c.video ? 'Clip prompt' : 'Picture prompt'}>
                     <p className="rounded-xl border border-line bg-white/[0.02] p-3 font-mono text-[12px] leading-relaxed text-muted">{c.prompt}</p>
@@ -619,124 +732,6 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="mb-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-dim">{title}</h3>
       {children}
     </section>
-  )
-}
-
-/** The made thing, as big as the screen allows. */
-function Stage({ c, version }: { c: Case; version: number }) {
-  const shot = c.shots?.[0]
-  const v = c.versions?.[version]
-
-  if (c.kind === 'reel') return <Reel c={c} version={version} />
-  if (c.kind === 'carousel') return <Slides c={c} />
-  if (c.kind === 'flow' && c.flow)
-    return (
-      <div className="flex w-full justify-center lg:h-full">
-        <FlowMap flow={c.flow} fit className="max-w-[640px]" />
-      </div>
-    )
-  if (c.kind === 'campaign' && c.plan && shot)
-    return (
-      <div className="no-scrollbar w-full max-w-[880px] py-2 lg:h-full lg:overflow-y-auto" data-lenis-prevent>
-        <div className="grid items-start gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-          <Picture shot={shot} eager className="w-full rounded-[20px] object-cover md:sticky md:top-0" />
-          <PlanBoard plan={c.plan} />
-        </div>
-      </div>
-    )
-  if (c.kind === 'post' && v)
-    return (
-      <div className="no-scrollbar flex w-full max-w-[500px] py-2 lg:max-h-full lg:overflow-y-auto" data-lenis-prevent>
-        <PostCard c={c} version={v} className="my-auto w-full" />
-      </div>
-    )
-  return shot ? <Picture shot={shot} eager className="h-auto max-h-full w-auto max-w-full rounded-[18px] shadow-[0_40px_120px_-40px_rgb(0_0_0_/_0.9)]" /> : null
-}
-
-/** A reel as a phone would play it: full bleed, the handle and caption over the bottom, a progress line on top. */
-function Reel({ c, version }: { c: Case; version: number }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const bar = useRef<HTMLSpanElement>(null)
-  const caption = c.versions?.[version]
-  useEffect(() => {
-    const v = ref.current?.querySelector('video')
-    if (!v) return
-    let raf = 0
-    const tick = () => {
-      if (v.duration && bar.current) bar.current.style.transform = `scaleX(${v.currentTime / v.duration})`
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [])
-  return (
-    <div ref={ref} className="relative aspect-[9/16] h-[70svh] max-h-full max-w-full overflow-hidden rounded-[26px] border border-white/10 shadow-[0_40px_120px_-40px_rgb(0_0_0_/_0.9)] lg:h-full">
-      <Clip c={c} size="full" className="size-full object-cover" />
-      <span className="absolute inset-x-3 top-3 h-[3px] overflow-hidden rounded-full bg-white/25">
-        <span ref={bar} className="block h-full origin-left scale-x-0 rounded-full bg-white" />
-      </span>
-      {caption && (
-        <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 via-black/30 to-transparent p-4 pt-20 text-white">
-          <p className="flex items-center gap-2 text-[13px] font-semibold">
-            <span className="grid size-7 place-items-center rounded-full bg-white text-[9px] text-black">{monogram(c.brand.name)}</span>@{c.brand.handle}
-            <PlatformIcon id={caption.platform} className="ml-auto size-4 text-white/80" />
-          </p>
-          <p className="mt-2 line-clamp-3 whitespace-pre-line text-[12.5px] leading-snug text-white/90">{caption.text}</p>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function Slides({ c }: { c: Case }) {
-  const shots = c.shots!
-  const [at, setAt] = useState(0)
-  const [dir, setDir] = useState(1)
-  const go = (by: number) => {
-    setDir(by)
-    setAt((n) => (n + by + shots.length) % shots.length)
-  }
-  return (
-    <div className="relative flex aspect-square max-h-full w-full max-w-[min(100%,calc(100svh-7rem))] items-center justify-center">
-      <div className="relative size-full overflow-hidden rounded-[20px] shadow-[0_40px_120px_-40px_rgb(0_0_0_/_0.9)]">
-        <AnimatePresence initial={false} custom={dir} mode="popLayout">
-          <motion.div
-            key={at}
-            custom={dir}
-            className="absolute inset-0 cursor-grab active:cursor-grabbing"
-            variants={{
-              enter: (d: number) => ({ x: `${d * 100}%` }),
-              center: { x: '0%' },
-              exit: (d: number) => ({ x: `${d * -100}%` }),
-            }}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.7, ease }}
-            drag="x"
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.25}
-            onDragEnd={(_, info) => Math.abs(info.offset.x) > 60 && go(info.offset.x < 0 ? 1 : -1)}
-          >
-            <Picture shot={shots[at]} eager className="size-full object-cover" />
-          </motion.div>
-        </AnimatePresence>
-        <span className="absolute right-3 top-3 rounded-full bg-black/55 px-2.5 py-1 font-mono text-[11px] text-white backdrop-blur-md">
-          {at + 1} / {shots.length}
-        </span>
-      </div>
-      <button type="button" aria-label="Previous slide" onClick={() => go(-1)} className="absolute left-2 grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur-md transition-colors hover:bg-black/75 md:-left-5">
-        <ChevronLeft className="size-5" />
-      </button>
-      <button type="button" aria-label="Next slide" onClick={() => go(1)} className="absolute right-2 grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur-md transition-colors hover:bg-black/75 md:-right-5">
-        <ChevronRight className="size-5" />
-      </button>
-      <span className="absolute -bottom-5 left-1/2 flex -translate-x-1/2 gap-1.5">
-        {shots.map((s, j) => (
-          <span key={s.src} className={cn('h-1 rounded-full bg-white transition-all duration-500', j === at ? 'w-5' : 'w-1 opacity-40')} />
-        ))}
-      </span>
-    </div>
   )
 }
 

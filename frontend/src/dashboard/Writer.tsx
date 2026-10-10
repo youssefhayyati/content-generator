@@ -37,7 +37,7 @@ type Props = {
   /** True while text is streaming into the body, so the editor can hold still. */
   onWriting: (writing: boolean) => void
   /** A brief (and tone) to start from, from a showcase case or an example. A new object refills it. */
-  seed?: { brief: string; tone: string | null } | null
+  seed?: { brief: string; tone: string | null; model?: string | null } | null
 }
 
 /**
@@ -49,7 +49,7 @@ export function Writer({ body, onBody, format, platforms, onWriting, seed }: Pro
   const { data: options, error: optionsError } = useApi<AiOptions>('/ai')
   const [brief, setBrief] = useState(seed?.brief ?? '')
   const [tone, setTone] = useState<Tone | null>(asTone(seed?.tone))
-  const [model, setModel] = useState<string | null>(null)
+  const [model, setModel] = useState<string | null>(seed?.model ?? null)
   // The body as it was when the current request started; null when nothing is running.
   const [job, setJob] = useState<{ before: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +61,8 @@ export function Writer({ body, onBody, format, platforms, onWriting, seed }: Pro
     if (!seed) return
     setBrief(seed.brief)
     setTone(asTone(seed.tone))
+    // A model this studio can't run falls back to the default below (activeModel).
+    if (seed.model) setModel(seed.model)
     setError(null)
   }, [seed])
 

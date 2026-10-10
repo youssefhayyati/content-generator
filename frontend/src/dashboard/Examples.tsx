@@ -1,8 +1,9 @@
-import { ArrowUpRight, Wand2 } from 'lucide-react'
+import { ArrowRight, Wand2 } from 'lucide-react'
 import { PlatformIcon } from '../components/ui/PlatformIcon'
 import { CASES, KIND_LABEL, type Case } from '../showcase/cases'
 import { Clip, Picture } from '../showcase/pieces'
 import { cn } from '../lib/cn'
+import { useRouter } from '../lib/router'
 import { Btn, Modal } from './ui'
 
 /**
@@ -26,6 +27,7 @@ export function Examples({
   describe?: (c: Case) => string
   onUse: (c: Case) => void
 }) {
+  const { navigate } = useRouter()
   const list = CASES.filter(only)
   return (
     <Modal open={open} onClose={onClose} title="Start from an example" wide>
@@ -33,9 +35,16 @@ export function Examples({
         <p className="max-w-[62ch] text-[13px] leading-relaxed text-muted">
           Made with FlowAI for demo brands, from the brief on each card. Pick one to fill it in here, then change it to fit you.
         </p>
-        <a href="/showcase" target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[12.5px] text-dim transition-colors hover:text-fg">
-          The full showcase <ArrowUpRight className="size-3.5" />
-        </a>
+        <button
+          type="button"
+          onClick={() => {
+            onClose()
+            navigate('/dashboard/showcase')
+          }}
+          className="flex items-center gap-1 text-[12.5px] text-dim transition-colors hover:text-fg"
+        >
+          The full showcase <ArrowRight className="size-3.5" />
+        </button>
       </div>
       <ul className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {list.map((c) => (

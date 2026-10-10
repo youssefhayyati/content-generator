@@ -13,7 +13,10 @@ export type Kind = 'post' | 'picture' | 'carousel' | 'reel' | 'flow' | 'campaign
 export type Tone = 'professional' | 'friendly' | 'bold' | 'playful'
 
 export type Shot = { src: string; w: number; h: number; tone: string; alt: string }
-export type Version = { platform: PlatformId; text: string }
+/** One network's post, and the studio model that wrote it. */
+export type Version = { platform: PlatformId; text: string; model?: string }
+/** A brand's voice as an account profile holds it: what the writer is told before every post. */
+export type Voice = Partial<Record<'tone' | 'style' | 'do' | 'avoid' | 'hashtags', string>>
 
 /** A flow as the showcase draws it: the composed graph's steps, placed in lanes and rows. */
 export type FlowStep = { id: string; type: string; label: string; detail: string; lane: number; row: number }
@@ -27,7 +30,7 @@ export type Plan = {
 
 /** Where "make one like it" goes, and what it fills in when it gets there. */
 export type Make =
-  | { tool: 'composer'; brief: string; tone: Tone; platforms: PlatformId[] }
+  | { tool: 'composer'; brief: string; tone: Tone; platforms: PlatformId[]; model?: string }
   | { tool: 'image' | 'video'; prompt: string; ratio: string; model: string }
   | { tool: 'flows'; say: string }
   | { tool: 'campaigns' }
@@ -36,7 +39,7 @@ export type Case = {
   id: string
   group: Group
   kind: Kind
-  brand: { name: string; handle: string; trade: string }
+  brand: { name: string; handle: string; trade: string; voice?: Voice }
   title: string
   /** What was typed in: the post brief, the sentence, or the campaign's message. */
   brief: string
@@ -55,12 +58,29 @@ export type Case = {
 }
 
 const WRITER = 'GPT-OSS 120B'
+const KIMI = 'Kimi K3'
+const GLM = 'GLM 5.3'
+const DEEPSEEK = 'DeepSeek V4 Pro'
 /** The studio's ids for the models the pictures and clips were made with. */
 const SOUL_ID = 'higgsfield/soul-v2'
+const MODEL_ID = { [KIMI]: 'ollama_cloud/kimi-k3', [GLM]: 'ollama_cloud/glm-5.3', [DEEPSEEK]: 'ollama_cloud/deepseek-v4-pro:0813' }
 const KLING_ID = 'higgsfield/kling-3-pro'
 const SOUL = 'Higgsfield Soul 2'
 const KLING = 'Kling 3 Pro'
 const CLEAN = ' No text, no lettering, no logos.'
+
+/** The demo brands, each with the voice its account profile gives the writer. */
+const BRANDS = {
+  maisoncire: { name: "Maison Cire", handle: "maisoncire", trade: "Candle maker", voice: { tone: "Quiet, sensory and unhurried, like a perfumer's notebook.", style: "Short sentences. Concrete smells, textures and light. One idea per line.", do: "Name the scent notes. Say that every candle is poured by hand in small batches.", avoid: "Exclamation marks. The words cozy, vibe, treat yourself and must-have. More than one emoji.", hashtags: "Two at most, lowercase." } },
+  lowtidecoffee: { name: "Low Tide Coffee", handle: "lowtidecoffee", trade: "Roaster and café", voice: { tone: "Dry, local and a little cheeky, like the person behind the counter who already knows your order.", style: "Short. One joke at most. Talks about the harbour and the weather like a neighbour would.", avoid: "Exclamation marks, vibes, strings of emoji.", hashtags: "Two at most." } },
+  kilnandco: { name: "Kiln & Co", handle: "kilnandco", trade: "Ceramics studio", voice: { tone: "Warm, proud of the craft, precise about the process.", style: "Plain words a beginner would understand. Calm, never salesy.", do: "Use the potter's real terms (wedging, throwing, trimming, glazing, firing) and say in a few words what each one does.", avoid: "Magic, journey, labor of love, exclamation marks, numbered emoji.", hashtags: "Three at most, at the very end." } },
+  northlineruns: { name: "Northline Run Club", handle: "northlineruns", trade: "Running club", voice: { tone: "Bold, short and rhythmic. Welcoming to every pace.", style: "Short lines in the present tense. One line in capitals is fine.", do: "Make the day, time and place impossible to miss. Make a first-timer feel expected.", avoid: "Gym clichés: beast mode, crush it, no excuses, grind.", hashtags: "Two at most." } },
+  ledgerly: { name: "Ledgerly", handle: "ledgerly", trade: "Finance software", voice: { tone: "Plain-spoken and specific, like a finance lead talking to a peer. Never a brochure.", style: "Open with the result. Short paragraphs that tell it as a story: before, the one change, after.", do: "Keep the customer's numbers exactly as given.", avoid: "Streamline, seamless, leverage, game-changer, unlock, bullet lists, a 'key benefits' section, emoji.", hashtags: "One at most." } },
+  marginsbooks: { name: "Margins Books", handle: "marginsbooks", trade: "Bookshop", voice: { tone: "Wry and bookish, gently funny, never smug.", style: "One clean joke, then the practical part.", avoid: "Bookworm, reading slump, exclamation marks, more than one emoji.", hashtags: "None." } },
+  osterianove: { name: "Osteria Nove", handle: "osterianove", trade: "Restaurant", voice: { tone: "A warm Italian host: simple, generous, appetite first.", style: "Short. Describe the dish as if you were setting it down at the table.", avoid: "Foodie, labor of love, mouthwatering, exclamation marks, long hashtag lists.", hashtags: "Two at most." } },
+  wildstemflowers: { name: "Wild Stem", handle: "wildstemflowers", trade: "Florist", voice: { tone: "Light, seasonal and specific.", style: "Name the flowers. Put the practical details (how to order, the deadline) on their own line at the end.", avoid: "Brighten your day, exclamation marks, more than two emoji.", hashtags: "Two at most." } },
+  dewtheory: { name: 'Dew Theory', handle: 'dewtheory', trade: 'Skincare', voice: { tone: 'Calm, precise, quietly confident. Short sentences.', avoid: 'Miracle claims, before-and-after promises.' } },
+} satisfies Record<string, Case['brand']>
 
 const shot = (name: string, w: number, h: number, tone: string, alt: string): Shot => ({ src: `/showcase/${name}`, w, h, tone, alt })
 
@@ -69,50 +89,41 @@ export const CASES: Case[] = [
     id: 'ember-fig',
     group: 'words',
     kind: 'post',
-    brand: { name: 'Maison Cire', handle: 'maisoncire', trade: 'Candle maker' },
+    brand: BRANDS.maisoncire,
     title: 'One brief, three networks',
-    brief: 'Our autumn candle Ember & Fig is back for six weeks only. Smoky fig, cedar and a little black pepper. Hand-poured in small batches.',
+    brief: "Our autumn candle Ember & Fig is back for six weeks only. Smoky fig, cedar and a little black pepper. Hand-poured in small batches.",
     prompt:
       'Amber glass candle burning on a dark walnut table, ripe split figs and a sprig of cedar beside it, a thin curl of smoke, low warm window light, shallow depth of field, editorial still life photography, muted autumn palette.' +
       CLEAN,
     shots: [shot('ember-fig', 1536, 2048, '#1a110d', 'A lit amber candle on a walnut table beside split figs and a sprig of cedar')],
     versions: [
-      {
-        platform: 'instagram',
-        text: 'Our cozy autumn favorite is back! 🌰✨ Ember & Fig is here for just six weeks—so light it up while you can.\n\nSmoky fig mingles with cedar and just a hint of black pepper, creating the perfect seasonal vibe. Hand‑poured in small batches, each candle is made with love and attention to detail.\n\nGrab yours before the season’s scent fades!\n\n#EmberAndFig #AutumnCandle #HandPoured',
-      },
-      {
-        platform: 'x',
-        text: 'Our autumn favorite Ember & Fig is back—for six weeks only! 🌿 Smoky fig, cedar, and a hint of black pepper, hand‑poured in small batches. Grab yours before the season fades. #candle #autumn',
-      },
-      {
-        platform: 'linkedin',
-        text: 'Our beloved Ember & Fig autumn candle is back—for just six weeks! 🌿🍂\n\nImagine the cozy scent of smoky fig layered with rich cedar and just a hint of black pepper. Each candle is hand‑poured in small batches, so you’ll get the same care and quality that made it a seasonal favorite.\n\nBecause it’s a limited‑time release, now’s the perfect moment to treat yourself (or a loved one) to that warm, seasonal glow before the season ends.\n\nTap the link to reserve yours while they last: [link]\n\n#AutumnVibes #HandPoured #CandleLovers',
-      },
+      { platform: 'instagram', model: KIMI, text: "Ember & Fig is back.\n\nIt comes home each autumn, and it slips away again. Six weeks only.\n\nFig ripened into smoke. Cedar, dry and warm. A whisper of black pepper at the edges.\n\nEvery candle is poured by hand in small batches.\n\n#emberandfig #maisoncire" },
+      { platform: 'x', model: KIMI, text: "Ember & Fig is back.\n\nSmoky fig. Cedar. A little black pepper.\n\nIt smells like woodsmoke drifting through the orchard at dusk.\n\nSix weeks, then it rests again.\n\nEvery candle is poured by hand in small batches.\n\n#emberandfig #autumn" },
+      { platform: 'linkedin', model: KIMI, text: "Ember & Fig is back.\n\nSmoky fig, dark and soft.\nCedar, dry as old wood.\nA little black pepper at the edge.\n\nIt smells like late October. Lamplight against a grey afternoon.\n\nEvery candle is poured by hand in small batches.\n\nSix weeks only. Then it rests until next year.\n\nIt is good to have it back on the bench.\n\n#maisoncire #emberandfig" },
     ],
     made: [
-      { did: 'Wrote a version for each network', model: WRITER },
+      { did: 'Wrote a version for each network, in the brand’s voice', model: KIMI },
       { did: 'Made the picture, 3:4', model: SOUL },
     ],
-    make: { tool: 'composer', brief: 'Our autumn candle Ember & Fig is back for six weeks only. Smoky fig, cedar and a little black pepper. Hand-poured in small batches.', tone: 'friendly', platforms: ['instagram', 'x', 'linkedin'] },
+    make: { tool: 'composer', model: MODEL_ID[KIMI], brief: "Our autumn candle Ember & Fig is back for six weeks only. Smoky fig, cedar and a little black pepper. Hand-poured in small batches.", tone: 'friendly', platforms: ['instagram', 'x', 'linkedin'] },
   },
   {
     id: 'dawn-miles',
     group: 'motion',
     kind: 'reel',
-    brand: { name: 'Northline Run Club', handle: 'northlineruns', trade: 'Running club' },
+    brand: BRANDS.northlineruns,
     title: 'A sunrise reel from one sentence',
-    brief: 'Every Saturday at 6:30 in the morning we run the river bridges. All paces, nobody gets left behind. Show up once and you’ll be back.',
+    brief: "Every Saturday at 6:30 in the morning we run the river bridges. All paces, nobody gets left behind. Show up once and you’ll be back.",
     prompt: 'Low tracking shot alongside a small group of runners crossing a steel bridge over a river at dawn, city skyline in soft mist behind them, breath visible in the cold air, warm sunrise light, cinematic.',
     shots: [shot('dawn-miles', 720, 1280, '#554f48', 'Runners silhouetted crossing a steel truss bridge at sunrise')],
     video: { src: '/showcase/dawn-miles.mp4', seconds: 5 },
     versions: [
-      { platform: 'tiktok', text: 'RISE BEFORE SUNRISE 🌅\nEvery Saturday at 6:30 am we run the river bridges.\nAll paces welcome—nobody gets left behind.\nShow up once and you’ll be back for more.\n\n💪🌊 #RiverBridges #SaturdayRun #AllPaces' },
-      { platform: 'instagram', text: 'Rise before sunrise. Every Saturday at 6:30 am we hit the River Bridges. All paces, nobody gets left behind. One run and you’ll be back for more. 🏃‍♂️💥 #RiverBridges #SaturdayRun #AllPaces' },
+      { platform: 'tiktok', model: KIMI, text: "Saturday. 6:30 AM. The river bridges.\n\nWe run. Every pace. Nobody left behind.\n\nNever run with us before? You're already expected.\n\nSHOW UP ONCE. YOU'LL BE BACK.\n\n#RunClub #NorthlineRuns" },
+      { platform: 'instagram', model: KIMI, text: "Saturday. 6:30 AM. The river bridges.\n\nEvery week. Every bridge. Every pace.\nFast, slow, brand new — it all counts out here.\n\nNobody gets dropped. Nobody runs alone.\nThat's the deal.\n\nFIRST TIME? GOOD. WE'RE EXPECTING YOU.\n\nShow up once. You'll be back.\n\n#NorthlineRunClub #RiverBridgeRuns" },
     ],
     made: [
       { did: 'Filmed the clip, 9:16, 5 seconds', model: KLING },
-      { did: 'Wrote the TikTok and Instagram captions', model: WRITER },
+      { did: 'Wrote the TikTok and Instagram captions in the brand’s voice', model: KIMI },
     ],
     make: { tool: 'video', prompt: 'Low tracking shot alongside a small group of runners crossing a steel bridge over a river at dawn, city skyline in soft mist behind them, breath visible in the cold air, warm sunrise light, cinematic.', ratio: '9:16', model: KLING_ID },
   },
@@ -120,9 +131,9 @@ export const CASES: Case[] = [
     id: 'clay-to-cup',
     group: 'pictures',
     kind: 'carousel',
-    brand: { name: 'Kiln & Co', handle: 'kilnandco', trade: 'Ceramics studio' },
+    brand: BRANDS.kilnandco,
     title: 'Clay to cup, in five slides',
-    brief: 'A carousel showing how one of our cups is made, from wedging the clay to the final firing. Weekend wheel classes are open for booking.',
+    brief: "A five-slide carousel on how one of our cups is made: wedging the clay, throwing it on the wheel, trimming the foot, dipping it in glaze, and the finished cups after the last firing. Weekend wheel classes are open for booking.",
     shots: [
       shot('clay-wedge', 2048, 2048, '#342d25', 'Hands wedging a block of grey clay on a canvas workbench'),
       shot('clay-throw', 2048, 2048, '#352414', 'Wet hands shaping a small cup on a spinning potter’s wheel'),
@@ -131,14 +142,11 @@ export const CASES: Case[] = [
       shot('clay-shelf', 2048, 2048, '#3f3932', 'A row of finished speckled cups on a shelf by a window'),
     ],
     versions: [
-      {
-        platform: 'instagram',
-        text: 'Watch our cup come to life, step by step!\n\n1️⃣ Wedging the clay – getting that perfect, even body.\n2️⃣ Shaping on the wheel – turning a lump into a sleek silhouette.\n3️⃣ Trimming & detailing – adding that personal touch.\n4️⃣ Glazing – a splash of color and shine.\n5️⃣ Final firing – where the magic locks in forever.\n\nFeel the process? 🎨✨ Our weekend wheel classes are now open for booking—perfect time to try your hand at the wheel and create your own pieces. Tap the link in our bio or visit [link] to reserve your spot!\n\n#pottery #handmade #ceramics #wheelclass #craftsmanship #creativelife',
-      },
+      { platform: 'instagram', model: GLM, text: "Every cup we make starts the same way: a heavy lump of clay with no shape in it yet.\n\nSwipe through to follow one from there.\n\nWedging. We knead the clay to push out any trapped air, so it won't crack in the kiln later.\n\nThrowing. On the spinning wheel, the clay is drawn up and hollowed out until it becomes a cup.\n\nTrimming. Once it's dried firm, a loop tool shaves off the extra clay and cuts in the foot ring the cup stands on.\n\nGlazing. A quick dip in the glaze bucket gives the cup its color and the glassy coat that keeps your coffee in the cup.\n\nFiring. Hours of kiln heat turn fragile clay into ceramic and melt the glaze into glass. The cups in the last slide have just come out, cooled and ready for the shelf.\n\nNo shortcuts in there. Just clay, water, heat and patience.\n\nIf you'd like to feel how the clay moves under your own hands, our weekend wheel classes are open for booking. You'll start with your own lump at the wedging table.\n\n#pottery #wheelthrown #ceramics" },
     ],
     made: [
       { did: 'Made five slides, 1:1', model: SOUL },
-      { did: 'Wrote the caption', model: WRITER },
+      { did: 'Wrote the caption in the brand’s voice', model: GLM },
     ],
     make: { tool: 'image', prompt: 'A potter\'s wet hands shaping a small cup on a spinning wheel, slip on the fingers, motion in the clay, warm studio light, close-up documentary photography.' + CLEAN, ratio: '1:1', model: SOUL_ID },
   },
@@ -146,31 +154,30 @@ export const CASES: Case[] = [
     id: 'month-end',
     group: 'words',
     kind: 'post',
-    brand: { name: 'Ledgerly', handle: 'ledgerly', trade: 'Finance software' },
+    brand: BRANDS.ledgerly,
     title: 'A case study, ready for LinkedIn',
-    brief: 'Case study: a 40-person design agency used Ledgerly to cut their month-end close from nine days to three. The main change: receipts are matched automatically as they come in, so nothing piles up at the end of the month.',
+    brief: "Case study: a 40-person design agency used Ledgerly to cut their month-end close from nine days to three. The main change: receipts are matched automatically as they come in, so nothing piles up at the end of the month.",
     versions: [
-      {
-        platform: 'linkedin',
-        text: 'Case Study: How a 40‑person design agency streamlined its finance workflow with Ledgerly\n\nThe agency struggled with a month‑end close that routinely took nine days. The bottleneck? Receipts piled up, requiring manual matching and endless follow‑ups.\n\nAfter implementing Ledgerly, every receipt is captured and matched automatically as it arrives. The result? The month‑end close dropped from nine days to just three, freeing up time for the team to focus on design work and strategic initiatives.\n\nKey benefits:\n- Real‑time receipt matching eliminates end‑of‑month backlogs\n- Faster close cycles improve cash visibility and forecasting\n- Reduced manual effort cuts operational costs\n\nLedgerly’s automation turned a time‑intensive process into a seamless, near‑instant workflow, demonstrating how smart finance tools can boost efficiency across creative businesses.\n\n#FinanceAutomation #DesignIndustry #Efficiency #Ledgerly',
-      },
+      { platform: 'linkedin', model: KIMI, text: "A 40-person design agency now closes the month in three days. It used to take nine.\n\nThe work itself never changed. What changed is when it happens. Receipts used to come in all month and wait. The matching started at month-end, so every close opened with a backlog, and the close ran to nine days.\n\nWith Ledgerly, receipts are matched automatically as they come in. Nothing piles up waiting for the end of the month.\n\nThree days instead of nine. The team isn't working faster. There's just less left to do when the close starts.\n\n#Accounting" },
     ],
-    made: [{ did: 'Wrote the post for LinkedIn', model: WRITER }],
-    make: { tool: 'composer', brief: 'Case study: a 40-person design agency used Ledgerly to cut their month-end close from nine days to three. The main change: receipts are matched automatically as they come in, so nothing piles up at the end of the month.', tone: 'professional', platforms: ['linkedin'] },
+    made: [{ did: 'Wrote the LinkedIn post in the brand’s voice', model: KIMI }],
+    make: { tool: 'composer', model: MODEL_ID[KIMI], brief: "Case study: a 40-person design agency used Ledgerly to cut their month-end close from nine days to three. The main change: receipts are matched automatically as they come in, so nothing piles up at the end of the month.", tone: 'professional', platforms: ['linkedin'] },
   },
   {
     id: 'cold-brew',
     group: 'pictures',
     kind: 'picture',
-    brand: { name: 'Low Tide Coffee', handle: 'lowtidecoffee', trade: 'Roaster and café' },
+    brand: BRANDS.lowtidecoffee,
     title: 'Golden hour on the harbour wall',
-    brief: 'Cold brew season isn’t over until we say it is. Steeped for 18 hours, poured over ice, best drunk sitting on the harbour wall.',
+    brief: "Cold brew season isn’t over until we say it is. Steeped for 18 hours, poured over ice, best drunk sitting on the harbour wall.",
     prompt: 'A tall glass of iced cold brew coffee standing on a weathered stone harbour wall at golden hour, condensation on the glass, fishing boats softly out of focus behind, warm 35mm film photograph.' + CLEAN,
     shots: [shot('cold-brew', 1344, 2016, '#261b0f', 'A glass of iced cold brew on a stone harbour wall at golden hour, boats behind')],
-    versions: [{ platform: 'instagram', text: 'Cold brew season isn’t over until we say it is ☕❄️ Steeped for 18 hours, poured over ice and sipped on the harbour wall 🌊🧊 #ColdBrew #HarbourVibes #SummerSip' }],
+    versions: [
+      { platform: 'instagram', model: KIMI, text: "Cold brew season ends when we say it ends. Not before.\n\nEighteen hours of steeping, poured over ice, best consumed on the harbour wall pretending it's still summer. The gulls don't judge. Neither do we.\n\nCome get one before the weather files a complaint.\n\n#lowtidecoffee #coldbrew" },
+    ],
     made: [
       { did: 'Made the picture, 2:3', model: SOUL },
-      { did: 'Wrote the caption', model: WRITER },
+      { did: 'Wrote the caption in the brand’s voice', model: KIMI },
     ],
     make: { tool: 'image', prompt: 'A tall glass of iced cold brew coffee standing on a weathered stone harbour wall at golden hour, condensation on the glass, fishing boats softly out of focus behind, warm 35mm film photograph.' + CLEAN, ratio: '2:3', model: SOUL_ID },
   },
@@ -178,7 +185,7 @@ export const CASES: Case[] = [
     id: 'friday-specials',
     group: 'automations',
     kind: 'flow',
-    brand: { name: 'Osteria Nove', handle: 'osterianove', trade: 'Restaurant' },
+    brand: BRANDS.osterianove,
     title: 'Friday specials, written at four',
     brief: 'Every Friday at 4pm, write tonight’s specials post for Instagram and score how well it fits our voice. If it scores under 7, rewrite it. Then wait for my approval and post it in the next free slot.',
     flow: {
@@ -215,22 +222,19 @@ export const CASES: Case[] = [
     id: 'pappardelle',
     group: 'pictures',
     kind: 'picture',
-    brand: { name: 'Osteria Nove', handle: 'osterianove', trade: 'Restaurant' },
+    brand: BRANDS.osterianove,
     title: 'Tonight’s special, shot and captioned',
-    brief: 'Tonight’s special: hand-rolled pappardelle with a ragù that has been cooking since this morning. Only as many plates as the dough allows.',
+    brief: "Tonight’s special: hand-rolled pappardelle with a ragù that has been cooking since this morning. Only as many plates as the dough allows.",
     prompt:
       'Overhead photograph of a white bowl of pappardelle: long, wide, flat ribbons of hand-cut egg pasta, loosely twirled with a slow-cooked meat ragù and a little grated parmesan, on rumpled linen, a glass of red wine at the edge of the frame, natural window light, Italian trattoria.' +
       CLEAN,
     shots: [shot('pappardelle', 2048, 2048, '#41392e', 'Overhead, a white bowl of pappardelle with ragù on linen, a glass of red wine beside it')],
     versions: [
-      {
-        platform: 'instagram',
-        text: 'Tonight’s special is a true labor‑of‑love: hand‑rolled pappardelle tossed with a ragù that’s been simmering since sunrise. 🍝✨ The sauce has had the whole day to develop deep, comforting flavors, and the fresh pasta is rolled to the perfect bite. Because we make every strand by hand, we can only serve as many plates as the dough allows – so grab yours while they last!\n\nCome taste the patience and passion in every forkful.\n\n#pappardelle #ragù #handmadepasta #foodie #dinnertime #freshflavors #limitededition #chefsguide',
-      },
+      { platform: 'instagram', model: DEEPSEEK, text: "Hand-rolled pappardelle, wide and tender, folded into a ragù that’s been simmering since this morning. We made only as much as the dough would give us, so when it’s finished, that’s it for tonight." },
     ],
     made: [
       { did: 'Made the picture, 1:1', model: SOUL },
-      { did: 'Wrote the caption', model: WRITER },
+      { did: 'Wrote the caption in the brand’s voice', model: DEEPSEEK },
     ],
     make: {
       tool: 'image',
@@ -245,35 +249,32 @@ export const CASES: Case[] = [
     id: 'short-novels',
     group: 'words',
     kind: 'post',
-    brand: { name: 'Margins Books', handle: 'marginsbooks', trade: 'Bookshop' },
+    brand: BRANDS.marginsbooks,
     title: 'Back into reading, in one post',
-    brief: 'For people who stopped reading: our staff picked novels under 200 pages that will get you back into it. They are on the short-novel table by the door all month.',
+    brief: "For people who stopped reading: our staff picked novels under 200 pages that will get you back into it. They are on the short-novel table by the door all month.",
     versions: [
-      {
-        platform: 'x',
-        text: '📚 Stuck in a reading slump? Our crew hand‑picked snappy novels under 200 pages to pull you back in! Grab one from the Short‑Novel table by the door—open all month long. #QuickReads #BookLove',
-      },
+      { platform: 'x', model: GLM, text: "A bookmark that hasn't moved in months is just a tiny monument to good intentions. Our staff picked short novels under 200 pages to change that. They're on the short-novel table by the door all month. 📚" },
     ],
-    made: [{ did: 'Wrote the post for X', model: WRITER }],
-    make: { tool: 'composer', brief: 'For people who stopped reading: our staff picked novels under 200 pages that will get you back into it. They are on the short-novel table by the door all month.', tone: 'playful', platforms: ['x'] },
+    made: [{ did: 'Wrote the post for X in the brand’s voice', model: GLM }],
+    make: { tool: 'composer', model: MODEL_ID[GLM], brief: "For people who stopped reading: our staff picked novels under 200 pages that will get you back into it. They are on the short-novel table by the door all month.", tone: 'playful', platforms: ['x'] },
   },
   {
     id: 'the-pour',
     group: 'motion',
     kind: 'reel',
-    brand: { name: 'Low Tide Coffee', handle: 'lowtidecoffee', trade: 'Roaster and café' },
+    brand: BRANDS.lowtidecoffee,
     title: 'The pour, in slow motion',
-    brief: 'The pour, in slow motion: our cold brew going over ice on the harbour wall. It stays on the menu all autumn.',
+    brief: "The pour, in slow motion: our cold brew going over ice on the harbour wall. It stays on the menu all autumn.",
     prompt: 'Slow-motion close-up of cold brew coffee being poured over ice in a tall glass on a stone harbour wall at golden hour, swirls of coffee through the ice, boats softly out of focus behind, cinematic.',
     shots: [shot('the-pour', 720, 1280, '#4e4844', 'Cold brew poured over ice in a tall glass on a harbour wall')],
     video: { src: '/showcase/the-pour.mp4', seconds: 5 },
     versions: [
-      { platform: 'instagram', text: 'Watch the magic cascade 🌊❄️ Our cold brew swoops over ice on the harbour wall in slo‑mo glory. 🍂 It’s hanging out on the menu all autumn long—so sip, savor, and let the waves roll. #ColdBrew #HarbourVibes #AutumnSip' },
-      { platform: 'tiktok', text: 'Watch the magic unfold 🌊☕️ Slow‑motion pour of our icy cold brew cascading over the harbour wall. It’s the perfect autumn vibe and it’s staying on the menu all season! #ColdBrew #AutumnSips #HarbourVibes' },
+      { platform: 'instagram', model: DEEPSEEK, text: "Slow pour for people who still wear shorts in October. Cold brew, harbour wall, no plans to take it off the menu. #coldbrew #harbourweather" },
+      { platform: 'tiktok', model: DEEPSEEK, text: "Cold brew over ice on the harbour wall, slowed down so you can watch the weather change its mind. It’s on the menu all autumn, same as the wind. #coldbrew #harbourwall" },
     ],
     made: [
       { did: 'Filmed the clip, 9:16, 5 seconds', model: KLING },
-      { did: 'Wrote the Instagram and TikTok captions', model: WRITER },
+      { did: 'Wrote the Instagram and TikTok captions in the brand’s voice', model: DEEPSEEK },
     ],
     make: { tool: 'video', prompt: 'Slow-motion close-up of cold brew coffee being poured over ice in a tall glass on a stone harbour wall at golden hour, swirls of coffee through the ice, boats softly out of focus behind, cinematic.', ratio: '9:16', model: KLING_ID },
   },
@@ -281,7 +282,7 @@ export const CASES: Case[] = [
     id: 'morning-serum',
     group: 'automations',
     kind: 'campaign',
-    brand: { name: 'Dew Theory', handle: 'dewtheory', trade: 'Skincare' },
+    brand: BRANDS.dewtheory,
     title: 'A launch week, planned from the brief',
     brief: 'A serum gentle enough for every morning: niacinamide and green tea, nothing that stings.',
     fields: [
@@ -316,20 +317,17 @@ export const CASES: Case[] = [
     id: 'friday-stems',
     group: 'pictures',
     kind: 'picture',
-    brand: { name: 'Wild Stem', handle: 'wildstemflowers', trade: 'Florist' },
+    brand: BRANDS.wildstemflowers,
     title: 'The Friday flower drop',
-    brief: 'Friday flower drop: loose seasonal bouquets wrapped in paper, delivered by bike around the neighbourhood. Order by noon on Thursday.',
+    brief: "Friday flower drop: loose bouquets of garden roses, ranunculus and wild grasses, wrapped in paper and delivered by bike around the neighbourhood. Order by noon on Thursday.",
     prompt: 'A loose bouquet of garden roses, ranunculus and wild grasses wrapped in brown paper in the front basket of a bicycle, cobblestone street, soft overcast light, lifestyle photography.' + CLEAN,
     shots: [shot('friday-stems', 1536, 2048, '#3d3728', 'A paper-wrapped bouquet of roses and ranunculus in a bicycle basket on cobblestones')],
     versions: [
-      {
-        platform: 'instagram',
-        text: 'Friday flower drop is here! 🌼✨ We’re handing out loose, seasonal bouquets wrapped in paper, delivered by bike right around the neighbourhood. Fresh, local, and ready to brighten your day.\n\nOrder yours by noon on Thursday to make sure you get a spot in the drop. Just tap the link in our bio or DM us to reserve your bouquet.\n\nLet the flowers roll in! 🚲💐 #FridayFlowers #LocalBlooms #BikeDelivery',
-      },
+      { platform: 'instagram', model: KIMI, text: "Friday's drop is garden roses, ranunculus and wild grasses, tied loose and wrapped in paper. The kind that spill sideways out of a jug.\n\nWe'll be out on the bikes delivering them around the neighbourhood. 🌿\n\nOrder by noon on Thursday.\n\n#fridayflowers #gardenroses" },
     ],
     made: [
       { did: 'Made the picture, 3:4', model: SOUL },
-      { did: 'Wrote the caption', model: WRITER },
+      { did: 'Wrote the caption in the brand’s voice', model: KIMI },
     ],
     make: { tool: 'image', prompt: 'A loose bouquet of garden roses, ranunculus and wild grasses wrapped in brown paper in the front basket of a bicycle, cobblestone street, soft overcast light, lifestyle photography.' + CLEAN, ratio: '3:4', model: SOUL_ID },
   },
@@ -342,6 +340,8 @@ export const GROUPS: Array<{ id: Group | 'all'; label: string }> = [
   { id: 'motion', label: 'Motion' },
   { id: 'automations', label: 'Automations' },
 ]
+
+export const VOICE_LABEL: Record<keyof Voice, string> = { tone: 'Tone', style: 'Style', do: 'Always', avoid: 'Never', hashtags: 'Hashtags' }
 
 export const KIND_LABEL: Record<Kind, string> = {
   post: 'Post',
@@ -366,7 +366,7 @@ export function makePath(make: Make) {
   const q = (o: Record<string, string>) => new URLSearchParams(o).toString()
   switch (make.tool) {
     case 'composer':
-      return `/dashboard/create?${q({ brief: make.brief, tone: make.tone, platforms: make.platforms.join(',') })}`
+      return `/dashboard/create?${q({ brief: make.brief, tone: make.tone, platforms: make.platforms.join(','), ...(make.model ? { model: make.model } : {}) })}`
     case 'image':
     case 'video':
       return `/dashboard/studio?${q({ tab: make.tool, prompt: make.prompt, ratio: make.ratio, model: make.model })}`

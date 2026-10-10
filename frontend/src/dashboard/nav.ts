@@ -5,6 +5,7 @@ import {
   Cpu,
   ChartColumn,
   Flame,
+  GalleryVerticalEnd,
   FolderOpen,
   Inbox,
   LayoutGrid,
@@ -59,6 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
       { path: '/dashboard/create', label: 'Composer', icon: PenLine },
       { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
+      { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
     ],
   },
   {

@@ -76,7 +76,7 @@ export default function Create() {
   // Arriving from the Studio's "Use in a post": the text, or the media, to start from.
   const [body, setBody] = useState(() => params.get('body') ?? '')
   // Arriving from a showcase case: the brief, tone and networks it was written from.
-  const [seed, setSeed] = useState(() => (params.get('brief') ? { brief: params.get('brief')!, tone: params.get('tone') } : null))
+  const [seed, setSeed] = useState(() => (params.get('brief') ? { brief: params.get('brief')!, tone: params.get('tone'), model: params.get('model') } : null))
   const [examples, setExamples] = useState(false)
   const [format, setFormat] = useState<PostFormat>(user.preferences.formats[0] ?? 'text')
   const [platforms, setPlatforms] = useState<PlatformId[]>(() => {
@@ -158,7 +158,7 @@ export default function Create() {
   }
 
   const startFrom = (c: Case) => {
-    setSeed({ brief: c.brief, tone: c.make.tool === 'composer' ? c.make.tone : null })
+    setSeed({ brief: c.brief, tone: c.make.tool === 'composer' ? c.make.tone : null, model: c.make.tool === 'composer' ? (c.make.model ?? null) : null })
     const networks = PLATFORM_ORDER.filter((p) => c.versions?.some((v) => v.platform === p))
     if (networks.length && !accountId) setPlatforms(networks)
     if (c.kind === 'picture' || c.kind === 'carousel') setFormat('image')

@@ -92,20 +92,40 @@ export function PostText({ text, className }: { text: string; className?: string
  * A post as it would go out: on paper, so the words read as the thing that was made rather than
  * as part of the page. The network's mark sits in the corner; Instagram versions carry the picture.
  */
-export function PostCard({ c, version, clamp, className, withShot = true }: { c: Case; version: Version; clamp?: boolean; className?: string; withShot?: boolean }) {
+export function PostCard({
+  c,
+  version,
+  clamp,
+  className,
+  withShot = true,
+  tone = 'paper',
+}: {
+  c: Case
+  version: Version
+  clamp?: boolean
+  className?: string
+  withShot?: boolean
+  /** paper on the site; panel inside the studio, where it sits among the studio's own surfaces. */
+  tone?: 'paper' | 'panel'
+}) {
   const shot = withShot && version.platform === 'instagram' ? c.shots?.[0] : undefined
+  const paper = tone === 'paper'
   return (
     <article
-      className={cn('overflow-hidden rounded-[18px] bg-bone text-ink shadow-[0_30px_80px_-40px_rgb(0_0_0_/_0.9)]', className)}
-      style={{ ['--tag' as string]: 'color-mix(in oklab, var(--color-accent) 72%, #000)' }}
+      className={cn(
+        'overflow-hidden',
+        paper ? 'rounded-[18px] bg-bone text-ink shadow-[0_30px_80px_-40px_rgb(0_0_0_/_0.9)]' : 'rounded-xl border border-line-2 bg-panel-2 text-fg',
+        className,
+      )}
+      style={{ ['--tag' as string]: paper ? 'color-mix(in oklab, var(--color-accent) 72%, #000)' : 'var(--color-accent-soft)' }}
     >
       <header className="flex items-center gap-2.5 px-4 pb-3 pt-4">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-ink text-[10.5px] font-semibold tracking-wide text-bone">{monogram(c.brand.name)}</span>
+        <span className={cn('grid size-8 shrink-0 place-items-center rounded-full text-[10.5px] font-semibold tracking-wide', paper ? 'bg-ink text-bone' : 'bg-fg text-ink')}>{monogram(c.brand.name)}</span>
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-[13.5px] font-semibold">{c.brand.name}</span>
-          <span className="block truncate text-[12px] text-ink/50">@{c.brand.handle}</span>
+          <span className={cn('block truncate text-[12px]', paper ? 'text-ink/50' : 'text-dim')}>@{c.brand.handle}</span>
         </span>
-        <PlatformIcon id={version.platform} className="ml-auto size-4 shrink-0 text-ink/70" />
+        <PlatformIcon id={version.platform} className={cn('ml-auto size-4 shrink-0', paper ? 'text-ink/70' : 'text-muted')} />
       </header>
       {shot && <Picture shot={shot} size="sm" className="aspect-square w-full object-cover" />}
       {/* The padding sits outside the clamp: inside it, the next line would show through the padding. */}

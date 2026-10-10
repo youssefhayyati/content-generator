@@ -28,6 +28,7 @@ import Phones from './pages/Phones'
 import Publishing from './pages/Publishing'
 import Reposts from './pages/Reposts'
 import Settings from './pages/Settings'
+import Showcase from './pages/Showcase'
 import Studio from './pages/Studio'
 import { pageLabel } from './nav'
 import { Shell } from './Shell'
@@ -43,6 +44,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/studio': Studio,
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
+  '/dashboard/showcase': Showcase,
   '/dashboard/library': Library,
   '/dashboard/inspire': Inspire,
   '/dashboard/calendar': Calendar,
