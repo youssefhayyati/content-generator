@@ -116,11 +116,13 @@ export type Linked = {
 export type Approval = {
   id: number
   draft: number
-  /** schedule: a time for a post. version: a changed campaign version (gate 6B). time: a time for one. */
-  kind: 'schedule' | 'version' | 'time'
+  /** schedule: a time for a post. version: a changed campaign version (gate 6B). time: a time for one.
+   *  repost: a redesigned X post for Instagram (reuse allowed and booked in one click). */
+  kind: 'schedule' | 'version' | 'time' | 'repost'
   post: number | null
   campaign: number | null
   variant: number | null
+  repost?: number | null
   text: string
   status: 'waiting' | 'approved' | 'declined' | 'failed' | 'outdated'
   detail: string
@@ -390,6 +392,12 @@ export function describe(name: string, a: Record<string, unknown>): string {
       return 'Saving to FlowAI'
     case 'schedule_post':
       return 'Asking you to approve the time'
+    case 'fetch_x_post':
+      return 'Bringing the post from X'
+    case 'redesign_picture':
+      return a.media != null ? `Redesigning picture ${a.media}` : 'Making a new picture'
+    case 'repost_to_instagram':
+      return 'Asking you to approve the repost'
     case 'find_posts':
       return 'Looking through your posts'
     case 'open_post':
@@ -863,11 +871,17 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   const approve = useCallback(
     async (a: Approval) => {
-      if (a.kind === 'schedule' && !a.payload) return
+      if ((a.kind === 'schedule' || a.kind === 'repost') && !a.payload) return
       setBooking((b) => [...b, a.id])
       try {
         // Done with the person's own session: they are the one approving it.
-        if (a.kind === 'version') await api(`/campaigns/${a.campaign}/variants/${a.variant}/approve`, { method: 'POST' })
+        if (a.kind === 'repost') {
+          const p = a.payload as { caption: string; asset_ids: number[]; note: string; placement?: string }
+          // A time that passed while the card waited: the next round instead.
+          const at = a.when && Date.parse(a.when) > Date.now() + 60_000 ? a.when : new Date(Date.now() + 90_000).toISOString()
+          await api(`/reposts/${a.repost}/permission`, { method: 'POST', body: { decision: 'allowed', note: p.note, attribution: true } })
+          await api(`/reposts/${a.repost}/schedule`, { method: 'POST', body: { caption: p.caption, asset_ids: p.asset_ids, scheduled_at: at, placement: p.placement } })
+        } else if (a.kind === 'version') await api(`/campaigns/${a.campaign}/variants/${a.variant}/approve`, { method: 'POST' })
         else if (a.kind === 'time') await api(`/campaigns/${a.campaign}/variants/${a.variant}/times`, { method: 'POST', body: { at: a.when } })
         else await api(`/posts/${a.post}`, { method: 'PUT', body: { ...a.payload, status: 'scheduled', ...(a.when ? { scheduled_at: a.when } : { queue: true }) } })
         link.send({ type: 'approve', id: a.id, done: true, conversation: conversation.current })

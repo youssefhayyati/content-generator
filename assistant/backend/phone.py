@@ -96,6 +96,11 @@ DROPPED = re.compile(r"PolicyViolation|TargetLost|unreachable|DEVICE_ERROR|can't
 SHARE_TAP = re.compile(r"\b(tap|press|click|hit)\b\W+(?:\w+\W+){0,3}?(share|post|publish|tweet|your story)\b"
                        r"(?![\s'\"]*\(?(the pen|pen|screen|box|text|caption|field|tab|type|picker|menu|options))", re.I)
 SHARE_ELEMENT = re.compile(r"^\W*(share|post|publish|tweet|your story)\W*$", re.I)
+# What the button that publishes says, per app: Instagram's Share (or "Your story"; its POST only switches the
+# camera's mode), X's Post
+PUBLISH_WORDS = {"instagram": r"share|your story|share to", "x": r"post(?! (?:mode|tab))|tweet"}
+# A tap the agent says switches a mode or a tab: never the one that publishes
+MODE_SWITCH = re.compile(r"\b(mode|selector|switch(es|ing)? to|tab bar)\b", re.I)
 # The phone's agent itself out of service (its model account), not the phone: ours takes over for a while
 AGENT_DOWN = re.compile(r"LLM error|Model\w*Error|insufficient balance|exceeded_current_quota|\bquota\b|"
                         r"suspended|agent went quiet", re.I)
@@ -104,6 +109,9 @@ INPUT_ACTIONS = {"tap", "key", "type", "swipe", "long_press", "scroll", "wait", 
 RETRY_NOTE = ("Note: an earlier try at this stopped halfway (the phone lost its connection, or the agent doing "
               "it stopped), so the app may still show where it got to. If it shows this same post half made, carry on from there; "
               "otherwise start from the beginning. Never share it a second time.\n\n")
+
+# The most typed in one go: the board types slowly, and a 320-character caption outlasted the server's ~20 s wait
+PIECE_CHARS = 50
 
 # Characters the input board can't type, as the nearest ones it can
 ASCII = str.maketrans({"‘": "'", "’": "'", "‚": "'", "“": '"', "”": '"', "„": '"', "–": "-", "—": "-",
@@ -158,6 +166,28 @@ def typable(text: str) -> tuple[list[str], list[str]]:
     return lines, dropped
 
 
+def pieces(text: str, size: int = PIECE_CHARS) -> list[str]:
+    """A text as pieces of at most `size` characters, split between words (a longer word is cut), without the
+    spaces between them: the input board types slowly, and one long type outlasts the phone server's wait
+    ("TargetLost: fleet unreachable (timeout)", about 20 s, a 320-character caption)."""
+    out, cur = [], ""
+    for word in str(text or "").split():
+        while len(word) > size:
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(word[:size])
+            word = word[size:]
+        if cur and len(cur) + 1 + len(word) > size:
+            out.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}" if cur else word
+    if cur:
+        out.append(cur)
+    return out
+
+
 def _count(value) -> int | None:
     """12, "1,204", "3.4K", "2M" -> a number."""
     if isinstance(value, bool) or value is None:
@@ -175,11 +205,23 @@ def _count(value) -> int | None:
     return int(n * {"": 1, "k": 1_000, "m": 1_000_000}[unit.lower()])
 
 
-def _shares(intent: str, params: dict) -> bool:
-    """Whether a tap was meant to publish the post (FlowAI's tap:post-button): the button it read says so
-    ("TextView 'Share'"), or what the phone's agent said it would do ("Tap the blue Share button")."""
+def _shares(intent: str, params: dict, platform: str = "") -> tuple[bool, bool]:
+    """Whether a tap was meant to publish the post (FlowAI's tap:post-button), and whether that's sure: the
+    button it read says so ("TextView 'Share'"; sure), or what the phone's agent said it would do ("Tap the
+    blue Share button"; not sure). In Instagram, POST is the mode switch under the camera, not the button that
+    publishes (Share): it never counts there, nor does any tap the agent says switches a mode."""
+    publish = PUBLISH_WORDS.get(platform)
     element = re.search(r"'([^']*)'", str(params.get("element") or ""))
-    return bool((element and SHARE_ELEMENT.search(element.group(1))) or SHARE_TAP.search(intent or ""))
+    if element:
+        label = element.group(1)
+        hit = re.fullmatch(rf"\W*({publish})\W*", label, re.I) if publish else SHARE_ELEMENT.search(label)
+        return bool(hit), True
+    text = intent or ""
+    if MODE_SWITCH.search(text):
+        return False, False
+    if publish:
+        return bool(re.search(rf"\b(tap|press|click|hit)\b\W+(?:\w+\W+){{0,3}}?({publish})\b", text, re.I)), False
+    return bool(SHARE_TAP.search(text)), False
 
 
 def handover_note(job: "PhoneJob") -> str:
@@ -466,6 +508,7 @@ class PhoneJob:
     attempts: int = 1
     tapped_post: bool = False  # a tap meant to share it went through (or a task that may share it won't stop): it
     #                            may be up, so never again
+    share_sure: bool = False  # that tap was on a button reading Share/Post, not just the agent's words for it
     fresh: bool = False  # the phone checked and the job's app opened anew (fresh_start), before its first try
     touched: bool = False  # something was done on the phone: a try after this carries on from where the app is
     direct: bool = False  # run by our own agent on the direct controls, not the API's agent
@@ -555,6 +598,10 @@ class PhoneWork:
             raise PhoneError(f"there is no phone skill for {platform} {placement} posts "
                              f"(skills/phone/post-{platform}-{placement}.md)")
         lines, dropped = typable(caption)
+        # One line: every Enter costs an OK from the phone (it can't read the caption field), two steps and about
+        # 20 s each, and a caption in paragraphs ran a post out of its 40 steps. They run on as one, credit included.
+        if len(lines) > 1:
+            lines = [" ".join(line for line in lines if line)]
         kind = "video" if "video" in kinds else "picture"
         n = len(kinds)
         media = f"{n} {kind}{'s' if n != 1 else ''}" if n else "no pictures (text only)"
@@ -884,9 +931,15 @@ class PhoneWork:
             params = {k: v for k, v in (data.get("params") or {}).items() if k not in ("transport", "perception")}
             ok = bool(data.get("ok"))
             result = "ok" if ok else f"failed: {data.get('error')}"
-            if name == "tap" and ok and job.kind in ("post", "publish") and not data.get("look") and \
-                    _shares(job.intent, params):
-                name, job.tapped_post = "tap:post-button", True  # FlowAI's name for it
+            if name == "tap" and ok and job.kind in ("post", "publish") and not data.get("look"):
+                shares, sure = _shares(job.intent, params, job.post.platform if job.post else "")
+                if shares:
+                    name, job.tapped_post = "tap:post-button", True  # FlowAI's name for it
+                    job.share_sure = job.share_sure or sure
+            elif name == "type" and job.tapped_post and not job.share_sure and job.kind in ("post", "publish"):
+                # Still typing the caption: the tap the agent's words made look like sharing wasn't (nothing is
+                # typed after a post goes up), so a drop from here is a plain failure, tried again
+                job.tapped_post = False
             job.steps.append(f"{name} {json.dumps(params, ensure_ascii=False)[:120]}: {result}")
             job.last_step = data.get("n") or job.last_step
             job.act(name, ok, job.intent or result)
@@ -1527,7 +1580,13 @@ def _fill(skill: Skill, values: dict[str, str]) -> str:
 def _caption_block(lines: list[str]) -> str:
     if not lines:
         return "(no caption: leave the text box empty)"
-    return "\n".join(f"{i}. {json.dumps(line)}" if line else f"{i}. (empty line)" for i, line in enumerate(lines, 1))
+    parts = pieces(" ".join(line for line in lines if line))
+    if len(parts) == 1:
+        return f"1. {json.dumps(parts[0])}"
+    # Typed whole, a long caption outlasts the phone server's wait and the phone is "lost": in pieces
+    return ("It is long, so type it in these pieces, in order, one type action per piece (never all at once, it "
+            "fails): type piece 1, then a single space and piece 2, then a single space and piece 3, and so on. "
+            "Never press enter.\n" + "\n".join(f"{i}. {json.dumps(p)}" for i, p in enumerate(parts, 1)))
 
 
 def _first_words(lines: list[str]) -> str:

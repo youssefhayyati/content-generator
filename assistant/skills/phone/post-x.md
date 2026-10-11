@@ -16,10 +16,9 @@ those, nothing older.
    "Maybe later", "Cancel" or the X.
 3. Tap the round blue "+" button at the bottom right. If it opens a small menu (Go Live, Spaces, Photos,
    Post), tap "Post" (the pen icon).
-4. In the "What's happening?" box, type the text exactly as given, one line at a time: type line 1, press
-   enter, type line 2, and so on, doing as many lines as you can in one step. For an "(empty line)" just
-   press enter. Do not press enter after the last line. Ignore any suggestion list that pops up while typing;
-   do not add, fix or translate anything.
+4. In the "What's happening?" box, type the text exactly as given below, the way it says (a long one in
+   pieces, one type action each). Never press enter. Ignore any suggestion list that pops up while typing; do not
+   add, fix or translate anything.
 
 Text:
 {{caption}}

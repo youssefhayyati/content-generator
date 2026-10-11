@@ -27,10 +27,9 @@ on. Use exactly those, nothing older.
 5. Tap "Next" (top right, or the arrow). On the filters / edit screen change nothing; if it asks to add
    music, skip it. Tap "Next" again.
 6. On the screen with "Write a caption..." / "Add a caption...", tap that box and type the caption exactly
-   as given, one line at a time: type line 1, press enter, type line 2, press enter, and so on, doing as many
-   lines as you can in one step. For an "(empty line)" just press enter. Do not press enter after the last
-   line. If a list of hashtag or name suggestions pops up while typing, ignore it and keep typing. Do not add,
-   fix or translate anything.
+   as given below, the way it says (a long one in pieces, one type action each). Never press enter. If a list
+   of hashtag or name suggestions pops up while typing, ignore it and keep typing. Do not add, fix or translate
+   anything.
 
 Caption:
 {{caption}}

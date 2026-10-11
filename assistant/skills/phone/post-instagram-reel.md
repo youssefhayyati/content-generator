@@ -19,10 +19,8 @@ that one.
 5. Tap "Next" (or "Add" then "Next") until you reach the screen with "Write a caption...". Change nothing in
    the editor: no music, no text, no trimming (the video already has its music and words). If asked about
    adding music or templates, skip it.
-6. Tap the caption box and type the caption exactly as given, one line at a time: type line 1, press enter,
-   type line 2, and so on, doing as many lines as you can in one step. For an "(empty line)" just press
-   enter. Do not press enter after the last line. Ignore hashtag suggestions; do not add, fix or translate
-   anything.
+6. Tap the caption box and type the caption exactly as given below, the way it says (a long one in pieces,
+   one type action each). Never press enter. Ignore hashtag suggestions; do not add, fix or translate anything.
 
 Caption:
 {{caption}}

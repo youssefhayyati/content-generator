@@ -21,6 +21,10 @@ return [
     // What the composer and the generators start on.
     'default_text' => env('AI_DEFAULT_TEXT', 'anthropic/claude-opus-5'),
 
+    // Who transcribes speech (captions, highlights, voice nodes), e.g. voicestudio/whisper-1; empty = the best
+    // that can run: the GPU pod's Whisper large-v3 before this server's Whisper base (App\Services\Sound\Listener).
+    'default_listen' => env('AI_DEFAULT_LISTEN'),
+
     'providers' => [
 
         'anthropic' => [
@@ -306,6 +310,8 @@ return [
             'FACESWAP_URL' => env('FACESWAP_URL'),
             'FACESWAP_API_KEY' => env('FACESWAP_API_KEY'),
             'LLM_MODEL' => env('LLM_MODEL'),
+            'PHONE_API_URL' => env('PHONE_API_URL'),
+            'PHONE_API_KEY' => env('PHONE_API_KEY'),
         ],
     ],
 

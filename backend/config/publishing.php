@@ -49,4 +49,13 @@ return [
         'port' => (int) env('ADB_SERVER_PORT', 5037),
     ],
 
+    // The team's phone on the hackathon Phone API (the same URL and team key the
+    // assistant uses): the Phones page mirrors it and drives it through this API.
+    // Its server's certificate is self-signed, hence no TLS check by default.
+    'phone_api' => [
+        'url' => env('PHONE_API_URL'),
+        'key' => env('PHONE_API_KEY'),
+        'verify' => (bool) env('PHONE_VERIFY_TLS', false),
+    ],
+
 ];

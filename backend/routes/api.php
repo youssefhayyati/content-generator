@@ -240,6 +240,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('reposts/{repost}/fetch', [RepostController::class, 'fetch'])->middleware('throttle:20,1');
     Route::post('reposts/{repost}/permission', [RepostController::class, 'permission']);
     Route::post('reposts/{repost}/schedule', [RepostController::class, 'schedule']);
+    Route::patch('reposts/{repost}', [RepostController::class, 'update']);
     Route::delete('reposts/{repost}', [RepostController::class, 'destroy']);
     Route::post('reposts/{repost}/adapt', [RepostController::class, 'adapt'])->middleware(['verified', 'throttle:ai']);
 

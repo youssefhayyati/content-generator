@@ -589,7 +589,7 @@ async def show_draft(session, draft: int | None = None):
 # --- FlowAI: saving, finding and scheduling posts (backend/flowai.py) --------------
 
 FLOWAI_TOOLS = {"save_draft", "find_posts", "open_post", "find_assets", "use_assets", "schedule_post",
-                "find_campaigns", "open_campaign"}
+                "find_campaigns", "open_campaign", "fetch_x_post", "redesign_picture", "repost_to_instagram"}
 
 
 @tool(
@@ -709,6 +709,68 @@ async def use_assets(assets: list, session):
 )
 async def schedule_post(when: str, session, draft: int | None = None):
     return await session.flowai.schedule(draft, when)
+
+
+# Reposts from X to Instagram (backend/reposts.py)
+
+@tool(
+    "fetch_x_post",
+    "Bring a post from X here to repost it on Instagram: FlowAI reads its author, text and pictures from its link, "
+    "and the pictures get numbers here. Then redesign it before it goes anywhere.",
+    {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "The post's link, e.g. https://x.com/someone/status/123…"},
+            "account": {"type": "integer", "description": "The Instagram account it goes to (default: the only one)"},
+        },
+        "required": ["url"],
+    },
+)
+async def fetch_x_post(url: str, session, account: int | None = None):
+    from . import reposts
+    return await reposts.fetch(session.flowai, url, account)
+
+
+@tool(
+    "redesign_picture",
+    "Make a new picture for a repost with an image model in FlowAI, from a picture here as its reference (or from "
+    "the instruction alone). It runs in the background, usually under a minute; you are told its number when ready.",
+    {
+        "type": "object",
+        "properties": {
+            "instruction": {"type": "string", "description": "What the new picture looks like: subject, style, "
+                                                             "colours, mood; say to keep what matters from the original"},
+            "media": {"type": "integer", "description": "The picture's number here to start from (none: from words)"},
+            "model": {"type": "string", "enum": ["higgsfield/grok-image-2", "higgsfield/ideogram-4", "higgsfield/soul"],
+                      "description": "Default grok-image-2; ideogram-4 is good with words on the picture"},
+        },
+        "required": ["instruction"],
+    },
+)
+async def redesign_picture(instruction: str, session, media: int | None = None, model: str | None = None):
+    from . import reposts
+    return await reposts.redesign(session.flowai, instruction, media, model)
+
+
+@tool(
+    "repost_to_instagram",
+    "Ask the user to approve a redesigned repost: an Approve card on screen for the Instagram draft, which also "
+    "records that reusing the X post is allowed. Nothing is booked before they press it; you are told. Once "
+    "approved, the team's phone posts it on Instagram at that time by itself.",
+    {
+        "type": "object",
+        "properties": {
+            "repost": {"type": "integer", "description": "The repost number from fetch_x_post"},
+            "draft": _DRAFT,
+            "when": {"type": "string", "description": "\"now\" (default: within a few minutes) or a date and time in "
+                                                      "the user's time zone, e.g. 2026-10-16T09:00"},
+        },
+        "required": ["repost"],
+    },
+)
+async def repost_to_instagram(repost: int, session, draft: int | None = None, when: str | None = None):
+    from . import reposts
+    return await reposts.ask(session.flowai, repost, draft, when)
 
 
 # --- The team's phone: posting from its Instagram and X apps (backend/phone.py) ----

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Repeat2, Square, Volume2, VolumeX, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, Toggle } from '../ui'
@@ -302,17 +302,18 @@ function Approvals() {
             )}
           >
             <p className={cn('flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]', x.status === 'waiting' ? 'text-accent-soft' : x.status === 'approved' ? 'text-ok' : 'text-dim')}>
-              {x.kind === 'version' ? <BadgeCheck className="size-3" /> : <CalendarCheck className="size-3" />}
+              {x.kind === 'version' ? <BadgeCheck className="size-3" /> : x.kind === 'repost' ? <Repeat2 className="size-3" /> : <CalendarCheck className="size-3" />}
               {(x.kind === 'version' && VERSION[x.status]) || CLOSED[x.status]}
             </p>
             <p className="mt-1.5 text-[12.5px] leading-snug">{x.text}</p>
+            {x.kind === 'repost' && x.payload && <RepostPreview payload={x.payload} />}
             {x.detail && x.status !== 'approved' && <p className="mt-1 text-[11.5px] text-dim">{x.detail}</p>}
             {x.status === 'waiting' && (
               <div className="mt-3 flex justify-end gap-2">
                 <Btn size="sm" variant="subtle" onClick={() => a.decline(x)}>
                   Decline
                 </Btn>
-                <Btn size="sm" variant="primary" icon={Check} loading={a.booking.includes(x.id)} disabled={x.kind === 'schedule' && !x.payload} onClick={() => void a.approve(x)}>
+                <Btn size="sm" variant="primary" icon={Check} loading={a.booking.includes(x.id)} disabled={(x.kind === 'schedule' || x.kind === 'repost') && !x.payload} onClick={() => void a.approve(x)}>
                   Approve
                 </Btn>
               </div>
@@ -320,6 +321,22 @@ function Approvals() {
           </motion.div>
         ))}
       </AnimatePresence>
+    </div>
+  )
+}
+
+/** What a repost's Approve books: its pictures as drawn, and its caption (the credit line comes on top). */
+function RepostPreview({ payload }: { payload: Record<string, unknown> }) {
+  const previews = (payload.previews as string[] | undefined) ?? []
+  return (
+    <div className="mt-2 flex gap-2.5 rounded-md border border-line bg-white/[0.02] p-2">
+      {previews.slice(0, 3).map((src) => (
+        <img key={src} src={src} alt="" className="size-16 shrink-0 rounded object-cover" />
+      ))}
+      <div className="min-w-0">
+        <p className="line-clamp-4 whitespace-pre-wrap text-[11.5px] leading-snug text-muted">{String(payload.caption ?? '')}</p>
+        <p className="mt-1 text-[10.5px] text-dim">Credit: @{String(payload.author ?? '')} on X</p>
+      </div>
     </div>
   )
 }

@@ -87,6 +87,20 @@
     color: var(--color-on-accent);
   }
 
+  /* A select's open list is drawn by the browser from the select's own colours: ours are see-through, so
+     Chromium on Windows fell back to a white list. Every select in the app gets the panel's instead. */
+  select {
+    color-scheme: dark;
+  }
+  select option,
+  select optgroup {
+    background-color: var(--color-panel-3);
+    color: var(--color-fg);
+  }
+  select option:disabled {
+    color: var(--color-dim);
+  }
+
   :focus-visible {
     outline: 1.5px solid var(--color-accent-soft);
     outline-offset: 3px;

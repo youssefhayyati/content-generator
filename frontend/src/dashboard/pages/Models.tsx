@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CircleAlert, CircleCheck, Cpu, FileCog, FlaskConical, HardDrive, Link2, PlugZap } from 'lucide-react'
+import { CircleAlert, CircleCheck, Cpu, FlaskConical, HardDrive, Link2, PlugZap } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type EnvSetting, type ModelInfo, type Registry } from '../../lib/api'
 import { cn } from '../../lib/cn'
@@ -23,7 +23,7 @@ const PROVIDER_NAME: Record<string, string> = {
   voicestudio: 'VoiceStudio',
   sound: 'FlowAI Sound',
   pod: 'RunPod pod',
-  engine: 'Assistant engine',
+  engine: 'Assistant',
 }
 
 /** The Creative Lab's tools from the pod and the assistant, filtered together. */
@@ -45,15 +45,6 @@ export default function Models() {
         }
         sub="Local and cloud, how each is reached, what it’s for, and whether it can run. A model is used only once its connector works."
       />
-
-      <p className="mt-6 flex items-start gap-2.5 rounded-lg border border-line bg-white/[0.015] px-3.5 py-2.5 text-[12px] leading-snug text-dim">
-        <FileCog className="mt-px size-3.5 shrink-0" strokeWidth={1.75} />
-        <span>
-          Every key is in one file, <EnvName>.env</EnvName> next to docker-compose.yml (from <EnvName>.env.example</EnvName>). The API and the assistant both read it; settings
-          marked <Link2 className="inline size-3 align-[-2px]" strokeWidth={2} /> serve both. After editing it, run <EnvName>docker compose up -d</EnvName> and{' '}
-          <EnvName>docker compose restart api worker scheduler</EnvName>.
-        </span>
-      </p>
 
       {!registry ? (
         <Skeleton className="mt-10 h-[420px] rounded-xl" />
@@ -121,11 +112,12 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
       setTesting(false)
     }
   }
-  const state = !p.configured ? 'off' : p.test?.ok ? 'ok' : p.test ? 'fail' : 'untested'
+  // The assistant says itself whether it's running; the others are as their last test left them.
+  const live = p.live ?? null
+  const state = !p.configured ? 'off' : live !== null ? (live ? 'ok' : 'fail') : p.test?.ok ? 'ok' : p.test ? 'fail' : 'untested'
 
   return (
-    // The pod and the assistant list what runs behind them, so they take two columns.
-    <div className={cn('flex flex-col rounded-xl border border-line bg-panel p-4', p.services && 'md:col-span-2')}>
+    <div className="flex flex-col rounded-xl border border-line bg-panel p-4">
       <div className="flex items-start gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-line-2 text-muted">
           {p.local ? <HardDrive className="size-4" strokeWidth={1.75} /> : <PlugZap className="size-4" strokeWidth={1.75} />}
@@ -142,27 +134,35 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
             { ok: 'border-ok/30 text-ok', fail: 'border-fail/30 text-fail', untested: 'border-warn/30 text-warn', off: 'border-white/10 text-dim' }[state],
           )}
         >
-          {{ ok: 'Connected', fail: 'Failing', untested: 'Not tested', off: 'Not set up' }[state]}
+          {live !== null ? (live ? 'Running' : 'Not running') : { ok: 'Connected', fail: 'Failing', untested: 'Not tested', off: 'Not set up' }[state]}
         </span>
       </div>
       <p className="mt-3 text-[12px] leading-snug text-dim">
-        {p.configured ? (p.test ? `${p.test.message} ${p.test.at ? `· ${fmtRelative(p.test.at)}` : ''}` : 'Configured. Test it to start using its models.') : p.setup}
+        {!p.configured
+          ? p.setup
+          : live === false
+            ? p.live_error
+            : live
+              ? 'Answering now. Its model, voice and phone are below.'
+              : p.test
+                ? `${p.test.message} ${p.test.at ? `· ${fmtRelative(p.test.at)}` : ''}`
+                : 'Configured. Test it to start using its models.'}
       </p>
       {p.settings.length > 0 && <Settings settings={p.settings} className="mt-3" />}
+      {/* What runs behind the pod and the assistant: one line each, the details on hover, so the card keeps the others' size. */}
       {p.services && (
-        <ul className="mt-3 divide-y divide-line rounded-lg border border-line">
+        <ul className="mt-3 space-y-1.5">
           {p.services.map((s) => (
-            <li key={s.id} className="px-3 py-2.5">
-              <div className="flex items-center gap-2 text-[12px]">
-                <span className={cn('size-1.5 shrink-0 rounded-full', s.ok === null ? 'bg-white/20' : s.ok ? 'bg-ok' : 'bg-warn')} />
-                <span className="font-medium">{s.label}</span>
-                <span className="min-w-0 truncate text-dim">{s.for}</span>
-                <span className={cn('ml-auto shrink-0 font-mono text-[10.5px]', s.ok === null ? 'text-dim' : s.ok ? 'text-ok' : 'text-warn')}>
-                  {s.status === null ? 'unknown' : s.ok ? s.status.replace(/^ok,?\s*/, '') || 'up' : s.status === 'off' ? 'off' : 'down'}
-                </span>
-              </div>
-              {s.hint && <p className="mt-1 pl-3.5 text-[11.5px] leading-snug text-warn">{s.hint}</p>}
-              <Settings settings={s.settings} className="mt-1.5 pl-3.5" />
+            <li
+              key={s.id}
+              title={[s.for, s.hint, s.settings.map((e) => `${e.name}: ${e.set ? 'set' : 'not set'}`).join(', ')].filter(Boolean).join('\n')}
+              className="flex items-center gap-2 text-[12px]"
+            >
+              <span className={cn('size-1.5 shrink-0 rounded-full', s.ok === null ? 'bg-white/20' : s.ok ? 'bg-ok' : 'bg-warn')} />
+              <span className="min-w-0 truncate">{s.label}</span>
+              <span className={cn('ml-auto shrink-0 truncate font-mono text-[10.5px]', s.ok === null ? 'text-dim' : s.ok ? 'text-ok' : 'text-warn')}>
+                {s.status === null ? 'unknown' : s.ok ? s.status.replace(/^ok,?\s*/, '') || 'up' : s.status === 'off' ? 'off' : 'down'}
+              </span>
             </li>
           ))}
         </ul>
@@ -175,10 +175,6 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
       </div>
     </div>
   )
-}
-
-function EnvName({ children }: { children: string }) {
-  return <code className="rounded border border-line bg-white/[0.03] px-1 py-px font-mono text-[10.5px] text-muted">{children}</code>
 }
 
 /** A connector's lines in .env: filled in or not (never the value), and whether the assistant reads them too. */

@@ -34,6 +34,12 @@ class FetchRepostSource implements ShouldQueue
         } catch (Throwable $e) {
             report($e);
             $repost->update(['status' => 'failed', 'error' => Str::limit($e->getMessage() ?: 'The post could not be read.', 500)]);
+
+            return;
+        }
+        if ($repost->placement) {
+            $repost->update(['status' => 'adapting']);
+            AdaptRepost::dispatch($repost->id);
         }
     }
 }

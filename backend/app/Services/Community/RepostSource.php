@@ -7,6 +7,8 @@ use App\Models\Repost;
 use App\Services\Media\AssetStore;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -184,10 +186,98 @@ class RepostSource
             if (filesize($tmp) > $limit) {
                 throw new RuntimeException('The post’s '.$kind.' is too large to repost.');
             }
-
             return $this->store->fromPath($repost->user, $tmp, $mime, $name, 'repost', $meta);
         } finally {
             @unlink($tmp);
+        }
+    }
+
+    /**
+     * A story's words on its picture or video, since stories show no caption: the line in dark type on a white
+     * box, low in the frame, and the credit as a small tag under it (libass draws Arabic and French alike, with
+     * DejaVu when Geist lacks a letter; emoji can't be drawn and are left out). The 9:16 file comes from fit().
+     */
+    public function sticker(Repost $repost, Asset $asset, ?string $line, ?string $credit): Asset
+    {
+        $clean = fn (?string $t) => trim(preg_replace('/\s+/u', ' ', str_replace(['{', '}', '\\'], '', (string) preg_replace('/[\p{So}\p{Sk}\p{Cs}\x{FE0F}\x{200D}]/u', '', (string) $t))));
+        [$line, $credit] = [$clean($line), $clean($credit)];
+        if (($line === '' && $credit === '') || ! in_array($asset->kind, ['image', 'video'], true)) {
+            return $asset;
+        }
+
+        $dir = sys_get_temp_dir().'/story-'.Str::random(12);
+        File::ensureDirectoryExists($dir);
+        $video = $asset->kind === 'video';
+        $out = "{$dir}/story".($video ? '.mp4' : '.jpg');
+        // Name, Font, Size, Primary, Secondary, Outline (the box, BorderStyle 3), Back, Bold, Italic, Underline, Strike,
+        // ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment (2: bottom centre), MarginL, MarginR, MarginV
+        $ass = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n"
+            ."[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            ."Style: Line,Geist ExtraBold,62,&H00141414,&H00141414,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,3,20,0,2,110,110,520,1\n"
+            ."Style: Credit,Geist SemiBold,36,&H00FFFFFF,&H00FFFFFF,&H8C000000,&H00000000,0,0,0,0,100,100,0,0,3,12,0,2,110,110,300,1\n\n"
+            ."[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            .($line !== '' ? "Dialogue: 0,0:00:00.00,9:00:00.00,Line,,0,0,0,,{$line}\n" : '')
+            .($credit !== '' ? "Dialogue: 0,0:00:00.00,9:00:00.00,Credit,,0,0,0,,{$credit}\n" : '');
+        file_put_contents("{$dir}/card.ass", $ass);
+        $filter = "subtitles=filename={$dir}/card.ass:fontsdir=".resource_path('fonts');
+        $source = Storage::disk('local')->path($asset->path);
+        $run = Process::timeout(900)->run($video
+            ? ['ffmpeg', '-y', '-v', 'error', '-i', $source, '-vf', $filter, '-map', '0:v', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast',
+                '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2', '-c:a', 'copy', '-movflags', '+faststart', $out]
+            : ['ffmpeg', '-y', '-v', 'error', '-i', $source, '-vf', $filter, '-frames:v', '1', '-q:v', '2', $out]);
+        try {
+            if (! $run->successful() || ! is_file($out) || filesize($out) === 0) {
+                Log::warning('Repost: the story’s words couldn’t be drawn; it goes without them.', ['asset' => $asset->id, 'error' => Str::limit(trim($run->errorOutput()), 300)]);
+
+                return $asset;
+            }
+
+            return $this->store->fromPath($repost->user, $out, $video ? 'video/mp4' : 'image/jpeg', $asset->name, 'repost',
+                ['repost_id' => $repost->id, 'source_url' => $repost->source_url, 'story_text' => $line, 'from_asset' => $asset->id]);
+        } finally {
+            File::deleteDirectory($dir);
+        }
+    }
+
+    /**
+     * A photo or video in the shape its placement takes: as it is when it fits the spec's ratio range,
+     * else a new one at the spec's canvas (1080 × 1920 for reels and stories, 1080 × 1350 for the feed),
+     * with the whole frame in the middle over a darkened, blurred copy of itself, as ClipRenderer frames
+     * clips. When ffmpeg can't, the original is kept (and the platform check says it's off).
+     *
+     * @param  array{ratio: array{0: float, 1: float}}  $spec
+     */
+    public function fit(Repost $repost, Asset $asset, array $spec): Asset
+    {
+        [$lo, $hi] = $spec['ratio'];
+        $ratio = $asset->ratio();
+        if (! in_array($asset->kind, ['image', 'video'], true) || $ratio === null || ($ratio >= $lo - 0.005 && $ratio <= $hi + 0.005)) {
+            return $asset;
+        }
+        [$w, $h] = $hi <= 0.6 ? [1080, 1920] : [1080, 1350];
+        $video = $asset->kind === 'video';
+        $out = tempnam(sys_get_temp_dir(), 'fit').($video ? '.mp4' : '.jpg');
+        $graph = '[0:v]split=2[back][front];'
+            ."[back]scale={$w}:{$h}:force_original_aspect_ratio=increase,crop={$w}:{$h},gblur=sigma=32,eq=brightness=-0.34:saturation=0.78[bg];"
+            ."[front]scale={$w}:{$h}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1[fg];"
+            .'[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]';
+        $source = Storage::disk('local')->path($asset->path);
+        $run = Process::timeout(900)->run($video
+            ? ['ffmpeg', '-y', '-v', 'error', '-i', $source, '-filter_complex', $graph, '-map', '[v]', '-map', '0:a?', '-r', '30',
+                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2',
+                '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', $out]
+            : ['ffmpeg', '-y', '-v', 'error', '-i', $source, '-filter_complex', $graph, '-map', '[v]', '-frames:v', '1', '-q:v', '2', $out]);
+        try {
+            if (! $run->successful() || ! is_file($out) || filesize($out) === 0) {
+                Log::warning('Repost: the media couldn’t be reframed; the original is kept.', ['asset' => $asset->id, 'error' => Str::limit(trim($run->errorOutput()), 300)]);
+
+                return $asset;
+            }
+
+            return $this->store->fromPath($repost->user, $out, $video ? 'video/mp4' : 'image/jpeg', $asset->name, 'repost',
+                ['repost_id' => $repost->id, 'source_url' => $repost->source_url, 'reframed' => "{$w}x{$h}", 'from_asset' => $asset->id]);
+        } finally {
+            @unlink($out);
         }
     }
 

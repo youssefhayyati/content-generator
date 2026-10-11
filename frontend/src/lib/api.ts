@@ -255,6 +255,8 @@ export type Device = {
   paused: boolean
   last_seen_at: string | null
   screenshot_url: string | null
+  /** The team phone on the hackathon Phone API (watched and driven through it); absent for other phones. */
+  remote?: { online: boolean; busy: boolean }
   accounts: Array<{ id: number; platform: PlatformId; handle: string }>
   created_at: string
 }
@@ -362,10 +364,15 @@ export type Repost = {
   author: string
   source_text: string
   /** The source's photos and video, saved to the library. */
-  media: Array<{ id: number; kind: 'image' | 'video' | 'audio'; url: string; poster_url: string | null }>
+  media: Array<{ id: number; kind: 'image' | 'video' | 'audio'; url: string; poster_url: string | null; width?: number | null; height?: number | null }>
   permission: 'pending' | 'allowed' | 'denied'
   permission_note: string | null
-  status: 'fetching' | 'failed' | 'captured' | 'adapted' | 'scheduled' | 'dropped'
+  /** adapting: picked with a placement, its takes are being written right after it was read. */
+  status: 'fetching' | 'failed' | 'captured' | 'adapting' | 'adapted' | 'scheduled' | 'dropped'
+  /** Where it goes (feed, reel, story, post), as picked with the link or on the preview. */
+  placement: 'feed' | 'reel' | 'story' | 'post' | null
+  /** A story's line, drawn on it when it's scheduled (stories show no caption). */
+  story_text: string | null
   /** Why the source couldn't be read. */
   error: string | null
   caption: string | null
@@ -373,9 +380,14 @@ export type Repost = {
   /** What will post: caption, credit and hashtags, within the target's limit. */
   body: string | null
   hashtags: string[]
+  /** The adaptation's three takes: the caption is the first until the person picks another. */
+  options: Array<{ angle: 'faithful' | 'take' | 'punchy'; caption: string; hashtags: string[] }>
   attribution: boolean
   post_id: number | null
-  account: { id: number; platform: PlatformId; handle: string } | null
+  /** Its post's status, once scheduled: deleting the repost deletes the post too, unless it's out already. */
+  post_status: 'draft' | 'scheduled' | 'publishing' | 'submitted' | 'published' | 'failed' | null
+  /** posts_from_phone: a phone is linked and automation is on, so it goes out by itself at its time. */
+  account: { id: number; platform: PlatformId; handle: string; posts_from_phone: boolean; phone: 'ready' | 'automation_off' | 'none' } | null
   created_at: string
 }
 
@@ -598,6 +610,9 @@ export type ModelProvider = {
   services: Array<{ id: string; label: string; for: string; status: string | null; ok: boolean | null; hint: string | null; settings: EnvSetting[] }> | null
   setup: string
   test: { ok: boolean; message: string; latency_ms: number | null; at: string | null } | null
+  /** The assistant (engine only): whether it answers right now, and why not. */
+  live?: boolean | null
+  live_error?: string | null
 }
 
 export type Recipe = { label: string; body: string; needs: 'image' | null; steps: Array<'image' | 'video'> }

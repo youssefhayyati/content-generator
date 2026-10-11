@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { Bookmark, ChartNoAxesColumn, Globe, Heart, MessageCircle, Music2, Play, Repeat2, Send, Share2, ThumbsUp } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Bookmark, ChartNoAxesColumn, Globe, Heart, MessageCircle, Music2, Play, Repeat2, Send, Share2, ThumbsUp, Volume2, VolumeX } from 'lucide-react'
 import { GenArt, type ArtVariant } from '../components/ui/GenArt'
 import { PLATFORMS, type PlatformId } from '../components/ui/PlatformIcon'
 import type { Asset, PostFormat, User } from '../lib/api'
@@ -7,9 +7,34 @@ import { cn } from '../lib/cn'
 import { CHAR_LIMIT } from './data'
 import { Avatar } from './ui'
 
-type Props = { platform: PlatformId; title: string; body: string; format: PostFormat; user: User; assets?: Asset[] }
+type Props = {
+  platform: PlatformId
+  title: string
+  body: string
+  format: PostFormat
+  user: User
+  assets?: Asset[]
+  /** Where it goes on the platform (Instagram's feed, reel or story): the preview takes that shape. */
+  placement?: string | null
+  /** The account it's posted from; without one, a handle made from the user's email. */
+  handle?: string | null
+}
 
 const handleOf = (user: User) => user.email.split('@')[0].replace(/[^a-z0-9_.]/gi, '').toLowerCase()
+
+/** A video that plays as it would in the feed: muted, on a loop; a tap turns the sound on and off. */
+function Playable({ asset, className, fit = 'cover', corner = 'bottom' }: { asset: Asset; className?: string; fit?: 'cover' | 'contain'; corner?: 'top' | 'bottom' }) {
+  const [muted, setMuted] = useState(true)
+  if (asset.kind !== 'video') return <img src={asset.poster_url ?? asset.url} alt="" className={cn('size-full', fit === 'cover' ? 'object-cover' : 'object-contain', className)} />
+  return (
+    <button type="button" onClick={() => setMuted((m) => !m)} className={cn('group relative block size-full', className)} aria-label={muted ? 'Turn the sound on' : 'Turn the sound off'}>
+      <video src={asset.url} poster={asset.poster_url ?? undefined} className={cn('size-full', fit === 'cover' ? 'object-cover' : 'object-contain')} muted={muted} autoPlay loop playsInline preload="metadata" />
+      <span className={cn('absolute right-2 grid size-6 place-items-center rounded-full bg-black/55 text-white backdrop-blur', corner === 'top' ? 'top-9' : 'bottom-2')}>
+        {muted ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}
+      </span>
+    </button>
+  )
+}
 
 /** Text up to the network's limit as normal, anything past it marked the way X marks overflow. */
 function Body({ text, limit, className, clamp }: { text: string; limit: number; className?: string; clamp?: number }) {
@@ -36,12 +61,7 @@ function Media({ format, variant, ratio, className, asset }: { format: PostForma
   if (asset) {
     return (
       <div className={cn('relative w-full overflow-hidden bg-black', ratio, className)}>
-        {asset.poster_url && <img src={asset.poster_url} alt="" className="size-full object-cover" />}
-        {asset.kind === 'video' && (
-          <span className="absolute left-1/2 top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/40 text-white backdrop-blur">
-            <Play className="size-4 translate-x-px" fill="currentColor" />
-          </span>
-        )}
+        <Playable asset={asset} />
       </div>
     )
   }
@@ -59,10 +79,10 @@ function Media({ format, variant, ratio, className, asset }: { format: PostForma
   )
 }
 
-export function PostPreview({ platform, title, body, format, user, assets = [] }: Props) {
+export function PostPreview({ platform, title, body, format, user, assets = [], placement, handle: account }: Props) {
   const first = assets[0]
   const limit = CHAR_LIMIT[platform]
-  const handle = handleOf(user)
+  const handle = account || handleOf(user)
   const text = body
   const hasMedia = format !== 'text' || !!first
 
@@ -85,6 +105,47 @@ export function PostPreview({ platform, title, body, format, user, assets = [] }
             <Share2 className="size-4" strokeWidth={1.5} />
           </div>
         </div>
+      </div>
+    )
+  }
+
+  // Instagram's reels and stories are full 9:16 screens: a wider picture or video sits whole in the middle.
+  if (platform === 'instagram' && (placement === 'reel' || placement === 'story')) {
+    const ring = 'size-6 rounded-full bg-linear-to-br from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]'
+    return (
+      <div className="p-3">
+        <div className="relative mx-auto aspect-[9/16] w-full max-w-[300px] overflow-hidden rounded-xl bg-black">
+          {first ? <Playable asset={first} fit="contain" corner="top" /> : <GenArt variant="orb" className="size-full" />}
+          {placement === 'story' ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 bg-linear-to-b from-black/55 to-transparent p-2.5">
+              <div className="h-0.5 rounded-full bg-white/80" />
+              <p className="mt-2 flex items-center gap-2 text-[12px] font-semibold text-white">
+                <span className={ring} />
+                {handle} <span className="font-normal text-white/70">now</span>
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="pointer-events-none absolute bottom-20 right-2.5 flex flex-col items-center gap-4 text-white">
+                <Heart className="size-5" strokeWidth={1.8} />
+                <MessageCircle className="size-5" strokeWidth={1.8} />
+                <Send className="size-5" strokeWidth={1.8} />
+              </div>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/85 to-transparent p-3 pr-12 pt-10 text-white">
+                <p className="flex items-center gap-2 text-[12px] font-semibold">
+                  <span className={ring} />
+                  {handle}
+                </p>
+                <Body text={text} limit={limit} clamp={90} className="mt-1.5 text-[11.5px] leading-snug text-white/90" />
+                <p className="mt-2 flex items-center gap-1.5 text-[10.5px] text-white/75">
+                  <Music2 className="size-3" /> Original audio · {handle}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+        {placement === 'story' && text.trim() && <Note>Stories show no caption: put the words on the picture or video.</Note>}
+        {!first && <Note>{placement === 'reel' ? 'A reel needs a video.' : 'A story needs a picture or a video.'}</Note>}
       </div>
     )
   }

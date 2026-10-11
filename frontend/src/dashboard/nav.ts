@@ -60,6 +60,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
       // Highlights from a link: not a canvas node yet, so it keeps its own page.
       { path: '/dashboard/clips', label: 'Highlights', icon: Clapperboard },
+      // Reposts between X and Instagram: also not a node, so its own page too.
+      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
     ],
   },
   {
@@ -104,7 +106,6 @@ export const OFF_NAV: NavItem[] = [
   { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
   { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
   { path: '/dashboard/create', label: 'Composer', icon: PenLine },
-  { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
   { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
 ]
 
