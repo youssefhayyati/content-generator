@@ -27,7 +27,7 @@ class LabError(Exception):
 
 
 def _project(session, project) -> int:
-    pid = project or (getattr(session, "lab", None) or {}).get("project")
+    pid = project or (getattr(session, "lab", None) or {}).get("project") or session.conv.project
     if not pid:
         raise LabError("no Creative Lab project is open: ask the user to open one (Creative Lab, then a project), "
                        "or pass project")
@@ -202,7 +202,9 @@ async def lab_new_project(session, name: str = "", template: str = "", campaign_
             "brief": brief or None})
     except Exception as exc:
         return {"error": str(exc)}
-    session.lab = {"project": p["project"]["id"], "node": None}
+    session.lab = {**(session.lab or {}), "project": p["project"]["id"], "node": None}
+    session.conv.project = p["project"]["id"]
+    session.conv.changed()
     await session.try_send(type="lab_open", project=p["project"]["id"])
     return {**_summary(p), "campaign": p.get("campaign_id"), "opened": "on the user's screen, in Creative Lab"}
 
@@ -274,9 +276,10 @@ async def lab_edit(ops: list, session, project: int | None = None):
 
 @tool(
     "lab_run",
-    "Run a Creative Lab node (and the nodes before it that need to run first). Slow or paid nodes (video models, "
-    "dubbing, face swaps, songs): say how long it takes and what it costs, and run them only once the user agrees. "
-    "A Post node you run is saved as a draft only: scheduling is the user's, on the node.",
+    "Run a Creative Lab node (and the nodes before it that need to run first). Unless the user approved your plan "
+    "or handed you control, it shows them a Run card on screen (what runs, how long, what it costs) and runs once "
+    "they approve it: you are told. A Post node you run is saved as a draft only (a scheduled one goes back to a draft): "
+    "lab_schedule asks to schedule it.",
     {"type": "object", "properties": {"node": {"type": "string"}, "project": _PROJECT}, "required": ["node"]},
 )
 async def lab_run(node: str, session, project: int | None = None):
@@ -284,12 +287,60 @@ async def lab_run(node: str, session, project: int | None = None):
         client = _client(session)
         pid = _project(session, project)
         plan = await client.get(f"/api/projects/{pid}/lab/nodes/{node}/plan")
-        payload = await client.request("POST", f"/api/projects/{pid}/lab/nodes/{node}/run", json={"upstream": True})
+        names = [n.get("label") or n.get("id") for n in plan.get("nodes") or []]
+        takes, cost = f"about {plan.get('seconds')} seconds", plan.get("cost")
+        if not (session.lab or {}).get("control") and not session.conv.plan_ok:
+            a = await session.flowai.ask("run", f"Run {node}" + (f" and the {len(names) - 1} before it" if len(names) > 1 else ""),
+                                         project=pid, node=node, items=names, takes=takes,
+                                         cost=str(cost) if cost else "")
+            return {"approval": a.id, "status": "waiting for the user to approve running it on screen",
+                    "runs": names, "takes": takes, "cost": cost,
+                    "note": "nothing runs until they press Approve; you are told"}
+        await session.flowai.run_node(pid, node)
     except Exception as exc:
         return {"error": str(exc)}
-    return {"started": [n.get("label") or n.get("id") for n in plan.get("nodes") or []],
-            "takes": f"about {plan.get('seconds')} seconds",
-            "cost": plan.get("cost"), "note": "it runs in the background; look again with lab_graph"}
+    return {"started": names, "takes": takes, "cost": cost, "note": "it runs in the background; look again with lab_graph"}
+
+
+@tool(
+    "lab_schedule",
+    "Ask the user to approve scheduling a Post node's post: it shows the post (picture or video, caption, account) "
+    "in their review queue, and once they approve it, it is scheduled. The node must have run (saved as a draft) "
+    "first. Ask again after changing a post the user asked to change.",
+    {"type": "object", "properties": {
+        "node": {"type": "string", "description": "The Post node"},
+        "when": {"type": "string", "description": "Date and time in the user's time zone, e.g. 2026-10-16T09:00, or "
+                                                  "\"queue\" for the account's next free posting time"},
+        "project": _PROJECT,
+    }, "required": ["node", "when"]},
+)
+async def lab_schedule(node: str, when: str, session, project: int | None = None):
+    try:
+        client = _client(session)
+        pid = _project(session, project)
+        at = session.flowai._when(when)
+        payload = await client.get(f"/api/projects/{pid}/lab")
+        n = next((n for n in payload["canvas"]["nodes"] if n["id"] == node), None)
+        if not n or n["type"] != "finish.post":
+            return {"error": f"{node} isn't a Post node in project {pid}; see lab_graph"}
+        post_id = ((payload.get("nodes") or {}).get(node, {}).get("post") or {}).get("id")
+        if not post_id:
+            return {"error": f"{node} hasn't saved its post yet: run it first (lab_run), then ask again"}
+        post = await client.get(f"/api/posts/{post_id}")
+        post = post.get("data", post)
+    except Exception as exc:
+        return {"error": str(exc)}
+    asset = next(iter(post.get("assets") or []), None)
+    acct = post.get("account") or {}
+    what = (n.get("label") or post.get("title") or node) + (f" (@{acct['handle']})" if acct.get("handle") else "")
+    text = f"Schedule “{post.get('title') or what}”" + (f" for @{acct['handle']}" if acct.get("handle") else "") + \
+           f" for {session.flowai._local(at) if at else 'the next free time in the queue'}"
+    preview = {"url": asset and asset.get("url"), "poster": asset and asset.get("poster_url"),
+               "kind": asset and asset.get("kind"),
+               "caption": (post.get("body") or "").strip()[:400], "what": what, "post": post_id}
+    a = await session.flowai.ask("lab_post", text, project=pid, node=node, when=at, post=post_id, preview=preview)
+    return {"approval": a.id, "status": "waiting for the user to approve it on screen", "asks": text,
+            "note": "nothing is booked until the user presses Approve; you are told"}
 
 
 @tool(

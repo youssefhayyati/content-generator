@@ -33,7 +33,7 @@ export function AssistantDock() {
           <span className="px-1.5 text-[12px]">{WORDS[voice]}</span>
           {waiting > 0 && (
             <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 font-mono text-[10px] text-accent-soft">
-              <CalendarCheck className="size-3" /> {waiting} to approve
+              <CalendarCheck className="size-3" /> {waiting} to review
             </span>
           )}
           {busy && (

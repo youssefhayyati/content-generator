@@ -177,18 +177,29 @@ class Linked:
 @dataclass
 class Approval:
     """Something the user has to approve on screen before it happens: a time for a post (schedule),
-    a campaign version (version, FlowAI's gate 6B) or a time for one (time)."""
+    a campaign version (version, FlowAI's gate 6B) or a time for one (time); a plan of what is about to be
+    made (plan), running Creative Lab nodes (run) or a time for a Post node (lab_post). The last three
+    aren't about a draft (draft 0)."""
     id: int
     draft: int
     version: int  # the draft as the user saw it when asked
     post: int | None
     when: datetime | None  # UTC; None = the queue's next free time
     text: str
-    status: str = "waiting"  # waiting | approved | declined | failed | outdated
+    status: str = "waiting"  # waiting | changing (the user asked for a change) | approved | declined | failed | outdated
     detail: str = ""
     kind: str = "schedule"
     campaign: int | None = None
     variant: int | None = None
+    project: int | None = None  # run, lab_post: the Creative Lab project
+    node: str | None = None  # run, lab_post: the node
+    items: list = field(default_factory=list)  # plan, run: what it makes or runs, a line each
+    takes: str = ""  # plan, run: how long, in words
+    cost: str = ""  # plan, run: what it costs, in words
+    preview: dict | None = None  # lab_post: what goes out (url, kind, caption, what), for the page to show
+
+
+ASKS = {"plan": "plan", "run": "run", "lab_post": "lab_post"}  # approvals that aren't about a draft
 
 
 def dump_links(saved: dict, linked: dict, approvals: dict, uploaded: set) -> dict:
@@ -336,7 +347,7 @@ class FlowAISession:
             await self.send_posts()
             self.conv.phone.flush_records()
 
-    def prompt(self) -> str:
+    def prompt(self, canvas: bool = False) -> str:
         if self.error and not self.accounts:
             return (f"\n\nFlowAI, where posts are saved, can't be reached right now ({self.error}). Drafts can "
                     "still be made, but not saved or scheduled; tell the user if they ask.")
@@ -348,6 +359,11 @@ class FlowAISession:
         return (
             "\n\nYou work inside FlowAI, the agency's studio" + (f", with {self.user['name']}" if self.user.get("name")
                                                                   else "") + ". "
+            + ("Posts come out of Post nodes on the canvas, as FlowAI posts the team sees in the Composer and the "
+               "calendar. find_assets and use_assets bring pictures from the FlowAI gallery into this conversation "
+               "(to pass to lab_new_project as photos). The voice you speak in is the user's pick: they choose it "
+               "under the message box. Write captions in the account's voice. Accounts (a Post or Where it goes "
+               "node's account_id):\n" if canvas else
             "When the user likes a draft or wants to keep it, save it with save_draft: it becomes a FlowAI post, "
             "saved as a draft, which the team sees in the Composer and the calendar; save again after more changes. "
             "find_posts and open_post bring back saved posts to change them, find_campaigns and open_campaign bring "
@@ -357,9 +373,9 @@ class FlowAISession:
             "scheduled until you are told it was approved. The voice you speak in is the user's pick: if they want "
             "another, they choose it under the message box, where they can hear each one first. Write captions in "
             "the account's voice. Accounts (a draft "
-            "goes to the one on its platform):\n"
+            "goes to the one on its platform):\n")
             + ("\n".join(accounts) or "- none: the user has to add an Instagram or X account in FlowAI first")
-            + self._campaign_prompt()
+            + ("" if canvas else self._campaign_prompt())
         )
 
     def _campaign_prompt(self) -> str:
@@ -741,6 +757,9 @@ class FlowAISession:
         a = self.approvals.get(_number(approval_id))
         if not a or a.status != "waiting":
             return
+        if a.kind in ASKS:
+            await self._decide_ask(a, approve, done)
+            return
         d, saved = self.studio.drafts.get(a.draft), self.saved.get(a.draft)
         if not approve:
             a.status = "declined"
@@ -933,12 +952,91 @@ class FlowAISession:
         return {"approval": a.id, "status": "waiting for the user to approve it on screen", "asks": text,
                 "note": "nothing is booked until the user presses Approve; you will be told"}
 
+    async def ask(self, kind: str, text: str, **fields) -> Approval:
+        """A question that isn't about a draft (plan, run, lab_post): one of a kind at a time (per node for
+        runs and Post nodes), so a newer one replaces the one still waiting."""
+        for old in self.approvals.values():
+            if old.kind == kind and old.status in ("waiting", "changing") and \
+                    (kind == "plan" or (old.project, old.node) == (fields.get("project"), fields.get("node"))):
+                old.status, old.detail = "outdated", "Replaced by a newer request."
+                await self._send_approval(old)
+        if kind == "plan":
+            self.conv.plan_ok = False
+        a = Approval(len(self.approvals) + 1, 0, 0, text=text, kind=kind, **{"post": None, "when": None, **fields})
+        self.approvals[a.id] = a
+        await self._send_approval(a)
+        return a
+
+    async def change(self, approval_id, text: str) -> Approval | None:
+        """The user pressed Change on a question and said what to change: it waits for the new version."""
+        a = self.approvals.get(_number(approval_id))
+        if not a or a.status != "waiting":
+            return None
+        a.status, a.detail = "changing", text
+        await self._send_approval(a)
+        return a
+
+    async def _decide_ask(self, a: Approval, approve: bool, done: bool):
+        """Approve or decline a plan, a run of Creative Lab nodes or a time for a Post node."""
+        if not approve:
+            a.status = "declined"
+            await self._send_approval(a)
+            self.remember(f"The user declined on screen: {a.text}. Nothing was " +
+                          {"plan": "made; ask what they'd like instead.", "run": "run.",
+                           "lab_post": "scheduled."}[a.kind])
+            return
+        if a.kind == "plan":
+            a.status, a.detail = "approved", "Approved"
+            self.conv.plan_ok = True
+            await self._send_approval(a)
+            self.notify(f"The user approved the plan on screen: {a.text}. Make it now, all of it, and run what it "
+                        "needs without asking again; then ask for each post's approval as the plan says.")
+            return
+        if a.kind == "run":
+            try:
+                await self.run_node(a.project, a.node)
+            except FlowAIError as exc:
+                a.status, a.detail = "failed", str(exc)
+                await self._send_approval(a)
+                self.notify(f"Running {a.node} failed: {exc}. Tell the user briefly.")
+                return
+            a.status, a.detail = "approved", "Running"
+            await self._send_approval(a)
+            self.notify(f"The user approved it on screen and it's running: {a.text}. Look with lab_graph when "
+                        "it's done; say in a few words that it started.")
+            return
+        # lab_post: only the person can schedule a Post node, so the page does it with their own session
+        if not done:
+            a.status, a.detail = "failed", "Approve it from the page."
+            await self._send_approval(a)
+            return
+        a.status, a.detail = "approved", f"Scheduled for {self._local(a.when)}" if a.when else "Scheduled in the queue"
+        await self._send_approval(a)
+        await self.send_posts()
+        self.notify(f"The user approved it on screen: {a.text}. It's scheduled. Tell them in a few words.")
+
+    async def run_node(self, project: int, node: str):
+        """Run a Creative Lab node (and the nodes before it that need to run first). A Post node the user
+        scheduled goes back to a draft first: the assistant only saves drafts, and the changed post comes back
+        to the user to approve (lab_schedule)."""
+        lab = await self.client.get(f"/api/projects/{project}/lab")
+        n = next((n for n in lab["canvas"]["nodes"] if n["id"] == node), None)
+        if n and n["type"] == "finish.post" and (n.get("params") or {}).get("when", "draft") != "draft":
+            await self.client.request("POST", f"/api/projects/{project}/lab/ops",
+                                      json={"ops": [{"op": "set", "id": node, "params": {"when": "draft"}}]})
+        await self.client.request("POST", f"/api/projects/{project}/lab/nodes/{node}/run", json={"upstream": True})
+
     async def _approval(self, d: Draft, text: str, **fields) -> Approval:
+        changed = False
         for old in self.approvals.values():  # one question per draft at a time
-            if old.draft == d.id and old.status == "waiting":
+            if old.draft == d.id and old.kind not in ASKS and old.status == "changing":
+                changed = True
+            if old.draft == d.id and old.kind not in ASKS and old.status in ("waiting", "changing"):
                 old.status, old.detail = "outdated", "Replaced by a newer request."
                 await self._send_approval(old)
         a = Approval(len(self.approvals) + 1, d.id, d.version, text=text, **{"post": None, "when": None, **fields})
+        if changed:
+            a.detail = "Changed as you asked"
         self.approvals[a.id] = a
         await self._send_approval(a)
         return a
@@ -1004,7 +1102,8 @@ class FlowAISession:
         saved = self.saved.get(a.draft) if a.kind == "schedule" else None
         return dict(type="approval", id=a.id, draft=a.draft, post=a.post, text=a.text, status=a.status,
                     detail=a.detail, when=a.when.isoformat() if a.when else None, kind=a.kind,
-                    campaign=a.campaign, variant=a.variant,
+                    campaign=a.campaign, variant=a.variant, project=a.project, node=a.node, items=a.items,
+                    takes=a.takes, cost=a.cost, preview=a.preview,
                     payload=saved.payload if saved and a.status == "waiting" else None)
 
     def _linked_event(self, d: Draft) -> dict:

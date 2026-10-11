@@ -58,6 +58,10 @@ Wire protocol
               edit_area {"draft": 1, "slide": 1, "mode": "remove", "prompt": "..."}
                                                change only the painted area (mode: change, remove,
                                                replace, improve)
+              mode {"mode": "drafts" | "canvas"}  the Drafts | Canvas switch: how content is made here
+              lab {"project": 3, "node": "caption", "control": false} | lab {"left": true}
+                                               which Creative Lab page is open (never dropped as being from
+                                               another conversation: it's about the page)
               make_video {"draft": 1, "lines": [...], "cta", "cta_line", "music", "captions",
                           "motion", "placement", "voice"}
                                                the draft's pictures as a video read in a voice: voice is
@@ -68,7 +72,11 @@ Wire protocol
                                                the music model ("song": a new one written for the post)
             {"type": "approve" | "decline", "id": 3, "conversation": "..."}
                                                the user's answer to an approval (scheduling, a campaign
-                                               version); with "done": true the page did it itself
+                                               version, a plan, a run, a Post node's time); with "done":
+                                               true the page did it itself
+            {"type": "change", "id": 3, "text": "a shorter caption", "conversation": "..."}
+                                               Change… on something waiting for approval: it waits for the
+                                               new version, and the words are the user's turn
             {"type": "voices", "q": "british", "lang": "English"}
                                                the voices to pick from (and catalog voices matching q)
             {"type": "voice", "id": "..."} | {"type": "voice", "archetype": "..."}
@@ -106,7 +114,8 @@ Wire protocol
                           drafts, saved, linked, approvals, phone (its phone posts and job as events),
                           phone_driver;
                           the page starts over from it) |
-            about (its name or campaign changed) |
+            about (its name, campaign, mode (drafts/canvas, null until the first request) or project changed) |
+            mode_changed (the mode was switched, by the switch or the assistant: the page goes to that view) |
             conversations (the user's conversations, newest first, and which one is on screen) |
             voice (the voice it speaks in: id, name, description, language) |
             voices (the ones ready to use, catalog voices matching the search, and the current one) |
@@ -245,6 +254,31 @@ class VoiceSession:
         self.job_count = 0
         self.castings: dict[str, dict] = {}  # a post's content -> the voice described for it (cast)
 
+    @property
+    def mode(self) -> str:
+        """How content is made in the conversation on screen: its own choice, else the page's (canvas in
+        Creative Lab, drafts elsewhere). A canvas needs FlowAI."""
+        if not self.flowai:
+            return "drafts"
+        return self.conv.mode or ("canvas" if self.lab is not None else "drafts")
+
+    async def set_mode(self, mode: str, by_user: bool = False) -> dict:
+        """The switch on the page (by_user) or the assistant's set_mode: the page goes to that view."""
+        if mode not in tools.MODES:
+            return {"error": f"mode is drafts or canvas, not {mode!r}"}
+        if mode == "canvas" and not self.flowai:
+            return {"error": "Creative Lab needs FlowAI, which isn't connected"}
+        conv = self.conv
+        before, conv.mode = self.mode, mode
+        conv.plan_ok = False
+        conv.changed()
+        await conv.send(**conv.about())
+        await self.try_send(type="mode_changed", mode=mode, project=conv.project)
+        if by_user and mode != before:
+            self.remember(f"On screen, the user switched this conversation to {mode} mode: from now on make content "
+                          f"as {tools.MODES[mode]}. What was made before stays where it is.")
+        return {"mode": mode, "now": f"content is made as {tools.MODES[mode]}; the page shows that view"}
+
     # The conversation on screen: its numbered pictures and files (generating them needs the ComfyUI
     # pod, self.m.comfy) and its drafts. Tools reach them as session.media and session.studio.
     @property
@@ -335,11 +369,13 @@ class VoiceSession:
             "sound): it can then read videos or be the voice you speak in. transcribe_media says what is said in "
             "one. Clone a voice, dub someone or swap a face only for people who agreed to it (the user, or someone "
             "they have permission from), and never to pass made-up words or pictures off as a real person's.")
-        skills = load_skills(ROOT / settings.content_skills_dir)
+        canvas = self.mode == "canvas"
+        # Each way of making content has its own playbooks: the canvas creative-lab's, drafts the rest
+        skills = {k: v for k, v in load_skills(ROOT / settings.content_skills_dir).items() if (k == "creative-lab") == canvas}
         # Small playbooks go in the prompt: that saves a load_skill round (about two seconds) per new
         # kind of post, and prompt length barely changes response time. A big library is loaded on demand.
         self.skills_inline = sum(len(k.instructions) for k in skills.values()) <= SKILLS_INLINE_CHARS
-        prompt += (
+        prompt += self.canvas_studio_prompt(skills) if canvas else (
             "\n\nYou are also the content studio of a social media agency: you make posts for Instagram and X "
             "as drafts the user sees on screen, and change them when asked. A draft has a number, a caption, and "
             "slides (one picture or video each) with texts drawn on top. The user sees one draft at a time; a "
@@ -396,7 +432,7 @@ class VoiceSession:
                + catalogue(skills))
         )
         if self.flowai:
-            prompt += self.flowai.prompt()
+            prompt += self.flowai.prompt(canvas=canvas)
         if self.m.phone:
             minutes = settings.phone_feedback_after_minutes
             prompt += (
@@ -433,14 +469,8 @@ class VoiceSession:
                 "themselves. Phone skills:\n"
                 + catalogue(self.phone.skills())
             )
-        if self.lab is not None and self.flowai:
-            prompt += ("\n\nThe user is in FlowAI's Creative Lab now, "
-                       + (f"with project {self.lab['project']} open" if self.lab.get("project") else
-                          "on its home page with no project open")
-                       + ": make what they ask for there, as nodes on the canvas with the lab_ tools, following the "
-                       "creative-lab skill, not as drafts here. With no project open, a request to make something "
-                       "starts a project: the campaign questions first (quick, 5, or thorough, 10, one at a time), "
-                       "then lab_new_project; after New post, skip the questions and make what they ask for.")
+        if self.flowai:
+            prompt += self.mode_prompt()
         # The date, not the time, so the prompt stays the same all day (the time is a tool call away)
         today = datetime.now(self.flowai.tz if self.flowai else None)
         prompt += f"\n\nToday is {today:%A} {today.day} {today:%B %Y}."
@@ -449,6 +479,47 @@ class VoiceSession:
                        "them, so a reply can be a little longer when that helps (a few options, exact names "
                        "and numbers), still in plain text.")
         return prompt
+
+    def canvas_studio_prompt(self, skills: dict) -> str:
+        """Canvas mode's studio: Creative Lab, instead of drafts here."""
+        return (
+            "\n\nYou are also the content studio of a social media agency. In this conversation content is made in "
+            "FlowAI's Creative Lab: a project is a canvas of nodes (the brief, the user's photos, models that write, "
+            "draw, film, voice and score, Where it goes, Post) that the user watches change as you work. Make every "
+            "post there, never as drafts here. "
+            + ("How to work there:\n\n" + "\n\n".join(f"### {k.name}: {k.description}\n{k.instructions}"
+                                                        for k in skills.values())
+               if self.skills_inline else
+               "Before building, call load_skill for creative-lab and follow it.")
+        )
+
+    def mode_prompt(self) -> str:
+        """Which way content is made here, how to switch, and the order things are approved in."""
+        conv, mode = self.conv, self.mode
+        where = ("in Creative Lab" + (f", with project {self.lab['project']} open" if self.lab.get("project") else
+                                      ", on its home page") if self.lab is not None else "on another page")
+        if mode == "canvas":
+            text = ("\n\nThis conversation is in canvas mode: content is made as nodes on a Creative Lab canvas, with "
+                    "the lab_ tools. " + (f"Its canvas is project {conv.project}. " if conv.project else
+                                          "It has no project yet: a request to make something starts one, the "
+                                          "campaign questions first (quick, 5, or thorough, 10, one at a time), "
+                                          "then lab_new_project; after New post, skip the questions. ")
+                    + f"The user is {where} now. The other way is drafts mode (posts made as drafts here, in the "
+                    "chat).")
+        else:
+            text = (f"\n\nThis conversation is in drafts mode: posts are made as drafts here, in the chat. The user "
+                    f"is {where} now. The other way is canvas mode (a Creative Lab project, built from nodes).")
+        return text + (
+            " The user picks with the Drafts | Canvas switch above the chat, or by asking (\"do it on the canvas\", "
+            "\"as a flow\", \"old school\", \"as drafts\"): then call set_mode first. When you start a new piece of "
+            "work, say in a few words which way you're making it (\"Making it as drafts here; say canvas for a "
+            "flow.\"), so they can switch before you build.\n"
+            "Approvals come in this order, on screen, where the user approves or asks for a change: 1. Plan: before "
+            "making several posts, or anything slow or paid, call propose_plan and wait (not for one quick post). "
+            "2. Make it. 3. Review: ask approval for each post, one call each, in posting order ("
+            + ("lab_schedule, after the Post node is saved as a draft" if mode == "canvas" else "schedule_post")
+            + "); the user goes through them one by one. Never say something is scheduled before you are told it "
+            "was approved. When the user asks for a change from the review queue, change only that and ask again.")
 
     # --- sending ------------------------------------------------------------------
 
@@ -514,6 +585,9 @@ class VoiceSession:
                 text = msg["text"].strip()
                 await self.send(type="transcript", text=text, final=True)
                 await self.start_response(text)
+            case "change" if str(msg.get("text") or "").strip() and self.flowai:
+                if msg.get("conversation") in (None, "", self.conv.id):
+                    self.spawn(self.on_change(msg))
             case "interrupt":
                 await self.interrupt()
             case "cancel_task":
@@ -575,8 +649,9 @@ class VoiceSession:
     async def on_action(self, msg: dict):
         """A button on the page: done directly, then the LLM is told so the conversation stays in step."""
         kind, name = msg["type"], msg.get("name")
-        if msg.get("conversation") not in (None, "", self.conv.id):
-            return  # pressed in a conversation that's no longer on screen
+        # Pressed in a conversation that's no longer on screen; which page is open (lab) is about the page
+        if name != "lab" and msg.get("conversation") not in (None, "", self.conv.id):
+            return
         if kind in ("approve", "decline"):
             if self.flowai:
                 await self.flowai.decide(msg.get("id"), approve=kind == "approve", done=bool(msg.get("done")))
@@ -658,18 +733,24 @@ class VoiceSession:
                 return
             before = self.lab or {}
             self.lab = {"project": msg.get("project"), "node": msg.get("node"), "control": bool(msg.get("control"))}
-            if msg.get("project") and msg.get("project") != before.get("project"):
+            if msg.get("project") and self.mode == "canvas" and self.conv.project != msg.get("project"):
+                self.conv.project = msg.get("project")  # the canvas this conversation works on
+                self.conv.changed()
+                await self.conv.send(**self.conv.about())  # the switch's "Open the canvas" goes there
+            # Where they are goes in every turn's prompt (mode_prompt); this is what changed, for the record
+            if self.mode == "canvas" and msg.get("project") and msg.get("project") != before.get("project"):
                 self.remember(f"The user has Creative Lab project {msg.get('project')} open on screen. lab_graph shows it; "
                               "build and run its nodes with the lab_ tools (the creative-lab skill says how).")
-            elif not msg.get("project") and (not before or before.get("project")):
-                self.remember("The user is on Creative Lab's home page, with no project open. When they want something "
-                              "made, start a project with them: the campaign questions first, then lab_new_project "
-                              "(the creative-lab skill says how).")
             if self.lab["control"] != bool(before.get("control")):
-                self.remember("The user handed you control of the Creative Lab project: build it and run its nodes yourself, "
-                              "slow and paid ones included, without asking first; say what you did as you go. Scheduling, "
-                              "posting now, permissions and consent stay theirs." if self.lab["control"] else
-                              "The user took back control of the Creative Lab project: ask before running slow or paid nodes.")
+                self.remember("The user handed you control of the Creative Lab project: lab_run runs at once, slow and paid "
+                              "nodes included, without asking on screen; say what you ran as you go. Scheduling, posting "
+                              "now, permissions and consent stay theirs." if self.lab["control"] else
+                              "The user took back control of the Creative Lab project: lab_run asks them on screen again.")
+            return
+        elif name == "mode":  # the Drafts | Canvas switch
+            result = await self.set_mode(str(msg.get("mode") or ""), by_user=True)
+            if "error" in result:
+                await self.send(type="error", message=result["error"][:1].upper() + result["error"][1:])
             return
         elif name == "open_campaign" and self.flowai:
             if self.flowai_loading:
@@ -686,6 +767,24 @@ class VoiceSession:
             await self.send(type="error", message=result["error"][:1].upper() + result["error"][1:])
             return
         self.remember(f"On screen, the user {done}.")
+
+    async def on_change(self, msg: dict):
+        """Change… on a plan or a post waiting for approval: the user's words go to the assistant, about it."""
+        text = str(msg["text"]).strip()
+        a = await self.flowai.change(msg.get("id"), text)
+        if not a:
+            return
+        about = {"plan": "the plan", "run": f"running {a.node}"}.get(a.kind) or \
+            (f"Post node {a.node}" if a.kind == "lab_post" else f"draft {a.draft}")
+        again = {"plan": "change the plan, then propose_plan again",
+                 "run": "change the nodes, then lab_run again",
+                 "lab_post": f"change what the post is made of, run {a.node} again (a draft), then lab_schedule it "
+                             "again with the same time"}.get(a.kind) or \
+            "change the draft, then schedule_post it again with the same time"
+        self.remember(f"The user pressed Change on what waited for their approval ({a.text}), about {about}. "
+                      f"Do what they ask, then {again}, so it comes back to them to approve.")
+        await self.send(type="transcript", text=f"Change: {text}", final=True)
+        await self.start_response(f"Change: {text}", change=True)
 
     # --- conversations --------------------------------------------------------------
 
@@ -709,6 +808,9 @@ class VoiceSession:
                     await self.on_action({"type": "action", "name": "open_campaign", "campaign": msg["campaign"]})
                 elif msg.get("quick") and self.flowai:  # Creative Lab's New post: it speaks first
                     self.lab = {"project": None, "node": None, "control": False}
+                    self.conv.mode = "canvas"
+                    self.conv.changed()
+                    await self.conv.send(**self.conv.about())
                     self.add_note("The user pressed New post in Creative Lab: they want something made straight away, "
                                   "without the campaign questions. Ask in English, in one short line, what they want "
                                   "to make (a post, a reel, a story, for which account), with two or three quick "
@@ -716,7 +818,7 @@ class VoiceSession:
                                   "interview with depth quick and every field, what they didn't say suggested (ending "
                                   "the value with \" (suggested)\"). Ask one more question only if you can't tell "
                                   "what to make. Build the nodes (creative-lab skill, step 2), then say in one line "
-                                  "what's ready and run it once they say yes. If they answer in another language, "
+                                  "what's ready and lab_run it: the user approves the run on screen. If they answer in another language, "
                                   "carry on in theirs.")
             elif kind == "open":
                 found = await self.store.open(owner, cid) if owner else None
@@ -1293,18 +1395,27 @@ class VoiceSession:
         if notify:
             await self.send(type="interrupt", turn=self.turn, was_speaking=was_speaking)
 
-    async def start_response(self, text: str):
+    async def start_response(self, text: str, change: bool = False):
         await self.interrupt(notify=self.assistant_active())
-        self.response = asyncio.create_task(self.respond(text, self.turn))
+        self.response = asyncio.create_task(self.respond(text, self.turn, change))
 
-    async def respond(self, user_text: str | None, turn: int):
-        """Answers user_text, or with None just reacts to pending notes (task results)."""
+    async def respond(self, user_text: str | None, turn: int, change: bool = False):
+        """Answers user_text, or with None just reacts to pending notes (task results). change: user_text is a
+        Change… on something waiting for approval, still part of the approved plan's work."""
         if self.m.comfy:
             self.m.comfy.maybe_refresh()  # the workflow list in the prompt; picked up next turn
         self.load_flowai()
         if self.flowai_loading and not self.flowai_loading.done():
             await asyncio.wait({self.flowai_loading}, timeout=5)  # the accounts go in the prompt
         conv = self.conv  # a switch interrupts this reply first, so it stays the same throughout
+        if user_text and not change and conv.plan_ok:  # an approved plan covers its work, not what's asked next
+            conv.plan_ok = False
+            conv.changed()
+        if user_text and conv.mode is None and self.flowai:  # the first request settles it: the page's
+            conv.mode = self.mode
+            conv.changed()
+            await conv.send(**conv.about())
+        mode = self.mode
         system = {"role": "system", "content": self.system_prompt()}
         if user_text and (focus := self.focus_note()):
             conv.notes.append(focus)
@@ -1326,14 +1437,18 @@ class VoiceSession:
                   (set() if self.flowai else tools.FLOWAI_TOOLS) | \
                   (set() if self.m.phone else tools.PHONE_TOOLS) | \
                   (set() if self.m.lipsync else tools.LIPSYNC_TOOLS) | \
-                  (set() if self.m.faceswap else tools.FACESWAP_TOOLS) | \
-                  ({"load_skill"} if self.skills_inline else set())
+                  (set() if self.m.faceswap else tools.FACESWAP_TOOLS)
         try:
             for _ in range(settings.llm_max_tool_rounds):
+                if self.mode != mode:  # it switched (set_mode): the rest of the reply works the new way
+                    mode = self.mode
+                    system = {"role": "system", "content": self.system_prompt()}
+                tool_list = tools.schemas(exclude | ({"load_skill"} if self.skills_inline else set())
+                                          | (tools.DRAFT_TOOLS if mode == "canvas" else tools.CANVAS_TOOLS))
                 content, calls, chunker = "", [], SentenceChunker()
                 rounds += 1
                 try:
-                    async for msg in self.m.llm.stream([system, *with_user_turn(conv.messages)], tools.schemas(exclude), usage):
+                    async for msg in self.m.llm.stream([system, *with_user_turn(conv.messages)], tool_list, usage):
                         if msg.content:
                             if first_token:
                                 log.info("LLM first token %.0f ms", (time.perf_counter() - t0) * 1000)
@@ -1355,8 +1470,9 @@ class VoiceSession:
                     break
                 used += len(calls)
                 await self.run_tools(conv, calls, turn)
-            log.info("reply in %.1f s: %d model calls, %d tool calls, %d prompt and %d output tokens",
-                     time.perf_counter() - t0, rounds, used, usage.get("prompt", 0), usage.get("output", 0))
+            log.info("reply in %.1f s (%s mode%s): %d model calls, %d tool calls, %d prompt and %d output tokens",
+                     time.perf_counter() - t0, mode, f", project {conv.project}" if mode == "canvas" else "",
+                     rounds, used, usage.get("prompt", 0), usage.get("output", 0))
 
             sentences.put_nowait(None)
             await speaker

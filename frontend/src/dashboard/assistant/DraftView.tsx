@@ -57,6 +57,60 @@ const STYLES = [
   { value: 'plain', label: 'Plain' },
 ]
 
+/**
+ * A row that scrolls sideways, every draft in reach: arrows at the ends while there's more, the mouse wheel
+ * scrolls it too (a trackpad already does), and the one on screen (aria-current) is kept in view.
+ */
+function ScrollRow({ active, children }: { active: unknown; children: ReactNode }) {
+  const row = useRef<HTMLDivElement>(null)
+  const [ends, setEnds] = useState({ left: false, right: false })
+  const measure = () => {
+    const el = row.current
+    if (!el) return
+    const left = el.scrollLeft > 4
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4
+    setEnds((e) => (e.left === left && e.right === right ? e : { left, right }))
+  }
+  useEffect(measure) // drafts come and go
+  useEffect(() => {
+    const el = row.current
+    if (!el) return
+    const resized = new ResizeObserver(measure)
+    resized.observe(el)
+    const wheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      resized.disconnect()
+      el.removeEventListener('wheel', wheel)
+    }
+  }, [])
+  useEffect(() => {
+    row.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [active])
+  const by = (dir: number) => row.current?.scrollBy({ left: dir * row.current.clientWidth * 0.8, behavior: 'smooth' })
+  return (
+    <div className="relative">
+      <div ref={row} onScroll={measure} className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+        {children}
+      </div>
+      {ends.left && (
+        <button type="button" aria-label="Earlier drafts" onClick={() => by(-1)} className="absolute inset-y-0 left-0 grid w-9 place-items-center bg-gradient-to-r from-ink via-ink/80 to-transparent text-muted hover:text-fg">
+          <ChevronLeft className="size-4" />
+        </button>
+      )}
+      {ends.right && (
+        <button type="button" aria-label="More drafts" onClick={() => by(1)} className="absolute inset-y-0 right-0 grid w-9 place-items-center bg-gradient-to-l from-ink via-ink/80 to-transparent text-muted hover:text-fg">
+          <ChevronRight className="size-4" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** The Draft tab: the post as it will look, and everything about it within reach. */
 export function DraftView() {
   const a = useAssistant()
@@ -99,11 +153,12 @@ export function DraftView() {
 
   return (
     <div className="space-y-4">
-      <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+      <ScrollRow active={d.id}>
         {list.map((x) => (
           <button
             key={x.id}
             type="button"
+            aria-current={x.id === d.id}
             onClick={() => a.setCurrent(x.id)}
             className={cn(
               'flex shrink-0 items-center gap-2.5 rounded-lg border py-1.5 pl-1.5 pr-3 text-left transition-colors',
@@ -126,7 +181,7 @@ export function DraftView() {
           </button>
         ))}
         <NewDraft compact />
-      </div>
+      </ScrollRow>
 
       <MaskProvider>
         <div className="grid gap-4 @2xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">

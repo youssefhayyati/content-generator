@@ -805,3 +805,50 @@ async def cancel_phone_task(session):
 
 # Creative Lab: building and running node graphs in FlowAI (lab_tools.py registers its tools here)
 from . import lab_tools  # noqa: E402,F401
+
+# --- How content is made here, and the plan the user approves ------------------------
+# A conversation makes content one way at a time: drafts here (the old-school way) or a Creative Lab canvas.
+# Each way sees only its own tools (session.py, VoiceSession.respond), so one can't drift into the other.
+
+DRAFT_TOOLS = (STUDIO_TOOLS - {"load_skill"}) | {"edit_area", "generate_media", "dub_video", "swap_face",
+                                                 "save_draft", "open_post", "schedule_post", "open_campaign",
+                                                 "post_on_phone"}
+CANVAS_TOOLS = {name for name in _REGISTRY if name.startswith("lab_")}
+MODES = {"drafts": "drafts in this chat", "canvas": "nodes on a Creative Lab canvas"}
+
+
+@tool(
+    "set_mode",
+    "Switch how content is made in this conversation, when the user asks for the other way: drafts (the "
+    "old-school way, drafts in this chat; they may say old school, classic, drafts, here) or canvas (a Creative "
+    "Lab project of nodes; they may say canvas, flow, nodes, graph, Creative Lab). The page goes to that view and "
+    "what was made stays where it is.",
+    {"type": "object", "properties": {"mode": {"type": "string", "enum": list(MODES)}}, "required": ["mode"]},
+)
+async def set_mode(mode: str, session):
+    return await session.set_mode(mode)
+
+
+@tool(
+    "propose_plan",
+    "Show the user the plan on screen before making several posts, or anything slow or paid (videos, songs, "
+    "dubbing, face swaps, cloud models), and wait: you are told when they approve it, or what to change. Not for "
+    "one quick post. Once approved, make all of it without asking again; each post still needs its own approval "
+    "to be scheduled.",
+    {"type": "object", "properties": {
+        "summary": {"type": "string", "description": "What it is, in one line: what, for whom, the angle, when"},
+        "items": {"type": "array", "items": {"type": "string"},
+                  "description": "What gets made, one short line each, e.g. \"Sun 12:00 · Instagram post · the "
+                                 "octopus escapes the printer\""},
+        "takes": {"type": "string", "description": "About how long it takes to make, e.g. \"about 8 minutes\""},
+        "cost": {"type": "string", "description": "What it costs, if anything is paid"},
+    }, "required": ["summary", "items"]},
+)
+async def propose_plan(session, summary: str, items: list | None = None, takes: str = "", cost: str = ""):
+    if not session.flowai:
+        return {"error": "FlowAI isn't connected, so nothing can be approved on screen; ask the user in words"}
+    a = await session.flowai.ask("plan", str(summary)[:300], items=[str(i)[:200] for i in items or []][:60],
+                                 takes=str(takes)[:80], cost=str(cost)[:80])
+    return {"approval": a.id, "status": "waiting for the user to approve the plan on screen",
+            "note": "make nothing until you are told they approved it; if they ask for a change, change the plan "
+                    "and propose it again"}

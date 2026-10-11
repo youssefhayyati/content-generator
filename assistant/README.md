@@ -659,8 +659,7 @@ its sample, which stops what is being said).
 ### Inside FlowAI
 
 FlowAI (`content-generator/`) has a copy of this repo in `assistant/`. It runs as its `assistant`
-service, which `docker compose up -d` starts with the rest (without a GPU:
-`docker compose --profile assistant-cpu up -d --scale assistant=0`).
+service, which `docker compose up -d` starts with the rest, on the CPU.
 Its page is the dashboard's **Assistant** tab (`frontend/src/dashboard/assistant/`), served
 through the Vite proxy at `/assistant/`. Beyond this page, it adds:
 - **Sign-in as the person who opened it.** The tab asks FlowAI for a token

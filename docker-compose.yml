@@ -1,8 +1,7 @@
 # Everything at once: docker compose up -d
 #   dashboard http://localhost:5173 · API :8002 · assistant :8003 · Mailpit :8025
 # The GPU models (pictures and videos, voices, songs, lip sync) run on a RunPod pod: runpod/ (one folder,
-# one deploy). Without an NVIDIA GPU here, run the assistant on the CPU instead:
-#   docker compose --profile assistant-cpu up -d --scale assistant=0
+# one deploy). The assistant runs on the CPU.
 # Settings for everything are in one file, .env next to this one (cp .env.example .env). The API, worker
 # and scheduler read it as backend/.env; the assistant gets it as its environment.
 
@@ -87,57 +86,31 @@ services:
     restart: unless-stopped
 
   # The voice assistant (assistant/) on :8003: the Assistant page talks to it at /assistant/
-  # through the dashboard's proxy. Speech recognition (and its voice, without VOICESTUDIO_URL) runs on an
-  # NVIDIA GPU (Docker Desktop, or the NVIDIA container toolkit on Linux).
-  # The first start builds the image and downloads its speech models (about 6 GB) into
-  # assistant-models. Its settings (the Ollama Cloud key, the pod's URLs and keys) are in .env.
+  # through the dashboard's proxy. It runs on the CPU: speech recognition takes about 2 s after you stop
+  # talking, and its voice comes from VoiceStudio on the pod (VOICESTUDIO_URL in .env).
+  # The first start builds the image and downloads its speech models into assistant-models.
+  # Its settings (the Ollama Cloud key, the pod's URLs and keys) are in .env.
   assistant:
-    build: ./assistant
-    env_file: .env
-    environment: &assistant-env
-      FLOWAI_URL: http://api:8000
-      FLOWAI_DASHBOARD_URL: http://localhost:5173
-      BROWSER_ENABLED: "false"
-    ports:
-      - "${ASSISTANT_PORT:-8003}:8000"
-    volumes: &assistant-volumes
-      - assistant-models:/cache
-      - assistant-media:/app/media
-      - assistant-voices:/app/voices
-      - assistant-data:/app/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    depends_on:
-      - api
-    restart: unless-stopped
-
-  # The same without a GPU: docker compose --profile assistant-cpu up -d --scale assistant=0
-  # Recognition takes about 2 s after you stop talking; set VOICESTUDIO_URL for its voice.
-  # The dashboard finds it under the assistant name too.
-  assistant-cpu:
     build:
       context: ./assistant
       args:
         TORCH: cpu
-    profiles: [assistant-cpu]
     env_file: .env
     environment:
-      <<: *assistant-env
+      FLOWAI_URL: http://api:8000
+      FLOWAI_DASHBOARD_URL: http://localhost:5173
+      BROWSER_ENABLED: "false"
       ASR_DEVICE: cpu
       ASR_DTYPE: float32
       TTS_DEVICE: cpu
       TTS_DTYPE: float32
     ports:
       - "${ASSISTANT_PORT:-8003}:8000"
-    volumes: *assistant-volumes
-    networks:
-      default:
-        aliases: [assistant]
+    volumes:
+      - assistant-models:/cache
+      - assistant-media:/app/media
+      - assistant-voices:/app/voices
+      - assistant-data:/app/data
     depends_on:
       - api
     restart: unless-stopped
