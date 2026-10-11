@@ -37,7 +37,7 @@ import { cn } from '../lib/cn'
 import { useRouter } from '../lib/router'
 import { useSession } from '../lib/session'
 import { firstName, fmtRelative, postState, titleOf, useApi, type Overview } from './data'
-import { NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, type NavItem } from './nav'
+import { covers, NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, VIEWS, type NavItem } from './nav'
 import { useToast } from './toast'
 import { Avatar, Kbd, Menu, Platforms, StateBadge } from './ui'
 
@@ -196,7 +196,7 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
   const fade = cn('whitespace-nowrap transition-opacity duration-200', rail && 'pointer-events-none opacity-0')
 
   const item = (n: NavItem) => {
-    const active = path === n.path
+    const active = covers(n, path)
     const Icon = n.icon
     const count = overview && n.count ? n.count(overview) : 0
     const live = overview && n.live ? n.live(overview) : false
@@ -304,7 +304,7 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
         {NAV_GROUPS.map((group, i) => {
           const isFolded = !rail && !!group.label && folded.includes(group.label)
           // A folded section still shows the page you're on.
-          const shown = isFolded ? group.items.filter((n) => n.path === path) : group.items
+          const shown = isFolded ? group.items.filter((n) => covers(n, path)) : group.items
           return (
             <div key={group.label ?? i}>
               {group.label && (
@@ -599,6 +599,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   const pages: Result[] = [
     { key: 'new', label: 'New post', icon: Plus, to: NEW_POST, hint: <Kbd>N</Kbd> },
     ...NAV.map((n) => ({ key: n.path, label: n.label, icon: n.icon, to: n.path })),
+    ...VIEWS.map((v) => ({ key: v.path, label: v.label, icon: v.icon, to: v.path })),
   ].filter((r) => !needle || r.label.toLowerCase().includes(needle))
   const found: Result[] = posts.map((p) => ({
     key: `post-${p.id}`,

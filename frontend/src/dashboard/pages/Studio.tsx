@@ -1,11 +1,14 @@
 import { useQueryParam } from '../../lib/router'
 import { LabBrief, LabHome } from '../lab/Home'
 import { LabView } from '../lab/LabView'
+import { LAB_VIEWS } from '../nav'
+import { PageSwitch } from '../PageSwitch'
 
 /**
  * /dashboard/studio, Creative Lab: every project is a canvas of nodes (lab/LabView). A project starts
  * with a few questions about the campaign (?brief=, its interview), from a campaign, or blank, and
- * the assistant can do all of it from the home page.
+ * the assistant can do all of it from the home page. The home's header switches to the quick tools
+ * (pages/Generators), Creative Lab's other view.
  */
 export default function Studio() {
   const project = useQueryParam('project')
@@ -13,5 +16,5 @@ export default function Studio() {
   const brief = useQueryParam('brief')
   if (project) return <LabView key={project} id={Number(project)} node={node} />
   if (brief) return <LabBrief key={brief} id={Number(brief)} />
-  return <LabHome />
+  return <LabHome actions={<PageSwitch id="lab-view" label="Creative Lab view" views={LAB_VIEWS} />} />
 }

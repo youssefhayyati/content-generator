@@ -370,7 +370,7 @@ function RecipesPanel({ registry }: { registry: Registry }) {
       sub="Ready-made pipelines: each step’s output feeds the next."
       actions={
         <Btn size="sm" icon={Wand2} onClick={() => navigate(`${GENERATORS}?tab=recipes`)}>
-          Open in Generators
+          Open in Quick tools
         </Btn>
       }
     >

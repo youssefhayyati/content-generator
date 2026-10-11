@@ -8,6 +8,8 @@ import { ease } from '../../lib/motion'
 import { useRouter } from '../../lib/router'
 import { useToast } from '../toast'
 import { Btn, EmptyState, inputClass, PageHeader, Segmented, Skeleton, Stagger } from '../ui'
+import { INSPIRE_VIEWS } from '../nav'
+import { PageSwitch } from '../PageSwitch'
 
 type Platform = 'instagram' | 'tiktok'
 
@@ -139,6 +141,7 @@ export default function Inspire() {
           </>
         }
         sub="Search a hashtag on TikTok or Instagram, see what the platform is rewarding, then turn any post into a video prompt and make your own with the video generator."
+        actions={<PageSwitch id="inspire-view" label="Inspire view" views={INSPIRE_VIEWS} />}
       />
 
       <Stagger i={0} className="mt-10">

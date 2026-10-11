@@ -12,6 +12,8 @@ import { useApi } from '../data'
 import { TemplateGrid, TemplateSheet } from '../lab/Gallery'
 import { useToast } from '../toast'
 import { Btn, Label, Modal, PageHeader, Segmented, Stagger } from '../ui'
+import { INSPIRE_VIEWS } from '../nav'
+import { PageSwitch } from '../PageSwitch'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 /** The models a case was made with, once each, in the order they worked. */
@@ -36,15 +38,18 @@ export default function Showcase() {
         }
         sub="Real output for demo brands: posts written in each brand’s voice, pictures, reels, a flow and a launch plan. Open one to see exactly how it was made, then make one like it."
         actions={
-          <a
-            href="/showcase"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line-2 px-3.5 text-[12.5px] font-medium text-fg transition-colors hover:border-white/25 hover:bg-white/[0.04]"
-          >
-            Public page
-            <ArrowUpRight className="size-3.5" strokeWidth={1.75} />
-          </a>
+          <>
+            <PageSwitch id="inspire-view" label="Inspire view" views={INSPIRE_VIEWS} />
+            <a
+              href="/showcase"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line-2 px-3.5 text-[12.5px] font-medium text-fg transition-colors hover:border-white/25 hover:bg-white/[0.04]"
+            >
+              Public page
+              <ArrowUpRight className="size-3.5" strokeWidth={1.75} />
+            </a>
+          </>
         }
       />
 

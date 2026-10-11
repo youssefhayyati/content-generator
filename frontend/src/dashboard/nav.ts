@@ -11,7 +11,6 @@ import {
   LayoutGrid,
   Megaphone,
   MessageSquareText,
-  PenLine,
   RadioTower,
   Repeat2,
   SearchCheck,
@@ -36,14 +35,27 @@ export type NavItem = {
   urgent?: boolean
   /** A beating dot beside the label while this is true. */
   live?: (o: Overview) => boolean
+  /** Other pages this entry stands for: a second view of the same place, reached by the switch in its header. */
+  also?: string[]
 }
 
 export type NavGroup = { label: string | null; items: NavItem[] }
 
 export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
 
-/** The one-off generators (text, pictures, video, sound, reels, recipes): a page of their own, apart from the canvas. */
+/** The one-off generators (text, pictures, video, sound, reels, recipes): Creative Lab's quick tools, beside its canvas. */
 export const GENERATORS = '/dashboard/generate'
+
+/** Two views of one place, switched in the page header (PageSwitch); the sidebar shows them as one entry. */
+export type View = { path: string; label: string }
+export const LAB_VIEWS: View[] = [
+  { path: '/dashboard/studio', label: 'Canvas' },
+  { path: GENERATORS, label: 'Quick tools' },
+]
+export const INSPIRE_VIEWS: View[] = [
+  { path: '/dashboard/inspire', label: 'Trending' },
+  { path: '/dashboard/showcase', label: 'Made with FlowAI' },
+]
 
 /** The studio's pages, in the order the sidebar shows them. */
 export const NAV_GROUPS: NavGroup[] = [
@@ -60,19 +72,16 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Create',
     items: [
       { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
-      // Creative Lab is the canvas of nodes; the one-off generators keep a page of their own beside it.
-      { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
-      { path: GENERATORS, label: 'Generators', icon: Shapes },
+      // One entry, two views: the canvas of nodes, and the one-off generators as its quick tools.
+      { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2, also: [GENERATORS] },
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
-      { path: '/dashboard/create', label: 'Composer', icon: PenLine },
-      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
-      { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
     ],
   },
   {
     label: 'Plan',
     items: [
-      { path: '/dashboard/inspire', label: 'Inspire', icon: Flame },
+      // What's trending, and what FlowAI has made (the showcase): both are places to start from.
+      { path: '/dashboard/inspire', label: 'Inspire', icon: Flame, also: ['/dashboard/showcase'] },
       { path: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays, count: (o) => o.counts.scheduled },
       { path: '/dashboard/library', label: 'Gallery', icon: FolderOpen, count: (o) => o.counts.total },
       { path: '/dashboard/automations', label: 'Automations', icon: CalendarClock },
@@ -83,6 +92,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Publish',
     items: [
       { path: '/dashboard/publishing', label: 'Publishing', icon: Send },
+      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
       { path: '/dashboard/accounts', label: 'Accounts', icon: UsersRound },
       { path: '/dashboard/phones', label: 'Phones', icon: Smartphone },
     ],
@@ -106,4 +116,16 @@ export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 /** Where every "New post" goes, from anywhere: the Composer. */
 export const NEW_POST = '/dashboard/create'
 
-export const pageLabel = (path: string) => NAV.find((n) => n.path === path)?.label ?? 'Overview'
+/** Pages with no entry of their own that still have a name: the Composer is the New post button. */
+const UNLISTED: Array<Pick<NavItem, 'path' | 'label'>> = [{ path: NEW_POST, label: 'Composer' }]
+
+/** Whether a sidebar entry is the page being shown, either itself or one of its views. */
+export const covers = (n: NavItem, path: string) => n.path === path || !!n.also?.includes(path)
+
+/** A page's second views, for the search palette: found by their own names. */
+export const VIEWS: Array<View & { icon: LucideIcon }> = [
+  { path: GENERATORS, label: 'Quick tools', icon: Shapes },
+  { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
+]
+
+export const pageLabel = (path: string) => NAV.find((n) => covers(n, path))?.label ?? UNLISTED.find((n) => n.path === path)?.label ?? 'Overview'

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type Ref } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
 import { motion } from 'framer-motion'
 import { useLenis } from 'lenis/react'
 import { ArrowLeft, ArrowRight, ArrowUpRight, FolderKanban, Megaphone, MessageCircleQuestion, Plus, Sparkles, SquareDashed, Trash2, X } from 'lucide-react'
@@ -24,7 +24,7 @@ const studio = (project: number) => `/dashboard/studio?project=${project}`
  * them from the start, for whoever would rather say what they want and let it make the project and
  * build the nodes.
  */
-export function LabHome() {
+export function LabHome({ actions }: { actions?: ReactNode }) {
   const { navigate } = useRouter()
   const toast = useToast()
   const a = useAssistant()
@@ -71,6 +71,7 @@ export function LabHome() {
           </>
         }
         sub="Every project is a canvas of nodes: the brief, your logo and photos, the models that write, draw, film, voice and score, and where it’s posted. Answer a few questions to set the campaign, or tell the assistant what you want."
+        actions={actions}
       />
 
       <div className="mt-10 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">

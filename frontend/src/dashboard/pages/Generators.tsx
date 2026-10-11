@@ -12,7 +12,8 @@ import { ReelMaker } from '../sound/ReelMaker'
 import { SoundStudio } from '../sound/SoundStudio'
 import { GenerationCard, ModelPicker, useGenerations } from '../studio/parts'
 import { messageFor, retryGeneration, runMedia, runText } from '../studio/run'
-import { GENERATORS } from '../nav'
+import { GENERATORS, LAB_VIEWS } from '../nav'
+import { PageSwitch } from '../PageSwitch'
 import { useToast } from '../toast'
 import { Examples } from '../Examples'
 import { promptOf } from '../../showcase/cases'
@@ -30,8 +31,9 @@ const TABS: Array<{ value: Tab; label: string }> = [
 ]
 
 /**
- * /dashboard/generate: the one-off generators, each on its own tab (text, pictures, video, sound,
- * reels) and the recipes. Apart from Creative Lab, where the same models work as nodes on a canvas.
+ * /dashboard/generate, Creative Lab's quick tools: the one-off generators, each on its own tab
+ * (text, pictures, video, sound, reels) and the recipes. The other view is the canvas (pages/Studio),
+ * where the same models work as nodes; the switch in the header goes between them.
  */
 export default function Generators() {
   const { search, navigate } = useRouter()
@@ -55,11 +57,7 @@ export default function Generators() {
           </>
         }
         sub="Create social images and video, give your posts a voice and a soundtrack, cut Reels, or run a recipe. Bring in references, choose a model, and keep every result in your Gallery."
-        actions={
-          <Btn icon={Wand2} onClick={() => navigate('/dashboard/studio')} title="The same models as nodes on a canvas, joined into a whole post">
-            Open Creative Lab
-          </Btn>
-        }
+        actions={<PageSwitch id="lab-view" label="Creative Lab view" views={LAB_VIEWS} />}
       />
 
       <Stagger i={0} className="no-scrollbar -mx-4 mt-10 overflow-x-auto px-4 md:mx-0 md:px-0">
