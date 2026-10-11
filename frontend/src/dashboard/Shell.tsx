@@ -303,13 +303,14 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
           aria-label={rail ? 'New post' : undefined}
           {...tipProps('New post  N')}
           className={cn(
-            'group flex h-8 items-center gap-2 rounded-md bg-fg px-3 text-[13px] font-medium text-ink transition-[width,background-color] duration-300 ease-expo hover:bg-white',
+            // In the palette's own colour, like every other place the accent asks to be pressed.
+            'group flex h-8 items-center gap-2 rounded-md bg-accent px-3 text-[13px] font-medium text-on-accent transition-[width,background-color] duration-300 ease-expo hover:bg-[color-mix(in_oklab,var(--color-accent)_82%,white)]',
             rail ? 'w-10' : 'w-full',
           )}
         >
           <Plus className="size-4 shrink-0" strokeWidth={2} />
           <span className={fade}>New post</span>
-          <Kbd className={cn('ml-auto border-ink/15 text-ink/45', fade)}>N</Kbd>
+          <Kbd className={cn('ml-auto border-on-accent/25 text-on-accent/60', fade)}>N</Kbd>
         </button>
       </div>
 
