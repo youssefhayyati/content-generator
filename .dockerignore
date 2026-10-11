@@ -1,7 +1,9 @@
 **/node_modules
 **/dist
 backend/vendor
-backend/.env
+**/.env
+**/.env.*
+!**/.env.example
 backend/database/*.sqlite
 backend/storage/logs/*
 deploy/.env

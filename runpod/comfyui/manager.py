@@ -12,6 +12,7 @@ ComfyUI headless manager for RunPod  (v2)
 Needs the custom node "comfyui-workflow-to-api-converter-endpoint" (start.sh installs it).
 """
 import base64
+import hmac
 import json
 import mimetypes
 import os
@@ -743,7 +744,7 @@ def progress_of(pid: str) -> dict:
 
 # =========================================================== HTTP API
 def auth(x_api_key: str = Header(default=""), key: str = ""):
-    if API_KEY and API_KEY not in (x_api_key, key):
+    if API_KEY and not any(hmac.compare_digest(k.encode(), API_KEY.encode()) for k in (x_api_key, key)):
         raise HTTPException(401, "invalid API key")
 
 

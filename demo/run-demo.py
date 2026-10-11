@@ -112,7 +112,7 @@ class Demo:
 
         say("2/8 · The agents plan the campaign (writer → visual director, on the local model)")
         self.call("POST", f"/api/campaigns/{cid}/plan")
-        c = self.wait_for("the plan", f"/api/campaigns/{cid}", lambda d: d["stage"] == "plan_review")
+        self.wait_for("the plan", f"/api/campaigns/{cid}", lambda d: d["stage"] == "plan_review")
         items = self.call("GET", f"/api/campaigns/{cid}/items")
         note(f"plan ready: {len(items)} posts proposed — GATE 6A is waiting (Inbox, or the campaign's Plan tab)")
         for it in items:
@@ -136,7 +136,7 @@ class Demo:
 
     def finish(self, cid: int) -> None:
         say("5/8 · Adaptation per platform + QA — then GATE 6B")
-        c = self.wait_for("the review", f"/api/campaigns/{cid}", lambda d: d["stage"] == "content_review")
+        self.wait_for("the review", f"/api/campaigns/{cid}", lambda d: d["stage"] == "content_review")
 
         def all_variants():
             return [v for it in self.call("GET", f"/api/campaigns/{cid}/items") for v in (it.get("variants") or [])]

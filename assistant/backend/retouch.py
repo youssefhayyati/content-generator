@@ -24,17 +24,6 @@ FEATHER = 0.012  # of the picture's shorter side: how soft the pasted edge is
 GROW = 0.008  # the painted area is grown by this much, so a stroke's edge is covered
 
 
-def fit_box(size: tuple[int, int], shape: tuple[int, int]) -> tuple[float, float, float, float]:
-    """The part of a picture of `size` that a slide of `shape` shows (as ImageOps.fit cuts it)."""
-    w, h = size
-    ratio = shape[0] / shape[1]
-    if w / h > ratio:
-        cw = h * ratio
-        return (w - cw) / 2, 0, (w + cw) / 2, h
-    ch = w / ratio
-    return 0, (h - ch) / 2, w, (h + ch) / 2
-
-
 def read_mask(data: bytes, size: tuple[int, int]) -> Image.Image:
     """The page's mask (a PNG, painted pixels opaque or white) at `size`, as 0 or 255."""
     with Image.open(io.BytesIO(data)) as m:

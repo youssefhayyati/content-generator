@@ -27,6 +27,7 @@ but /health needs it as a bearer token.
 from __future__ import annotations
 
 import gc
+import hmac
 import json
 import os
 import shutil
@@ -80,7 +81,7 @@ class Unusable(Exception):
 
 
 def auth(authorization: str = Header(default="")):
-    if API_KEY and authorization != f"Bearer {API_KEY}":
+    if API_KEY and not hmac.compare_digest(authorization.encode(), f"Bearer {API_KEY}".encode()):
         raise HTTPException(401, "a bearer token (FACESWAP_API_KEY) is needed")
 
 

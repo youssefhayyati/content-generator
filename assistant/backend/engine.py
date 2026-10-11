@@ -29,6 +29,7 @@ MEDIA_DIR/engine/<id>/, for two hours: FlowAI copies what it needs into its own 
 """
 
 import asyncio
+import hmac
 import io
 import json
 import logging
@@ -765,7 +766,7 @@ def _engine(request: Request) -> Engine:
 
 
 def _auth(x_engine_key: str | None = Header(default=None)):
-    if settings.engine_key and x_engine_key != settings.engine_key:
+    if settings.engine_key and not hmac.compare_digest((x_engine_key or "").encode(), settings.engine_key.encode()):
         raise HTTPException(401, "a wrong or missing X-Engine-Key")
 
 

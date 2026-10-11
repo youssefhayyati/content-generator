@@ -651,7 +651,7 @@ class FlowAISession:
             raise StudioError(f"draft {d.id} has changes that aren't saved to the campaign: save it, and once the "
                               "user approves the new version, book the time")
         if link.status != "approved":
-            raise StudioError(f"its version isn't approved yet (gate 6B): the user approves it on screen first")
+            raise StudioError("its version isn't approved yet (gate 6B): the user approves it on screen first")
         text = f"Book {self._what(link)} on {self._local(at)}"
         a = await self._approval(d, text, when=at, kind="time", campaign=link.campaign, variant=link.variant)
         return {"approval": a.id, "status": "waiting for the user to approve it on screen", "asks": text,

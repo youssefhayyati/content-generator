@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from .flowai import FlowAISession
     from .phone_direct import DirectDriver
     from .publisher import Publisher
-    from .studio import Draft, StudioSession
+    from .studio import StudioSession
 
 log = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ PIECE_CHARS = 50
 
 # Characters the input board can't type, as the nearest ones it can
 ASCII = str.maketrans({"‘": "'", "’": "'", "‚": "'", "“": '"', "”": '"', "„": '"', "–": "-", "—": "-",
-                       "‐": "-", "…": "...", "•": "-", "·": "-", "×": "x", " ": " ", " ": " ",
+                       "‐": "-", "…": "...", "•": "-", "·": "-", "×": "x", "\u00a0": " ", "\u202f": " ",
                        "€": "EUR", "£": "GBP", "©": "(c)", "®": "(R)", "™": "TM", "ß": "ss", "æ": "ae",
                        "Æ": "AE", "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "đ": "d"})
 

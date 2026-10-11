@@ -123,17 +123,3 @@ export function Button({ href, children, variant = 'primary', size = 'md', arrow
     </Magnetic>
   )
 }
-
-/** Plain text link with an underline that draws in from the left. */
-export function TextLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
-  const onClick = useLinkClick(href)
-  return (
-    <a href={href} onClick={onClick} className={cn('group inline-flex items-center gap-1.5 text-sm text-fg', className)}>
-      <span className="relative">
-        {children}
-        <span className="absolute -bottom-0.5 left-0 h-px w-full origin-right scale-x-0 bg-current transition-transform duration-500 ease-expo group-hover:origin-left group-hover:scale-x-100" />
-      </span>
-      <ArrowRight className="size-3.5 transition-transform duration-500 ease-expo group-hover:translate-x-1" strokeWidth={1.75} />
-    </a>
-  )
-}

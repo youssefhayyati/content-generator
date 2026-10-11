@@ -34,7 +34,7 @@ import {
   MonitorPlay,
   type LucideIcon,
 } from 'lucide-react'
-import type { LabCanvas, LabNode, LabNodeKind, LabPortType } from '../../lib/api'
+import type { LabNode, LabNodeKind, LabPortType } from '../../lib/api'
 
 /** One hue per group, so a graph reads at a glance; the chrome stays monochrome. */
 export const GROUP_HUE: Record<string, string> = {
@@ -129,19 +129,6 @@ export function curve(x1: number, y1: number, x2: number, y2: number) {
 
 /** Whether an output of this type can go into that input. */
 export const fits = (type: LabPortType, accepts: LabPortType[]) => accepts.includes(type)
-
-/** The nodes after this one, however far. */
-export function downstream(canvas: LabCanvas, id: string): string[] {
-  const seen = new Set<string>()
-  const queue = canvas.edges.filter((e) => e.from === id).map((e) => e.to)
-  while (queue.length) {
-    const n = queue.shift()!
-    if (seen.has(n) || n === id) continue
-    seen.add(n)
-    queue.push(...canvas.edges.filter((e) => e.from === n).map((e) => e.to))
-  }
-  return [...seen]
-}
 
 export const fmtSeconds = (s: number) => (s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`)
 

@@ -392,7 +392,7 @@ class MediaSession:
 
     def pipeline(self, label: str, workflow: str, prompt: str, makes: str, work, then=None) -> dict:
         """Steps on this machine and on the pod, in the background like a generation (dub.py: a
-        dub, a face swap). work(job) does them, with on_pod for the pod's, threads for the rest and
+        dub, a face swap). work(job) does them, with threads for the work and
         step(job, text) to show where it is, and returns the files made as (bytes, file name, meta)."""
         running = [j for j in self.jobs.values() if j.kind == "generate" and j.status == "running"]
         if len(running) >= MAX_RUNNING:
@@ -419,18 +419,6 @@ class MediaSession:
     def _running(job: MediaJob) -> dict:
         return {"type": "media_job", "id": job.id, "kind": "generate", "status": "running", "text": job.progress,
                 "stage": job.stage, "share": job.share, "at": round(time.monotonic() - job.started)}
-
-    async def on_pod(self, job: MediaJob, workflow: str, inputs: dict) -> list[tuple[bytes, str]]:
-        """Runs a workflow for a pipeline's job and waits: the files it made, as (bytes, file name)."""
-        queued = await self.comfy.run(workflow, inputs)
-        if queued.get("status") == "setting_up":
-            raise ComfyError(f"{workflow} is still being installed on the pod; try again in a few minutes")
-        job.prompt_id = queued["prompt_id"]
-        files = made_files(await self._wait_for(job))
-        if not files:
-            raise ComfyError("it finished without producing any file")
-        await self.step(job, "downloading the result")
-        return [(await self.comfy.download(f["url"]), f.get("filename") or "output") for f in files]
 
     async def _run_pipeline(self, job: MediaJob, work):
         await self.send(type="media_job", id=job.id, kind="generate", status="started", workflow=job.workflow,
