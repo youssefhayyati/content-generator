@@ -9,6 +9,7 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
   type SelectHTMLAttributes,
@@ -600,3 +601,181 @@ export function DateTimeInput(props: FieldProps) {
     </>
   )
 }
+
+/* ------------------------------------------------------------------ */
+/* Colour                                                              */
+/* ------------------------------------------------------------------ */
+
+type Hsv = { h: number; s: number; v: number }
+const clamp01 = (n: number) => Math.min(1, Math.max(0, n))
+const hexOk = (s: string | undefined | null) => (/^#[0-9a-f]{6}$/i.test(s ?? '') ? (s as string).toLowerCase() : /^#[0-9a-f]{3}$/i.test(s ?? '') ? `#${[...(s as string).slice(1)].map((c) => c + c).join('')}`.toLowerCase() : null)
+function toHsv(hex: string): Hsv {
+  const n = parseInt(hex.slice(1), 16)
+  const [r, g, b] = [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+  const max = Math.max(r, g, b)
+  const d = max - Math.min(r, g, b)
+  const h = d === 0 ? 0 : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return { h: h * 60, s: max === 0 ? 0 : d / max, v: max }
+}
+function toHex({ h, s, v }: Hsv) {
+  const f = (n: number) => {
+    const k = (n + h / 60) % 6
+    return Math.round((v - v * s * Math.max(0, Math.min(k, 4 - k, 1))) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${f(5)}${f(3)}${f(1)}`
+}
+const SWATCHES = ['#ffffff', '#0b0b0c', '#f43f5e', '#f59e0b', '#84cc16', '#06b6d4', '#6366f1', '#a855f7']
+
+/** Where on a track or a square the pointer is, 0 to 1 each way, followed while it's held down. */
+function useDrag(onMove: (x: number, y: number) => void) {
+  const at = (e: { clientX: number; clientY: number; currentTarget: HTMLElement }) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    onMove(clamp01((e.clientX - r.left) / r.width), clamp01((e.clientY - r.top) / r.height))
+  }
+  return {
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId)
+      at(e)
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLElement>) => e.currentTarget.hasPointerCapture(e.pointerId) && at(e),
+  }
+}
+
+/** A field of the hue to pick shade and strength from, the hues on a bar under it, the hex to type, a few to start from. */
+function ColorPane({ value, onPick }: { value: string; onPick: (hex: string) => void }) {
+  // The hue is kept here: a grey has none of its own, and would lose the one being worked in.
+  const [hsv, setHsv] = useState(() => toHsv(value))
+  const [typed, setTyped] = useState(value)
+  useEffect(() => {
+    if (toHex(hsv) !== value) setHsv(toHsv(value))
+    setTyped(value)
+    // Only when the colour changes from outside: the local hue is otherwise the one to keep.
+  }, [value])
+  const set = (next: Hsv) => {
+    setHsv(next)
+    onPick(toHex(next))
+  }
+  const field = useDrag((x, y) => set({ ...hsv, s: x, v: 1 - y }))
+  const hue = useDrag((x) => set({ ...hsv, h: Math.min(359.9, x * 360) }))
+
+  return (
+    <div className="w-[228px] space-y-2.5 p-2">
+      <div
+        {...field}
+        role="slider"
+        aria-label="Shade"
+        aria-valuetext={value}
+        className="relative h-[140px] cursor-crosshair touch-none rounded-[8px]"
+        style={{ backgroundColor: `hsl(${hsv.h} 100% 50%)`, backgroundImage: 'linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)' }}
+      >
+        <span className="pointer-events-none absolute size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgb(0_0_0_/_0.5)]" style={{ left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%`, background: value }} />
+      </div>
+      <div
+        {...hue}
+        role="slider"
+        aria-label="Hue"
+        aria-valuenow={Math.round(hsv.h)}
+        aria-valuemin={0}
+        aria-valuemax={360}
+        className="relative h-3 cursor-pointer touch-none rounded-full"
+        style={{ background: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' }}
+      >
+        <span className="pointer-events-none absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgb(0_0_0_/_0.5)]" style={{ left: `${(hsv.h / 360) * 100}%`, background: `hsl(${hsv.h} 100% 50%)` }} />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="size-7 shrink-0 rounded-md border border-white/20" style={{ background: value }} />
+        <input
+          aria-label="Hex colour"
+          value={typed}
+          spellCheck={false}
+          onChange={(e) => {
+            setTyped(e.target.value)
+            const ok = hexOk(e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`)
+            if (ok) {
+              setHsv(toHsv(ok))
+              onPick(ok)
+            }
+          }}
+          onBlur={() => setTyped(value)}
+          className={cn(inputClass, 'h-7 px-2 font-mono text-[12px] uppercase')}
+        />
+      </div>
+      <div className="flex justify-between">
+        {SWATCHES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-label={c}
+            onClick={() => {
+              setHsv(toHsv(c))
+              onPick(c)
+            }}
+            className={cn('size-5 rounded-full border transition-transform hover:scale-110', c === value ? 'border-white ring-2 ring-white/25' : 'border-white/20')}
+            style={{ background: c }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A colour, in and out as '#rrggbb' like <input type="color">. The button takes the caller's
+ * classes (a swatch, or an invisible cover over one of their own) and is filled with the colour;
+ * onBlur is given the colour when the pane closes, as leaving a native field would.
+ */
+export function ColorInput({
+  value,
+  onChange,
+  onBlur,
+  className,
+  id,
+  name,
+  title,
+  disabled,
+  ...rest
+}: {
+  value?: string
+  onChange?: (e: ChangeEvent<HTMLInputElement>) => void
+  onBlur?: (e: ChangeEvent<HTMLInputElement>) => void
+  className?: string
+  id?: string
+  name?: string
+  title?: string
+  disabled?: boolean
+  'aria-label'?: string
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  const hex = hexOk(value) ?? '#ffffff'
+  const latest = useRef(hex)
+  latest.current = hex
+  const close = () => {
+    setOpen(false)
+    onBlur?.(changed<HTMLInputElement>(latest.current, name))
+  }
+  return (
+    <>
+      <button
+        ref={ref}
+        id={id}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={rest['aria-label'] ?? 'Pick a colour'}
+        title={title}
+        disabled={disabled}
+        onClick={() => (open ? close() : setOpen(true))}
+        className={className}
+        style={{ backgroundColor: hex }}
+      />
+      {name && <input type="hidden" name={name} value={hex} />}
+      <Popover anchor={ref} open={open} onClose={close} label={rest['aria-label'] ?? 'Pick a colour'} className="!overflow-hidden">
+        <ColorPane value={hex} onPick={(v) => onChange?.(changed<HTMLInputElement>(v, name))} />
+      </Popover>
+    </>
+  )
+}
+

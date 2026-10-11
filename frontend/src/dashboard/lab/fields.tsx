@@ -8,7 +8,7 @@ import { TextOverlay, type TextItem } from './TextOverlay'
 import { LabVoicePicker } from './VoicePicker'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
-import { Btn, Label, Modal, Select, Toggle, inputClass, DateTimeInput } from '../ui'
+import { Btn, Label, Modal, Select, Toggle, inputClass, DateTimeInput, ColorInput } from '../ui'
 
 /** What a field can know about the graph around its node. */
 export type FieldContext = {
@@ -115,7 +115,7 @@ export function FieldEditor({ field, value, onChange, ctx }: { field: LabField; 
     case 'color':
       return wrap(
         <div className="flex items-center gap-2">
-          <input id={id} type="color" className="h-9 w-12 cursor-pointer rounded border border-line-2 bg-transparent" value={str || '#ffffff'} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onChange(e.target.value, true)} />
+          <ColorInput id={id} className="h-9 w-12 shrink-0 cursor-pointer rounded-lg border border-line-2" value={str || '#ffffff'} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onChange(e.target.value, true)} />
           <input className={cn(inputClass, 'font-mono')} value={str} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onChange(e.target.value, true)} />
         </div>,
       )
@@ -125,7 +125,7 @@ export function FieldEditor({ field, value, onChange, ctx }: { field: LabField; 
         <div className="flex flex-wrap items-center gap-2">
           {list.map((c, i) => (
             <span key={i} className="group relative">
-              <input type="color" value={c} onChange={(e) => onChange(list.map((x, j) => (j === i ? e.target.value : x)))} onBlur={() => onChange(list, true)} className="size-8 cursor-pointer rounded-full border border-line-2 bg-transparent" />
+              <ColorInput value={c} onChange={(e) => onChange(list.map((x, j) => (j === i ? e.target.value : x)))} onBlur={() => onChange(list, true)} className="block size-8 cursor-pointer rounded-full border border-line-2" />
               <button type="button" onClick={() => onChange(list.filter((_, j) => j !== i), true)} aria-label="Remove this colour" className="absolute -right-1 -top-1 hidden size-4 place-items-center rounded-full bg-panel-3 text-dim group-hover:grid hover:text-fail">
                 <X className="size-2.5" />
               </button>

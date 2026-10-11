@@ -15,6 +15,7 @@ import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
 import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger } from '../ui'
 import { TemplateBrowser, TemplateSheet, TemplateStrip } from './Gallery'
+import { confirm } from '../confirm'
 
 const studio = (project: number) => `/dashboard/studio?project=${project}`
 
@@ -400,7 +401,7 @@ export function LabProjects() {
             <button
               type="button"
               onClick={async () => {
-                if (!window.confirm(`Delete “${p.name}”? What it made stays in the gallery.`)) return
+                if (!(await confirm({ title: `Delete “${p.name}”?`, body: 'What it made stays in the gallery.', action: 'Delete', danger: true }))) return
                 await api(`/projects/${p.id}`, { method: 'DELETE' }).catch(() => toast('It couldn’t be deleted.'))
                 invalidate()
               }}

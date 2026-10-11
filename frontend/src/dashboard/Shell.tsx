@@ -40,6 +40,8 @@ import { firstName, fmtRelative, postState, titleOf, useApi, type Overview } fro
 import { covers, NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, VIEWS, type NavItem } from './nav'
 import { useToast } from './toast'
 import { Avatar, Kbd, Menu, Platforms, StateBadge } from './ui'
+import { ConfirmHost } from './confirm'
+import { Tips } from './Tips'
 
 export { pageLabel }
 
@@ -125,6 +127,8 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="isolate min-h-dvh bg-ink text-fg" style={{ '--sidebar-w': rail ? '64px' : '248px' } as CSSProperties}>
         {/* The wash the glass sits on: fixed, behind everything, tinted by the palette. */}
         <div aria-hidden className="glass-ambient pointer-events-none fixed inset-0 -z-10" />
+        <Tips />
+        <ConfirmHost />
         <aside className="glass-chrome fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] overflow-hidden border-r border-white/[0.09] transition-[width] duration-300 ease-expo lg:block">
           <Sidebar overview={overview.data} rail={rail} />
         </aside>

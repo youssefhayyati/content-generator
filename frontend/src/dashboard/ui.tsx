@@ -123,7 +123,7 @@ type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const BTN_VARIANT = {
   primary: 'bg-fg text-ink hover:bg-white hover:shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_20%,transparent)] disabled:bg-fg/50',
-  ghost: 'border border-line-2 text-fg hover:border-white/30 hover:bg-white/[0.04] disabled:text-dim',
+  ghost: 'glass-control border border-line-2 text-fg hover:border-white/30 hover:bg-white/[0.1] disabled:text-dim',
   subtle: 'text-muted hover:bg-white/[0.05] hover:text-fg disabled:text-dim',
   danger: 'border border-fail/30 text-fail hover:bg-fail/10 disabled:opacity-50',
 }
@@ -152,7 +152,7 @@ export function Btn({ variant = 'ghost', size = 'md', icon: Icon, loading, child
 }
 
 export { inputClass } from './field'
-export { DateInput, DateTimeInput, Popover, Select, TimeInput } from './pickers'
+export { ColorInput, DateInput, DateTimeInput, Popover, Select, TimeInput } from './pickers'
 
 export function FieldError({ message }: { message: string | null | undefined }) {
   return (
@@ -191,7 +191,7 @@ export function Segmented<T extends string | number>({
   label: string
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cn('flex rounded-md border border-line p-0.5 text-[12px]', className)}>
+    <div role="radiogroup" aria-label={label} className={cn('glass-control flex rounded-lg border border-line p-0.5 text-[12px]', className)}>
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -200,14 +200,14 @@ export function Segmented<T extends string | number>({
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'relative flex items-center gap-1.5 rounded-[5px] px-3 py-1.5 transition-colors',
+            'relative flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 transition-colors',
             value === o.value ? 'text-fg' : 'text-dim hover:text-muted',
           )}
         >
           {value === o.value && (
             <motion.span
               layoutId={`seg-${id}`}
-              className="absolute inset-0 rounded-[5px] bg-white/[0.08]"
+              className="absolute inset-0 rounded-[6px] bg-white/[0.16] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.2),0_1px_4px_rgb(0_0_0_/_0.35)]"
               transition={{ type: 'spring', stiffness: 500, damping: 40 }}
             />
           )}

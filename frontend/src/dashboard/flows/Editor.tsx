@@ -12,6 +12,7 @@ import { Board } from './Board'
 import { defaults, Inspector } from './Inspector'
 import { COLUMN, GROUP_HUE, hueOf, iconOf, NODE_H, NODE_W, ROW, uid } from './look'
 import { RunDetail, RunList } from './Runs'
+import { confirm } from '../confirm'
 
 /** How long each step of a replay takes to light up. */
 const STEP_MS = 420
@@ -205,7 +206,7 @@ export function FlowEditor({ id, runParam, born }: { id: number; runParam: numbe
   }
 
   const destroy = async () => {
-    if (!window.confirm(`Delete “${name}” and its run history?`)) return
+    if (!(await confirm({ title: `Delete “${name}”?`, body: 'The flow and its run history go with it. This can’t be undone.', action: 'Delete', danger: true }))) return
     await api(`/flows/${id}`, { method: 'DELETE' })
     invalidate()
     toast('Flow deleted.')
