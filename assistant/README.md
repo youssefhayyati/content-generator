@@ -397,7 +397,12 @@ With VoiceStudio (`VOICESTUDIO_URL`), each video is read by the voice that suits
   counts towards the fit. The description is asked once per content, so asking again costs nothing.
 - **Asked for:** `make_video`'s `voice` is a description ("upbeat young woman for an ad"), a voice id
   (`find_voices` lists the ones that fit a description), or "mine" for the assistant's own voice.
-- **Kept:** the voice goes into the video's recipe, so making the video again uses it until it's changed.
+- **Language:** `make_video`'s `language` is the one the lines are written in, sent to VoiceStudio so
+  any voice speaks it with its accent. OmniVoice speaks 600+ (`/engines/tts`), far more than the catalog
+  labels: "Darija" is `moroccan arabic`, "Arabic" is `standard arabic`. Without it OmniVoice guesses
+  from the text, and Darija comes out as standard Arabic.
+- **Kept:** the voice and its language go into the video's recipe, so making the video again uses them
+  until they're changed.
 
 On the page, the **Voice** row of the Video section shows who reads it, with a sample to hear.
 **Change** lists the voices that suit the post (with the description they were matched to), or the

@@ -629,7 +629,7 @@ class StudioSession:
                                   captions, motion, placement, color, moods, compose is not None, songs, song)
         except StudioError as exc:
             return {"error": str(exc)}
-        recipe["voice"] = {k: voice.get(k) for k in ("id", "name", "description", "language", "archetype")}
+        recipe["voice"] = {k: voice.get(k) for k in ("id", "name", "description", "language", "archetype", "speaks")}
         # The pictures it's made of stay with it: to make it again, and to go back to them
         recipe["source"] = {"placement": source.placement, "aspect": source.aspect,
                             "slides": _slides_out(source.slides), "palettes": source.palettes}

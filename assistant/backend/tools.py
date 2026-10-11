@@ -541,15 +541,20 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
                                                        "closest voice is used), a voice id from find_voices, or "
                                                        "'mine' for the voice you speak in. Leave out to keep the last "
                                                        "video's voice; the first video gets one cast for the post"},
+            "language": {"type": "string", "description": "The language the lines are written in, when it isn't "
+                                                          "English, e.g. 'Moroccan Arabic' for Darija, 'Egyptian "
+                                                          "Arabic', 'French'. Any voice speaks it, with that "
+                                                          "language's accent. Leave out to keep the last video's; "
+                                                          "empty to have it guessed from the lines"},
         },
     },
 )
 async def make_video(session, draft: int | None = None, lines: list | None = None, cta: str | None = None,
                      cta_line: str | None = None, music: str | None = None, captions: bool | None = None,
                      motion: str | None = None, placement: str | None = None, color: str | None = None,
-                     voice: str | None = None):
+                     voice: str | None = None, language: str | None = None):
     return await session.make_video(draft, lines=lines, cta=cta, cta_line=cta_line, music=music, captions=captions,
-                                    motion=motion, placement=placement, color=color, voice=voice)
+                                    motion=motion, placement=placement, color=color, voice=voice, language=language)
 
 
 @tool(
@@ -572,9 +577,21 @@ async def find_voices(session, description: str, language: str = ""):
     if not tts.choosable:
         return {"voices": await asyncio.to_thread(tts.profiles),
                 "note": "these are all the voices (no VoiceStudio server): its own and the ones cloned here"}
-    found = await asyncio.to_thread(tts.match, description, language, 8)
-    return {"voices": [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found],
-            "note": "pass a voice's id as make_video's voice"}
+    _, _, labelled = await asyncio.to_thread(tts.catalog)
+    known = next((lang for lang in labelled if lang.lower() == language.strip().lower()), "")
+    found = await asyncio.to_thread(tts.match, description, known, 8)
+    voices = [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found]
+    if language.strip() and not known:
+        # No voice is labelled with it, but every voice speaks it: searching again finds nothing more
+        try:
+            speaks = await asyncio.to_thread(tts.language, language)
+        except ValueError as exc:
+            return {"voices": voices, "error": str(exc)}
+        return {"voices": voices,
+                "note": f"any of these voices speaks {speaks}: write the lines in it and pass a voice's id as "
+                        f"make_video's voice and '{speaks}' as its language. For a native speaker's own voice, "
+                        f"the user can record one and clone it (clone_voice). Don't search again"}
+    return {"voices": voices, "note": "pass a voice's id as make_video's voice"}
 
 
 @tool(

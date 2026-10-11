@@ -969,7 +969,7 @@ class VoiceSession:
     # last version had, else one cast for the post (the LLM describes the voice that suits it, and
     # the voice that fits that description best is used). The assistant keeps speaking in self.voice.
 
-    async def make_video(self, draft=None, voice=None, **asked) -> dict:
+    async def make_video(self, draft=None, voice=None, language=None, **asked) -> dict:
         """make_video in the video's voice, over a song written for it (ACE-Step) or FlowAI Sound's
         composer, whichever is there."""
         songs, song = self.m.music, ""
@@ -987,11 +987,19 @@ class VoiceSession:
                 chosen = await asyncio.to_thread(self.find_voice, before)
             else:
                 chosen = await self.cast_voice(source, asked.get("lines"))
+            # The language its lines are in, kept with the voice: asked for, else the last video's
+            speaks = (before or {}).get("speaks") or ""
+            if language is not None:
+                try:
+                    speaks = await asyncio.to_thread(self.m.tts.language, language) if language.strip() else ""
+                except ValueError as exc:  # not one it speaks: the close ones
+                    raise StudioError(str(exc)) from exc
         except StudioError as exc:
             return {"error": str(exc)}
         except Exception as exc:  # the voice server: the video is still made, in the assistant's voice
             log.warning("no voice of its own for the video: %s", exc)
-            chosen = self.voice
+            chosen, speaks = self.voice, ""
+        chosen = {**chosen, "speaks": speaks}
         tts, speaker = self.m.tts, chosen["id"]
 
         def compose(recipe: dict, seconds: float, progress=None) -> bytes | None:  # in the render's thread
@@ -1015,7 +1023,7 @@ class VoiceSession:
                 return None
 
         return await self.studio.make_video(draft, **asked, voice=chosen,
-                                            speak=lambda text: tts.synthesize(text, speaker),
+                                            speak=lambda text: tts.synthesize(text, speaker, language=speaks),
                                             compose=compose if settings.sound_url or songs else None,
                                             moods=tuple(reel.MOODS), songs=songs is not None, song=song)
 
@@ -1439,12 +1447,14 @@ class VoiceSession:
                   (set() if self.m.lipsync else tools.LIPSYNC_TOOLS) | \
                   (set() if self.m.faceswap else tools.FACESWAP_TOOLS)
         try:
-            for _ in range(settings.llm_max_tool_rounds):
+            for n in range(settings.llm_max_tool_rounds):
                 if self.mode != mode:  # it switched (set_mode): the rest of the reply works the new way
                     mode = self.mode
                     system = {"role": "system", "content": self.system_prompt()}
                 tool_list = tools.schemas(exclude | ({"load_skill"} if self.skills_inline else set())
                                           | (tools.DRAFT_TOOLS if mode == "canvas" else tools.CANVAS_TOOLS))
+                if n == settings.llm_max_tool_rounds - 1:  # the last round has no tools: it answers in words
+                    tool_list = []
                 content, calls, chunker = "", [], SentenceChunker()
                 rounds += 1
                 try:
