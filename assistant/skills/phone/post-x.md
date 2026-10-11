@@ -37,9 +37,12 @@ Text:
    doubled, fix it before going on.
 7. Tap "Post" (top right). If a pop-up appears (e.g. about who can reply, or a premium offer), close it in the
    way that still posts.
-8. Wait until the compose screen closes and the timeline shows "Your post was sent" or your new post, and
-   stop on that screen: your last screenshot is kept as the proof that it is up. Only if you can't tell, open
-   your profile and look at the newest post.
+8. Wait until the compose screen closes and the timeline shows "Your post was sent" or your new post.
+9. Then show it is up, on your own profile (the "sent" message goes in a few seconds): tap your profile picture
+   at the top left, then "Profile". Your new post is the first under "Posts" (below a "Pinned" one, if there is
+   one). Check it starts with the text's first words, and stop there with it on screen: your last screenshot is
+   kept as the proof that it is up. If it isn't there yet, wait a few seconds and pull down to refresh; never
+   post it a second time.
 
 Report in one or two sentences whether the post is now published, or exactly where it stopped and what the
 screen said.

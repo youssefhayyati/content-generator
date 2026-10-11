@@ -30,8 +30,11 @@ Caption:
    shares the reel ("Share", "Not now").
 9. Wait until the upload has finished (the progress bar at the top of the feed disappears or says posted).
    If it says it couldn't post, tap retry once.
-10. Stop on a screen that shows the reel is up (the feed with "Posted" or the new reel): your last screenshot
-   is kept as the proof. Only if you can't tell, open your profile's Reels tab and look at the newest one.
+10. Then show it is up, on your own profile (the "Done posting" message goes in a few seconds, and the Reels
+   feed then plays other people's reels): tap your profile picture at the far right of the bottom bar, open the
+   Reels tab (the film icon above the grid) and tap the newest reel, top left. Check its caption starts with the
+   caption's first words, and stop there, with it open: your last screenshot is kept as the proof. If it isn't
+   there yet, wait a few seconds and look again (pull down to refresh); never post it a second time.
 
 Report in one or two sentences whether the reel is now published, or exactly where it stopped and what the
 screen said.
