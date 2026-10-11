@@ -41,6 +41,23 @@ class LimitAssistantToken
         'PATCH api/campaigns/{campaign}/items/{item}',
         'PUT api/campaigns/{campaign}/items/{item}/media',
         'PATCH api/campaigns/{campaign}/variants/{variant}',
+        // Creative Lab: the assistant builds and runs graphs like the person does. A Post node it runs
+        // only ever saves a draft, and recording permission to use a video stays the person's.
+        'GET api/lab/catalog',
+        'GET api/lab/voices',
+        'GET api/projects',
+        'GET api/projects/{project}',
+        'POST api/lab/projects',
+        'GET api/projects/{project}/lab',
+        'GET api/projects/{project}/lab/state',
+        'POST api/projects/{project}/lab/ops',
+        'GET api/projects/{project}/lab/nodes/{node}/plan',
+        'GET api/projects/{project}/lab/nodes/{node}/history',
+        'POST api/projects/{project}/lab/nodes/{node}/run',
+        'POST api/projects/{project}/lab/nodes/{node}/stop',
+        'POST api/projects/{project}/lab/run-all',
+        'POST api/lab/youtube/inspect',
+        'GET api/lab/youtube/{source}',
     ];
 
     public function handle(Request $request, Closure $next): Response

@@ -12,10 +12,13 @@ use Illuminate\Support\Collection;
  * be retried, sent to another model, or rerun with an edited prompt: each makes a new
  * generation that points back at it (`retry_of`).
  */
-#[Fillable(['project_id', 'campaign_item_id', 'shot', 'kind', 'model', 'prompt', 'params', 'input_asset_ids', 'status', 'external_id', 'status_url', 'output_text', 'output_asset_ids', 'error', 'retry_of', 'recipe', 'recipe_step', 'parent_id', 'cost', 'started_at', 'finished_at'])]
+#[Fillable(['project_id', 'campaign_item_id', 'shot', 'kind', 'model', 'prompt', 'params', 'input_asset_ids', 'status', 'external_id', 'status_url', 'output_text', 'output_asset_ids', 'error', 'retry_of', 'recipe', 'recipe_step', 'parent_id', 'cost', 'started_at', 'finished_at', 'node_run_id'])]
 class Generation extends Model
 {
     public const KINDS = ['text', 'image', 'video', 'voice', 'music', 'reel'];
+
+    /** Made for Creative Lab nodes only, on the assistant's engine: never offered by the plain generators. */
+    public const ENGINE_KINDS = ['edit', 'swap', 'dub', 'design', 'slideshow', 'retouch', 'song'];
 
     /**
      * Get the attributes that should be cast.
@@ -50,6 +53,14 @@ class Generation extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class);
+    }
+
+    /**
+     * @return BelongsTo<NodeRun, $this>
+     */
+    public function nodeRun(): BelongsTo
+    {
+        return $this->belongsTo(NodeRun::class);
     }
 
     public function isFinished(): bool

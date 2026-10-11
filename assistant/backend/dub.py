@@ -8,13 +8,12 @@ A dub makes a video say new words in its speaker's own voice, with lips that mat
    A read that still runs long is sped up a little to fit.
    A shorter one is padded with silence, so the whole video stays.
 3. A lip-sync model redraws the mouth to match the new speech: LatentSync, a service of its own
-   (lipsync.py; content-generator/lipsync/). It works at 25 frames a second, so the video goes
+   (podjobs.py; content-generator/runpod/lipsync/). It works at 25 frames a second, so the video goes
    there at that rate.
 4. If the video comes back without sound, the new speech is laid under it.
 
-A face swap (the ComfyUI pod's face_swap and face_swap_video workflows: ReActor with
-inswapper_128.onnx) needs nothing here but a smaller copy of a big video, since the pod holds every
-frame in memory.
+A face swap (the pod's face swap service: inswapper_128 in ONNX, podjobs.py) needs nothing here but a
+smaller copy of a big video.
 """
 
 import io
@@ -27,9 +26,6 @@ import numpy as np
 
 from .comfyui import ComfyError
 from .reel import ffmpeg, probe
-
-FACE_SWAP = "face_swap"
-FACE_SWAP_VIDEO = "face_swap_video"
 
 RATE = 24000  # the TTS's
 LIPSYNC_FPS = 25  # what LatentSync is trained at
@@ -45,7 +41,10 @@ class DubError(ComfyError):
 
 
 def _run(cmd: list[str], what: str) -> bytes:
-    proc = subprocess.run(cmd, capture_output=True, timeout=600)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        raise DubError(f"{what} took over ten minutes") from None
     if proc.returncode != 0:
         err = proc.stderr.decode(errors="replace").strip()
         raise DubError(f"{what} failed: {err.splitlines()[-1] if err else 'no output'}")

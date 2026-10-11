@@ -192,7 +192,10 @@ export type FontList = { styles: Array<{ id: string; label: string }>; fonts: Fo
 export type CurrentConversation = { id: string; title: string; kept: boolean; campaign: { id: number; name: string; stage: string } | null }
 /** A numbered picture or video in the conversation. */
 export type Picture = { id: number; kind: 'image' | 'video'; name: string; source: string; url: string; workflow: string; prompt: string }
-export type Job = { id: number; label: string; started: number; status: string; text: string }
+/** A picture, video, dub or face swap being made: where it is now (stage, its detail in text, share done 0..1 when
+ * known) and the stages it went through, each with when it began (ms). status: running, failed, or done for a moment. */
+export type Job = { id: number; label: string; started: number; status: string; text: string; stage: string; share: number | null; log: JobStage[] }
+export type JobStage = { at: number; text: string }
 export type AssistantAccount = { id: number; platform: 'instagram' | 'x'; handle: string; label: string; name: string | null }
 /** What the person selected on screen: "this", "it". */
 export type Focus = { draft?: number; slide?: number; text?: number }
@@ -557,15 +560,25 @@ function onEvent(s: State, m: AssistantEvent): State {
       if (m.kind === 'install') return s
       const id = Number(m.id)
       const before = s.jobs[id]
+      const share = typeof m.share === 'number' ? m.share : null
       if (m.status === 'started') {
         const started = Date.now() - Number(m.seconds ?? 0) * 1000 // still going in a conversation just reopened
         const label = String(m.label || (m.makes === 'video' ? 'Making the video' : 'Making the picture'))
-        return { ...s, jobs: { ...s.jobs, [id]: { id, label, started, status: 'running', text: '' } } }
+        const log = ((m.log as Array<{ at: number; stage: string }> | undefined) ?? []).map((l) => ({ at: started + Number(l.at) * 1000, text: String(l.stage) }))
+        return { ...s, jobs: { ...s.jobs, [id]: { id, label, started, status: 'running', text: String(m.text ?? ''), stage: String(m.stage ?? ''), share, log } } }
       }
       if (!before) return s
       const jobs = { ...s.jobs }
-      if (m.status === 'done' || m.status === 'cancelled') delete jobs[id]
-      else jobs[id] = { ...before, status: String(m.status), text: String(m.text ?? '') }
+      if (m.status === 'cancelled') delete jobs[id]
+      else if (m.status === 'done') jobs[id] = { ...before, status: 'done', share: 1, text: String(m.text ?? '') } // shown done for a moment
+      else if (m.status === 'failed') jobs[id] = { ...before, status: 'failed', text: String(m.text ?? '') }
+      else {
+        // A new stage starts a new line of its log
+        const stage = String(m.stage ?? '')
+        const at = typeof m.at === 'number' ? before.started + m.at * 1000 : Date.now()
+        const log = stage && before.log[before.log.length - 1]?.text !== stage ? [...before.log, { at, text: stage }] : before.log
+        jobs[id] = { ...before, status: 'running', text: String(m.text ?? ''), stage: stage || before.stage, share, log }
+      }
       return { ...s, jobs }
     }
     case 'draft': {
@@ -651,6 +664,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   start: () => void
   /** A new conversation; with a campaign, that FlowAI campaign's posts in it as drafts. */
   newConversation: (campaign?: number) => void
+  /** A new conversation that opens with the assistant asking what to make (Creative Lab's New post, no campaign questions). */
+  newPost: () => void
   openConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   deleteConversation: (id: string) => void
@@ -693,6 +708,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   generation: boolean
   /** Videos can be dubbed (the lip sync service is set up). */
   dubbing: boolean
+  /** Faces can be swapped (the face swap service is set up). */
+  faceswap: boolean
   /** Text waiting in the composer, so other parts of the page can start a sentence. */
   input: string
   setInput: (text: string) => void
@@ -779,6 +796,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [booking, setBooking] = useState<number[]>([])
   const [generation, setGeneration] = useState(false)
   const [dubbing, setDubbing] = useState(false)
+  const [faceswap, setFaceswap] = useState(false)
   const wanted = useRef(false)
   const connecting = useRef(false)
   /** The assistant's FlowAI session, kept for reconnects until it nearly runs out. */
@@ -826,11 +844,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       retry.current = 0
       fetch(`${ASSISTANT_BASE}health`)
         .then((r) => r.json())
-        .then((h: { comfyui?: string; lipsync?: string }) => {
+        .then((h: { comfyui?: string; lipsync?: string; faceswap?: string }) => {
           setGeneration(!!h.comfyui?.startsWith('ok'))
           setDubbing(!!h.lipsync && h.lipsync !== 'off') // still downloading its model: a dub says so
+          setFaceswap(!!h.faceswap && h.faceswap !== 'off')
         })
-        .catch(() => (setGeneration(false), setDubbing(false)))
+        .catch(() => (setGeneration(false), setDubbing(false), setFaceswap(false)))
     } catch {
       dispatch({ type: 'conn', conn: 'offline' })
       if (wanted.current) {
@@ -875,6 +894,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
             queued.current = null
           }
           break
+        case 'lab_open':
+          // The assistant made a Creative Lab project: show it (Dashboard listens and navigates).
+          window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: `/dashboard/studio?project=${Number(m.project)}` }))
+          break
         case 'conversation':
           conversation.current = String(m.id)
           autoApprove.current.clear()
@@ -906,7 +929,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           break
         }
         case 'media_job':
-          if (m.status === 'failed') window.setTimeout(() => dispatch({ type: 'job-expired', id: Number(m.id) }), 8000)
+          if (m.status === 'failed' || m.status === 'done') window.setTimeout(() => dispatch({ type: 'job-expired', id: Number(m.id) }), m.status === 'done' ? 4000 : 8000)
           break
       }
     },
@@ -1029,6 +1052,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       link,
       start,
       newConversation: (campaign) => switchTo({ type: 'new', ...(campaign ? { campaign } : {}) }),
+      newPost: () => switchTo({ type: 'new', quick: true }),
       openConversation: (id) => id !== conversation.current && switchTo({ type: 'open', id }),
       renameConversation: (id, title) => link.send({ type: 'rename', id, title }),
       deleteConversation: (id) => {
@@ -1096,6 +1120,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       generation,
       dubbing,
+      faceswap,
       input,
       setInput,
       inputRef,
@@ -1115,7 +1140,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       booking,
     }),
-    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.phoneDriver, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation, dubbing],
+    [state.conn, state.conversation, state.conversations, state.kept, state.switching, state.drafts, state.current, state.saved, state.linked, state.approvals, state.pictures, state.jobs, state.phone, state.phoneLive, state.phoneDriver, state.accounts, state.flowaiError, state.focus, state.painting, state.tab, state.voice, state.voices, state.voicePending, state.sample, state.videoVoices, state.fonts, state.songs, link, start, switchTo, refreshConversations, findVoices, findVideoVoices, say, action, select, toggleMic, approve, input, micOn, speech, bargeIn, booking, generation, dubbing, faceswap],
   )
 
   return (

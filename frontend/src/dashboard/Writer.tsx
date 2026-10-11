@@ -14,6 +14,7 @@ import { FieldError, Menu, Skeleton } from './ui'
 /** Mirrors App\Services\Ai\PostPrompt::TONES on the API. */
 const TONES = ['professional', 'friendly', 'bold', 'playful'] as const
 type Tone = (typeof TONES)[number]
+const asTone = (t: string | null | undefined): Tone | null => (TONES as readonly string[]).includes(t ?? '') ? (t as Tone) : null
 
 /** One-click briefs once there's a draft to work on. */
 const REWRITES = ['Make it shorter', 'Stronger opening line', 'Add a call to action', 'Tighten the wording']
@@ -35,24 +36,35 @@ type Props = {
   platforms: PlatformId[]
   /** True while text is streaming into the body, so the editor can hold still. */
   onWriting: (writing: boolean) => void
+  /** A brief (and tone) to start from, from a showcase case or an example. A new object refills it. */
+  seed?: { brief: string; tone: string | null; model?: string | null } | null
 }
 
 /**
  * Asks Claude for the post: a fresh one from a brief when the editor is empty, or a rewrite
  * of what's there. The text streams straight into the editor, and the result can be undone.
  */
-export function Writer({ body, onBody, format, platforms, onWriting }: Props) {
+export function Writer({ body, onBody, format, platforms, onWriting, seed }: Props) {
   const user = useUser()
   const { data: options, error: optionsError } = useApi<AiOptions>('/ai')
-  const [brief, setBrief] = useState('')
-  const [tone, setTone] = useState<Tone | null>(null)
-  const [model, setModel] = useState<string | null>(null)
+  const [brief, setBrief] = useState(seed?.brief ?? '')
+  const [tone, setTone] = useState<Tone | null>(asTone(seed?.tone))
+  const [model, setModel] = useState<string | null>(seed?.model ?? null)
   // The body as it was when the current request started; null when nothing is running.
   const [job, setJob] = useState<{ before: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null)
   const controller = useRef<AbortController | null>(null)
   const stopped = useRef(false)
+
+  useEffect(() => {
+    if (!seed) return
+    setBrief(seed.brief)
+    setTone(asTone(seed.tone))
+    // A model this studio can't run falls back to the default below (activeModel).
+    if (seed.model) setModel(seed.model)
+    setError(null)
+  }, [seed])
 
   // Leaving the page cancels a request in flight.
   useEffect(() => () => controller.current?.abort(), [])

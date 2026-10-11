@@ -25,6 +25,8 @@ class RegisteredUserController extends Controller
             'preferences' => [
                 'platforms' => $request->input('platforms', []),
                 'formats' => $request->input('formats', []),
+                // Accounts made before onboarding existed have no key, and count as done.
+                'onboarding' => 'pending',
             ],
         ]);
 

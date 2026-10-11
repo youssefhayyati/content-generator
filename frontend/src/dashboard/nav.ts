@@ -6,6 +6,7 @@ import {
   Cpu,
   ChartColumn,
   Flame,
+  GalleryVerticalEnd,
   FolderOpen,
   Inbox,
   LayoutGrid,
@@ -41,7 +42,7 @@ export type NavGroup = { label: string | null; items: NavItem[] }
 
 export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
 
-/** The studio's pages, in the order the sidebar shows them. Page numbers follow this order. */
+/** The studio's pages, in the order the sidebar shows them. */
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: null,
@@ -55,12 +56,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Create',
     items: [
-      { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
+      // Everything that makes content lives here now: nodes on a canvas, the assistant beside them.
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
+      // Highlights from a link: not a canvas node yet, so it keeps its own page.
       { path: '/dashboard/clips', label: 'Highlights', icon: Clapperboard },
-      { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
-      { path: '/dashboard/create', label: 'Composer', icon: PenLine },
-      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
     ],
   },
   {
@@ -97,7 +96,19 @@ export const NAV_GROUPS: NavGroup[] = [
 /** Every page, Settings included. */
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
-export const pageLabel = (path: string) => NAV.find((n) => n.path === path)?.label ?? 'Overview'
+/**
+ * Pages kept off the sidebar since Creative Lab took in everything that makes content; still opened
+ * from links (a campaign's gates, a post in the composer, the showcase), so they keep their titles.
+ */
+export const OFF_NAV: NavItem[] = [
+  { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
+  { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
+  { path: '/dashboard/create', label: 'Composer', icon: PenLine },
+  { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
+  { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
+]
 
-/** "04" for the fourth page in the sidebar: the number in each page's header. */
-export const pageIndex = (path: string) => String(Math.max(1, NAV.findIndex((n) => n.path === path) + 1)).padStart(2, '0')
+/** Where every "New post" goes, from anywhere: Creative Lab, which starts with the brief. */
+export const NEW_POST = '/dashboard/studio'
+
+export const pageLabel = (path: string) => [...NAV, ...OFF_NAV].find((n) => n.path === path)?.label ?? 'Overview'

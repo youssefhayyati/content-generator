@@ -465,6 +465,18 @@ class StudioSession:
             reply.update(draft=d.id, slide=n, note="the result goes into the draft by itself when it is ready")
         return reply
 
+    def slide_media(self, ref=None, slide=None) -> tuple[int, int, int]:
+        """A slide's picture or video, to change it elsewhere (a face swap): (draft, slide, its media number)."""
+        d = self.get(ref)
+        n = 1 if slide in (None, "") else _number(slide)
+        if not n or n > len(d.slides) or d.slides[n - 1].media is None:
+            raise StudioError(f"slide {slide or 1} of draft {d.id} has no picture or video")
+        return d.id, n, d.slides[n - 1].media
+
+    def into_slide(self, draft_id: int, n: int):
+        """What puts a result made elsewhere on that slide, once made (MediaJob.then)."""
+        return lambda items: self._made(draft_id, n, items)
+
     async def _made(self, draft_id: int, n: int, items: list["MediaItem"]) -> str:
         """A generation for a draft finished: put it on its slide. Returns a sentence for the assistant."""
         d = self.drafts.get(draft_id)
@@ -608,9 +620,9 @@ class StudioSession:
                          moods=(), songs=False, song="") -> dict:
         """The draft's pictures as a video, its lines read in `voice` (the video's own: session.py picks
         it). It goes into a draft of its own; asked again (of either draft), that same video draft is made
-        again with the changes. speak(text) -> 24 kHz audio in that voice; compose(recipe, seconds) -> WAV
-        bytes or None: the recipe's song (songs: a music model is there; song: the music that suits the
-        post, described) or mood (FlowAI Sound's composer)."""
+        again with the changes. speak(text) -> 24 kHz audio in that voice; compose(recipe, seconds, progress)
+        -> WAV bytes or None: the recipe's song (songs: a music model is there; song: the music that suits the
+        post, described) or mood (FlowAI Sound's composer); progress(share) says how much of a song is made."""
         try:
             source, target = self.video_drafts(ref)
             recipe = self._recipe(source, self.recipe_of(target), lines, cta, cta_line, music,
@@ -634,8 +646,14 @@ class StudioSession:
 
         def work(progress) -> tuple[bytes, str, dict]:  # in a thread
             shots = []
+            song = bool(recipe["music"] and compose)
+            frames_from = 0.3 if song and recipe["music"] == "song" else 0.15  # a song takes a while to write
+            progress(0, f"reading the lines in {voice['name']}’s voice")
             for i, (slide, path, line) in enumerate(zip(slides, pictures, recipe["lines"])):
-                picture = Image.open(path).convert("RGB") if path else None
+                picture = None
+                if path:
+                    with Image.open(path) as src:  # closed again: a long video otherwise keeps every file open
+                        picture = src.convert("RGB")
                 overlay = reel.layer(size, lambda img, sl=slide: self._draw_texts(img, sl, fonts, safe)[0]) \
                     if slide.texts else None
                 # A shot per sentence, each moving its own way: one picture still looks filmed
@@ -653,10 +671,15 @@ class StudioSession:
             if seconds > most:
                 raise StudioError(f"the voiceover makes it {seconds:.0f} seconds, and {platforms.label(platform, where)} "
                                   f"takes up to {most:g}; shorter lines would fit")
-            tune = compose(recipe, seconds + 1) if recipe["music"] and compose else None
+            tune = None
+            if song:
+                progress(0.12, "writing the song" if recipe["music"] == "song" else "adding the music")
+                tune = compose(recipe, seconds + 1, lambda share: progress(
+                    0.12 + (frames_from - 0.12) * share, detail=f"{round(share * 100)}%"))
             look = reel.Look(size, fonts["bold"].path if "bold" in fonts else None, background, recipe["captions"],
                              accent, safe)
-            data, meta = reel.render(shots, look, tune, lambda share: progress(0.15 + 0.85 * share))
+            progress(frames_from, "putting the video together")
+            data, meta = reel.render(shots, look, tune, lambda share: progress(frames_from + (1 - frames_from) * share))
             return data, f"video-draft{source.id}.mp4", meta
 
         async def placed(items: list["MediaItem"]) -> str:
@@ -673,7 +696,7 @@ class StudioSession:
                          voice=f"{voice['name']} ({voice['description']})" if voice.get("description") else voice["name"],
                          music=f"a song: {recipe['song']}" if recipe["music"] == "song" else recipe["music"] or "none",
                          expected_time=f"about {max(15, said // 12)} seconds",
-                         note="it is made in the background and shown when ready; you'll be told")
+                         note="it is made in the background, its progress live on screen, and shown when ready; you'll be told")
         return reply
 
     def _recipe(self, source: Draft, recipe: dict, lines, cta, cta_line, music, captions, motion, placement,

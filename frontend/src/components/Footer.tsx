@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
 import { motion, useReducedMotion, useScroll, useTransform, type MotionValue } from 'framer-motion'
 import { ArrowUp } from 'lucide-react'
+import { queueSection, useLinkClick, useRouter } from '../lib/router'
 import { Logo } from './ui/Logo'
 
 const REPO = 'https://github.com/youssefhayyati/content-generator'
@@ -10,6 +11,7 @@ const COLUMNS: Array<{ title: string; links: Array<[label: string, href: string]
   {
     title: 'Product',
     links: [
+      ['Showcase', '/showcase'],
       ['Features', '#features'],
       ['Automations', '#automations'],
       ['Platforms', '#platforms'],
@@ -27,9 +29,9 @@ const COLUMNS: Array<{ title: string; links: Array<[label: string, href: string]
   {
     title: 'Legal',
     links: [
-      ['Privacy', '#resources'],
-      ['Terms', '#resources'],
-      ['Cookies', '#resources'],
+      ['Privacy', '/privacy'],
+      ['Terms', '/terms'],
+      ['Cookies', '/cookies'],
     ],
   },
 ]
@@ -59,14 +61,7 @@ export function Footer() {
                 <ul className="mt-4 space-y-2.5">
                   {c.links.map(([l, href]) => (
                     <li key={l}>
-                      <a
-                        href={href}
-                        {...(href.startsWith('http') ? { target: '_blank', rel: 'noreferrer' } : {})}
-                        className="group relative text-[14px] text-muted transition-colors hover:text-fg"
-                      >
-                        {l}
-                        <span className="absolute -bottom-0.5 left-0 h-px w-full origin-right scale-x-0 bg-current transition-transform duration-500 ease-expo group-hover:origin-left group-hover:scale-x-100" />
-                      </a>
+                      <FooterLink href={href}>{l}</FooterLink>
                     </li>
                   ))}
                 </ul>
@@ -86,6 +81,29 @@ export function Footer() {
 
       <Wordmark y={wordY} />
     </footer>
+  )
+}
+
+/** Pages open in the app, sections scroll (from another page: go home first), outside links get a new tab. */
+function FooterLink({ href, children }: { href: string; children: ReactNode }) {
+  const { path, navigate } = useRouter()
+  const page = useLinkClick(href)
+  const away = href.startsWith('#') && path !== '/'
+  const section = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    queueSection(href)
+    navigate('/')
+  }
+  return (
+    <a
+      href={away ? `/${href}` : href}
+      onClick={away ? section : page}
+      {...(href.startsWith('http') ? { target: '_blank', rel: 'noreferrer' } : {})}
+      className="group relative text-[14px] text-muted transition-colors hover:text-fg"
+    >
+      {children}
+      <span className="absolute -bottom-0.5 left-0 h-px w-full origin-right scale-x-0 bg-current transition-transform duration-500 ease-expo group-hover:origin-left group-hover:scale-x-100" />
+    </a>
   )
 }
 

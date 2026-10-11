@@ -50,6 +50,7 @@ import {
   type Overview as OverviewData,
 } from '../data'
 import { AssetModal, fmtSeconds } from '../media/Media'
+import { NEW_POST } from '../nav'
 import { useOverview, useUser } from '../Shell'
 import { Btn, CountUp, EmptyState, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
 
@@ -61,7 +62,6 @@ export default function Overview() {
   return (
     <div>
       <PageHeader
-        eyebrow="Overview"
         title={
           <>
             {greeting()}, <Serif>{firstName(user.name)}.</Serif>
@@ -73,7 +73,7 @@ export default function Overview() {
             <Btn icon={CalendarDays} onClick={() => navigate('/dashboard/calendar')}>
               Calendar
             </Btn>
-            <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
+            <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
               New post
             </Btn>
           </>
@@ -434,7 +434,7 @@ function Spotlight({ overview, recent }: { overview: OverviewData; recent: Post[
               : 'Give a draft a time, or pick posting times and let the queue fill them.'}
           </p>
           <div className="mt-auto flex flex-wrap gap-2 pt-6">
-            <Btn size="sm" variant="primary" icon={PenLine} onClick={() => navigate(slot ? composeAt(new Date(slot)) : '/dashboard/create')}>
+            <Btn size="sm" variant="primary" icon={PenLine} onClick={() => navigate(slot ? composeAt(new Date(slot)) : NEW_POST)}>
               {slot ? 'Fill that slot' : 'Write a post'}
             </Btn>
             <Btn size="sm" icon={Workflow} onClick={() => navigate('/dashboard/automations')}>
@@ -617,7 +617,7 @@ function WeekCard({ post }: { post: Post }) {
   const { navigate } = useRouter()
   const state = postState(post)
   const cover = coverOf(post)
-  const words = <span className="line-clamp-3 px-2 pr-6 pt-2 text-[11px] leading-snug text-muted">{titleOf(post)}</span>
+  const words = <span className="line-clamp-3 px-2 pt-2 text-[11px] leading-snug text-muted">{titleOf(post)}</span>
   return (
     <motion.button
       type="button"
@@ -628,16 +628,14 @@ function WeekCard({ post }: { post: Post }) {
       transition={{ duration: 0.4, ease }}
       className="group block w-full overflow-hidden rounded-md border border-line bg-panel-2 text-left transition-colors hover:border-line-2"
     >
-      <span className="relative block">
-        {cover ? <Img src={cover} fallback={words} className="aspect-[4/3] w-full object-cover" /> : words}
-        {post.platforms[0] && (
-          <span className="absolute right-1 top-1 grid size-[18px] place-items-center rounded bg-black/60 text-white backdrop-blur">
-            <PlatformIcon id={post.platforms[0]} className="size-2.5" />
-          </span>
-        )}
-      </span>
+      <span className="block">{cover ? <Img src={cover} fallback={words} className="aspect-[4/3] w-full object-cover" /> : words}</span>
+      {/* The platform mark, in its state's colour, leads the time: the title above keeps the card's full width. */}
       <span className="flex items-center gap-1.5 px-2 py-1.5">
-        <span className={cn('size-1.5 shrink-0 rounded-full', STATE[state].dot)} />
+        {post.platforms[0] ? (
+          <PlatformIcon id={post.platforms[0]} className={cn('size-2.5', STATE[state].text)} />
+        ) : (
+          <span className={cn('size-1.5 shrink-0 rounded-full', STATE[state].dot)} />
+        )}
         <span className="truncate whitespace-nowrap text-[10.5px] tabular-nums text-fg">{shortTime.format(new Date(post.scheduled_at!))}</span>
       </span>
     </motion.button>
@@ -1014,8 +1012,8 @@ function GettingStarted({ overview }: { overview: OverviewData }) {
       icon: PenLine,
       title: 'Write your first post',
       body: 'One idea, shaped for every platform you pick.',
-      action: 'Open the composer',
-      to: '/dashboard/create',
+      action: 'Open Creative Lab',
+      to: NEW_POST,
       done: overview.counts.total > 0,
     },
     {
@@ -1061,7 +1059,7 @@ function GettingStarted({ overview }: { overview: OverviewData }) {
             Three steps from an empty workspace to a week of posts that are ready to go.
           </p>
           <div className="mt-7">
-            <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
+            <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
               Write the first post
             </Btn>
           </div>

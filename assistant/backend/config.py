@@ -1,16 +1,19 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
+    # FlowAI's one settings file, the repo's .env (../.env.example); docker compose passes it in as the
+    # environment, which wins over both files. An assistant/.env, if there is one, overrides it.
+    model_config = SettingsConfigDict(env_file=(ROOT.parent / ".env", ROOT / ".env"), extra="ignore")
 
-    # LLM
-    ollama_api_key: str = ""
+    # LLM: the same Ollama Cloud key as FlowAI's (OLLAMA_CLOUD_API_KEY); OLLAMA_API_KEY still works
+    ollama_api_key: str = Field("", validation_alias=AliasChoices("OLLAMA_API_KEY", "OLLAMA_CLOUD_API_KEY"))
     ollama_host: str = "https://ollama.com"
     llm_model: str = "glm-5.3-flash"
     # GLM 5.3 Flash leaks its reasoning into the reply with think=false; "low" keeps it
@@ -47,9 +50,10 @@ class Settings(BaseSettings):
     tts_ref_audio: str = ""
     tts_ref_text: str = ""
     # Speech from a VoiceStudio server instead of this PC's GPU (backend/voicestudio.py), e.g.
-    # https://<pod-id>-8002.proxy.runpod.net. Empty = OmniVoice here, with the settings above
-    tts_url: str = ""
-    tts_api_key: str = ""
+    # https://<pod-id>-8002.proxy.runpod.net: FlowAI's VOICESTUDIO_URL and VOICESTUDIO_KEY (TTS_URL and
+    # TTS_API_KEY, when set, win). Empty = OmniVoice here, with the settings above
+    tts_url: str = Field("", validation_alias=AliasChoices("TTS_URL", "VOICESTUDIO_URL"))
+    tts_api_key: str = Field("", validation_alias=AliasChoices("TTS_API_KEY", "VOICESTUDIO_KEY"))
     # Until the user picks one: a VoiceStudio profile's name or id, or a catalog voice's id; empty = the
     # server's oldest profile. OpenAI names (alloy…) get a new random voice every sentence there
     tts_voice: str = ""
@@ -65,10 +69,10 @@ class Settings(BaseSettings):
     browser_screenshots: bool = True  # send a screenshot to the web UI after each step
     skills_dir: str = "skills"
 
-    # Pictures and videos: the ComfyUI manager API on the RunPod pod (comfyui/API.md)
+    # Pictures and videos: the ComfyUI manager API on the RunPod pod (runpod/comfyui/API.md in content-generator)
     comfyui_url: str = ""  # https://<pod-id>-8000.proxy.runpod.net; empty = off
     comfyui_api_key: str = ""  # MANAGER_API_KEY from comfyui/pod.env
-    comfyui_descriptions: str = "comfyui/descriptions.yaml"  # what each workflow is for
+    comfyui_descriptions: str = "workflows/descriptions.yaml"  # what each workflow is for
     comfyui_timeout_minutes: int = 30  # give up waiting for one generation after this
     media_dir: str = "media"  # generated and attached files, served at /media
     data_dir: str = "data"  # conversations, so they can be reopened (backend/conversations.py); not served
@@ -79,18 +83,25 @@ class Settings(BaseSettings):
     # Music under videos made with make_video (backend/reel.py): FlowAI Sound's composer, e.g.
     # http://sound:8000 next to FlowAI; empty = videos have only the voice
     sound_url: str = ""
-    # Songs written for each video (backend/music.py): an ACE-Step 1.5 API, e.g. http://music:8000 next to
-    # FlowAI (content-generator/music/) or a pod's; empty = only the composer's moods
+    # Songs written for each video (backend/music.py): an ACE-Step 1.5 API, the RunPod pod's (content-generator/
+    # runpod/music/, port 8003), or http://music:8000 next to FlowAI; empty = only the composer's moods
     music_url: str = ""
     music_api_key: str = ""  # its ACESTEP_API_KEY, when it has one
     music_timeout_seconds: int = 300  # the first song also loads the model
-    # Lip sync for dubbed videos (backend/lipsync.py): the LatentSync API, e.g. http://lipsync:8000 next to
-    # FlowAI (content-generator/lipsync/) or a pod's; empty = dubbing is off
+    # Lip sync for dubbed videos (backend/podjobs.py): the LatentSync API, the RunPod pod's (content-generator/
+    # runpod/lipsync/, port 8004), or http://lipsync:8000 next to FlowAI; empty = dubbing is off
     lipsync_url: str = ""
     lipsync_api_key: str = ""  # its LIPSYNC_API_KEY, when it has one
     lipsync_timeout_minutes: int = 30  # the first dub also downloads and loads the model
+    # Face swaps (backend/podjobs.py): inswapper_128 and GFPGAN in ONNX, the RunPod pod's (content-generator/
+    # runpod/faceswap/, port 8005); empty = face swaps are off
+    faceswap_url: str = ""
+    faceswap_api_key: str = ""  # its FACESWAP_API_KEY
+    faceswap_timeout_minutes: int = 20
 
     # FlowAI (content-generator/): where drafts are saved as posts and scheduled (backend/flowai.py)
+    # Creative Lab (FlowAI) sends its nodes' jobs to /engine (engine.py) with this key; empty = no key
+    engine_key: str = ""
     flowai_url: str = ""  # its API, e.g. http://localhost:8002; empty = off
     # The dashboard: links to posts point here, and FlowAI only accepts cookie sign-ins from it
     flowai_dashboard_url: str = "http://localhost:5173"
@@ -112,6 +123,7 @@ class Settings(BaseSettings):
     phone_agent_retry_minutes: float = 30
     phone_vision_model: str = "kimi-k3"  # needs vision; glm-5.3-flash works too, a little slower
     phone_verify_posts: bool = True  # direct: look once more at the screen a post ended on before calling it up
+    phone_action_gap_seconds: float = 5  # direct: at least this long between two taps, keys, swipes or typings
     phone_mode: Literal["flash", "pro"] = "flash"  # the API's agent for feedback and other tasks
     phone_post_mode: Literal["flash", "pro"] = "pro"  # for posting: pro also checks independently that it went up
     phone_max_steps: int = 40  # the team's limit

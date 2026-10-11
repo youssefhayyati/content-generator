@@ -17,7 +17,7 @@ Which skill is used:
 
 These are replaced with the draft's details before the goal is sent:
 - {{count}}: how many files were put on the phone (0 for a text-only post)
-- {{media}}: the same in words, e.g. "3 pictures" or "1 video"
+- {{media}}: the same in words, e.g. "3 pictures" or "1 video, 0:38 long" (a video's length, when known)
 - {{kind}}: picture or video
 - {{placement}}: feed, reel, story or post
 - {{caption}}: the caption as numbered lines, each in quotes, to type one by one (the phone types plain

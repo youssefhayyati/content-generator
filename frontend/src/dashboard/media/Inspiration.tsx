@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Bookmark, ExternalLink, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
-import { api } from '../../lib/api'
+import { ArrowUpRight, Bookmark, ExternalLink, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
+import { api, ApiError } from '../../lib/api'
 import { useRouter } from '../../lib/router'
 import { useToast } from '../toast'
-import { Btn, inputClass, Modal, Panel } from '../ui'
+import { Btn, inputClass, Modal, Panel, Select, Toggle } from '../ui'
 
 type Idea = { id?: number; url: string; title: string; creator?: string; board?: string; notes?: string; video_id?: string; published_at?: string; short?: boolean }
 type Feed = { items: Idea[]; checked_at: string }
@@ -34,7 +34,8 @@ export function Inspiration() {
   const discover = async () => {
     setBusy(true); setFailure(''); setFeed(null)
     try { setFeed(await api<Feed>('/inspirations/discover', { query: { channel } })) }
-    catch (e) { setFailure(e instanceof Error ? e.message : 'Could not load videos.') }
+    // A refused channel ID explains itself; a server fault shouldn't put its SQL on screen.
+    catch (e) { setFailure(e instanceof ApiError && e.status < 500 ? e.message : 'Couldn’t load that channel right now. Try again in a moment.') }
     finally { setBusy(false) }
   }
   useEffect(() => { void discover() }, [])
@@ -74,20 +75,20 @@ export function Inspiration() {
         </div>
       </div>
       {view === 'discover' && <Panel title="Discover from channels" sub="Recent uploads, not a verified trend ranking. Feeds refresh every five minutes.">
-        <div className="flex flex-wrap gap-2">
-          <select aria-label="Source channel" className={inputClass} value={CHANNELS.some((c) => c.id === channel) ? channel : ''} onChange={(e) => setChannel(e.target.value)}>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]">
+          <Select aria-label="Source channel" value={CHANNELS.some((c) => c.id === channel) ? channel : ''} onChange={(e) => setChannel(e.target.value)}>
             <option value="" disabled>Custom channel</option>{CHANNELS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-          </select>
-          <input aria-label="YouTube channel ID" className={inputClass} value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="YouTube channel ID (UC…)" />
+          </Select>
+          <input aria-label="YouTube channel ID" className={inputClass + ' font-mono text-[12px] text-muted'} value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="or a channel ID (UC…)" />
           <Btn icon={RefreshCw} onClick={discover} loading={busy}>Load videos</Btn>
         </div>
         {feed && <p className="mt-2 text-xs text-dim">Checked {new Date(feed.checked_at).toLocaleString()} · Source: YouTube public channel feed</p>}
         {failure && <p role="alert" className="mt-3 text-sm text-fail">{failure}</p>}
       </Panel>}
       <div className="flex flex-wrap items-center gap-3">
-        <input aria-label="Search inspiration" className={inputClass} placeholder="Search titles, creators or notes…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={shorts} onChange={(e) => setShorts(e.target.checked)} />Shorts only</label>
-        {view === 'saved' && <select aria-label="Board" className={inputClass} value={board} onChange={(e) => setBoard(e.target.value)}><option value="">All boards</option>{[...new Set(saved.map((x) => x.board))].map((b) => <option key={b}>{b}</option>)}</select>}
+        <input aria-label="Search inspiration" className={inputClass + ' min-w-[220px] flex-1'} placeholder="Search titles, creators or notes…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {view === 'saved' && <Select aria-label="Board" className="w-48" value={board} onChange={(e) => setBoard(e.target.value)}><option value="">All boards</option>{[...new Set(saved.map((x) => x.board))].map((b) => <option key={b}>{b}</option>)}</Select>}
+        <span className="flex items-center gap-2 text-[12.5px] text-muted"><Toggle on={shorts} onChange={setShorts} label="Shorts only" />Shorts only</span>
       </div>
       {busy && view === 'discover' && <p className="text-muted">Loading recent videos…</p>}
       {!busy && !items.length && <p className="rounded-xl border border-line p-8 text-center text-muted">No matching videos. Load another channel or add a link to your board.</p>}
@@ -99,7 +100,7 @@ export function Inspiration() {
             <h3 className="text-sm font-medium">{idea.title}</h3>
             {idea.published_at && <p className="text-xs text-dim">Published {new Date(idea.published_at).toLocaleDateString()}</p>}
             {idea.notes && <p className="line-clamp-3 text-xs text-muted">{idea.notes}</p>}
-            <a href={idea.url} target="_blank" rel="noreferrer" className="text-xs underline">View source ↗</a>
+            <a href={idea.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] text-muted transition-colors hover:text-fg">View source <ArrowUpRight className="size-3" /></a>
             <div className="flex flex-wrap gap-2">
               <Btn size="sm" icon={Bookmark} onClick={() => setEditing(saved.find((s) => s.url === idea.url) ?? { ...idea, board: 'Ideas', notes: '' })}>{saved.some((s) => s.url === idea.url) ? 'Edit notes' : 'Save'}</Btn>
               <Btn size="sm" variant="primary" icon={Sparkles} onClick={() => { setRemake(idea); setDirection(idea.notes || ''); setProduct('') }}>Make my version</Btn>
@@ -121,7 +122,7 @@ export function Inspiration() {
           <label className="block text-sm">Your product / brand<input className={inputClass + ' mt-1'} value={product} onChange={(e) => setProduct(e.target.value)} placeholder="What are you promoting?" /></label>
           <label className="block text-sm">What should your version do differently?<textarea rows={3} className={inputClass + ' mt-1 h-auto'} value={direction} onChange={(e) => setDirection(e.target.value)} placeholder="Describe the hook, scene sequence and style you want…" /></label>
           <pre className="whitespace-pre-wrap rounded-lg border border-line p-3 text-xs leading-relaxed">{brief}</pre>
-          <Btn variant="primary" icon={Sparkles} disabled={!product.trim()} onClick={() => navigate('/dashboard/studio?tab=video&prompt=' + encodeURIComponent(brief))}>Review in Creative Lab</Btn>
+          <Btn variant="primary" icon={Sparkles} disabled={!product.trim()} onClick={() => navigate('/dashboard/studio?make=video&prompt=' + encodeURIComponent(brief))}>Review in Creative Lab</Btn>
         </div>
       </Modal>
     </div>

@@ -37,6 +37,10 @@ class PostResource extends JsonResource
             'approved_at' => $this->approved_at?->toIso8601ZuluString(),
             'post_url' => $this->post_url,
             'error' => $this->error,
+            // Made in Creative Lab: the project and its Post node, to open it there.
+            'lab' => $this->project_id ? ['project_id' => $this->project_id, 'node_id' => $this->node_id] : null,
+            'metrics' => $this->metrics,
+            'metrics_at' => $this->metrics_at?->toIso8601ZuluString(),
             // The latest publishing run, when loaded: its outcome and the screenshot it ended on, as proof
             'run' => $this->whenLoaded('latestRun', fn () => $this->latestRun ? [
                 'id' => $this->latestRun->id,

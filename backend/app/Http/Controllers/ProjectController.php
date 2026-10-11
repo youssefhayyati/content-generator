@@ -3,13 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Project;
+use App\Services\Lab\Graph;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Gate;
 
 /**
- * Studio projects: a named canvas you arrange by hand.
+ * Creative Lab projects: a named canvas of nodes. The canvas itself changes through operations
+ * (LabController::ops, App\Services\Lab\Graph), never by saving it whole, so the page and the
+ * assistant editing at once never overwrite each other; here a project is listed, made, renamed or deleted.
  */
 class ProjectController extends Controller
 {
@@ -22,7 +25,7 @@ class ProjectController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate(['name' => ['required', 'string', 'max:80']]);
-        $project = $request->user()->projects()->create($data + ['canvas' => ['nodes' => [], 'edges' => [], 'view' => ['x' => 0, 'y' => 0, 'zoom' => 1]]]);
+        $project = $request->user()->projects()->create($data + ['canvas' => Graph::normalize(['version' => 2])]);
 
         return response()->json($this->full($project), 201);
     }
@@ -34,26 +37,11 @@ class ProjectController extends Controller
         return response()->json($this->full($project));
     }
 
-    /**
-     * Rename, or save the canvas (the page saves a moment after every change).
-     */
+    /** Rename it. */
     public function update(Request $request, Project $project): JsonResponse
     {
         Gate::authorize('update', $project);
-        $data = $request->validate([
-            'name' => ['sometimes', 'string', 'max:80'],
-            'canvas' => ['sometimes', 'array'],
-            'canvas.nodes' => ['present_with:canvas', 'array', 'max:400'],
-            'canvas.nodes.*.id' => ['required', 'string', 'max:40'],
-            'canvas.nodes.*.type' => ['required', 'in:note,text,asset,generation'],
-            'canvas.nodes.*.x' => ['required', 'numeric'],
-            'canvas.nodes.*.y' => ['required', 'numeric'],
-            'canvas.nodes.*.text' => ['nullable', 'string', 'max:20000'],
-            'canvas.nodes.*.ref' => ['nullable', 'integer'],
-            'canvas.edges' => ['nullable', 'array', 'max:800'],
-            'canvas.view' => ['nullable', 'array'],
-        ]);
-        $project->update($data);
+        $project->update($request->validate(['name' => ['required', 'string', 'max:80']]));
 
         return response()->json($this->full($project));
     }
@@ -79,6 +67,6 @@ class ProjectController extends Controller
 
     private function full(Project $p): array
     {
-        return $this->summary($p) + ['canvas' => $p->canvas ?? ['nodes' => [], 'edges' => [], 'view' => ['x' => 0, 'y' => 0, 'zoom' => 1]]];
+        return $this->summary($p) + ['canvas' => Graph::normalize($p->canvas)];
     }
 }

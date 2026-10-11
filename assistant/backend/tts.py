@@ -151,7 +151,7 @@ class TTSEngine:
         return [{**v, "catalog": False} for v in self.profiles()]
 
     def adopt(self, archetype: str) -> dict:
-        raise ValueError("voices can only be picked with a VoiceStudio server (TTS_URL)")
+        raise ValueError("voices can only be picked with a VoiceStudio server (VOICESTUDIO_URL)")
 
     def sample(self, voice: str | None = None, archetype: str | None = None) -> np.ndarray:
         return self.synthesize(REFERENCE_TEXT, voice)

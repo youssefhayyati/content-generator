@@ -9,6 +9,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
 import { fmtDay, fmtRelative, fmtTime, useApi, useInvalidate, WEEKDAYS, type QueueState } from '../data'
+import { NEW_POST } from '../nav'
 import { useToast } from '../toast'
 import { Btn, inputClass, Menu, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
 
@@ -73,7 +74,6 @@ export default function Automations() {
   return (
     <div className="pb-16">
       <PageHeader
-        eyebrow="Automations"
         title={
           <>
             Posting <Serif>queue.</Serif>
@@ -81,7 +81,7 @@ export default function Automations() {
         }
         sub="Pick the times you like to publish. “Add to queue” drops each post into the next free one, in order."
         actions={
-          <Btn variant="primary" icon={PenLine} onClick={() => navigate('/dashboard/create')}>
+          <Btn variant="primary" icon={PenLine} onClick={() => navigate(NEW_POST)}>
             Write a post
           </Btn>
         }

@@ -5,7 +5,8 @@ set -e
 cd /app
 
 [ -f vendor/autoload.php ] || composer install --no-interaction --prefer-dist
-[ -f .env ] || cp .env.example .env
+# .env is the stack's one settings file (../.env), mounted here by docker compose.
+[ -f .env ] || { echo ".env is missing: in the repo, cp .env.example .env" >&2; exit 1; }
 grep -q '^APP_KEY=base64:' .env || php artisan key:generate --force
 [ -f database/database.sqlite ] || touch database/database.sqlite
 php artisan migrate --force

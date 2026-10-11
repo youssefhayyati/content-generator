@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CalendarClock, Check, Clapperboard, Copy, FileText, Image, ListPlus, Send, Trash2, Type } from 'lucide-react'
+import { CalendarClock, Check, Clapperboard, Copy, FileText, Image, LayoutTemplate, ListPlus, Send, Trash2, Type } from 'lucide-react'
 import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Account, type Asset, type Page, type Post, type PostFormat } from '../../lib/api'
@@ -24,6 +24,8 @@ import { PostPreview } from '../PostPreview'
 import { useOverview, useUser } from '../Shell'
 import { useToast } from '../toast'
 import { Writer } from '../Writer'
+import { Examples } from '../Examples'
+import type { Case } from '../../showcase/cases'
 import { Btn, FieldError, inputClass, Modal, PageHeader, Panel, Segmented, Skeleton, StateBadge, Stagger } from '../ui'
 
 type When = 'draft' | 'queue' | 'pick' | 'published'
@@ -73,10 +75,14 @@ export default function Create() {
   const [title, setTitle] = useState('')
   // Arriving from the Studio's "Use in a post": the text, or the media, to start from.
   const [body, setBody] = useState(() => params.get('body') ?? '')
+  // Arriving from a showcase case: the brief, tone and networks it was written from.
+  const [seed, setSeed] = useState(() => (params.get('brief') ? { brief: params.get('brief')!, tone: params.get('tone'), model: params.get('model') } : null))
+  const [examples, setExamples] = useState(false)
   const [format, setFormat] = useState<PostFormat>(user.preferences.formats[0] ?? 'text')
-  const [platforms, setPlatforms] = useState<PlatformId[]>(
-    user.preferences.platforms.length ? user.preferences.platforms : ['linkedin'],
-  )
+  const [platforms, setPlatforms] = useState<PlatformId[]>(() => {
+    const asked = PLATFORM_ORDER.filter((p) => params.get('platforms')?.split(',').includes(p))
+    return asked.length ? asked : user.preferences.platforms.length ? user.preferences.platforms : ['linkedin']
+  })
   const [preview, setPreview] = useState<PlatformId | null>(null)
   const { data: accounts } = useApi<Account[]>('/accounts')
   const [accountId, setAccountId] = useState<number | null>(null)
@@ -149,6 +155,16 @@ export default function Create() {
     setErrors(({ checks: _, ...rest }) => rest)
     if (next.some((m) => m.kind === 'video')) setFormat('video')
     else if (next.length) setFormat('image')
+  }
+
+  const startFrom = (c: Case) => {
+    setSeed({ brief: c.brief, tone: c.make.tool === 'composer' ? c.make.tone : null, model: c.make.tool === 'composer' ? (c.make.model ?? null) : null })
+    const networks = PLATFORM_ORDER.filter((p) => c.versions?.some((v) => v.platform === p))
+    if (networks.length && !accountId) setPlatforms(networks)
+    if (c.kind === 'picture' || c.kind === 'carousel') setFormat('image')
+    else if (c.kind === 'reel') setFormat('video')
+    setErrors(({ platforms: _, ...rest }) => rest)
+    setExamples(false)
   }
 
   const changeBody = (v: string) => {
@@ -249,7 +265,6 @@ export default function Create() {
   return (
     <div>
       <PageHeader
-        eyebrow="Create"
         title={
           existing ? (
             <>
@@ -263,7 +278,7 @@ export default function Create() {
         }
         sub={existing ? `Last edited ${fmtRelative(existing.updated_at)}.` : 'Write it once, then choose where and when it goes.'}
         actions={
-          existing && (
+          existing ? (
             <>
               <StateBadge state={postState(existing)} className="mr-1" />
               <Btn icon={Copy} onClick={duplicate}>
@@ -273,6 +288,10 @@ export default function Create() {
                 Delete
               </Btn>
             </>
+          ) : (
+            <Btn icon={LayoutTemplate} onClick={() => setExamples(true)}>
+              Examples
+            </Btn>
           )
         }
       />
@@ -287,7 +306,7 @@ export default function Create() {
           {/* On a phone this column dissolves into the page (contents), so the bar inside it can be
               ordered after the preview; beside the preview it is a real column. */}
           <Stagger i={0} className="contents min-w-0 lg:block lg:space-y-4">
-            <Writer body={body} onBody={changeBody} format={format} platforms={platforms} onWriting={setWriting} />
+            <Writer body={body} onBody={changeBody} format={format} platforms={platforms} onWriting={setWriting} seed={seed} />
             <section className="rounded-xl border border-line bg-panel">
               <Destination
                 accounts={accounts ?? []}
@@ -484,6 +503,7 @@ export default function Create() {
         </div>
       )}
 
+      <Examples open={examples} onClose={() => setExamples(false)} only={(c) => !!c.versions} action="Use this brief" onUse={startFrom} />
       <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this post?">
         <p className="text-[13px] leading-snug text-muted">It comes off your calendar and out of your library. This can’t be undone.</p>
         <div className="mt-5 flex justify-end gap-2">

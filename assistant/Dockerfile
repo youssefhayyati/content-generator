@@ -37,7 +37,8 @@ COPY backend backend
 COPY web web
 COPY skills skills
 COPY fonts fonts
-COPY comfyui/descriptions.yaml comfyui/
+# The assistant adds a line to workflows/descriptions.yaml when it adds a workflow
+COPY --chown=agent workflows workflows
 USER agent
 
 EXPOSE 8000

@@ -116,6 +116,13 @@ class StudioFoundationsTest extends TestCase
         $this->spa()->postJson('/api/devices', ['name' => 'Rack 1', 'driver' => 'http', 'ref' => 'dev-7'])->assertCreated()->assertJsonPath('status', 'idle');
         $this->spa()->postJson('/api/devices', ['name' => 'Sim', 'driver' => 'simulator', 'profile' => 'flaky'])->assertCreated()->assertJsonPath('profile', 'flaky');
         $this->spa()->getJson('/api/devices')->assertJsonCount(2);
+
+        // Nor can a change leave one on the service without it.
+        $sim = Device::where('name', 'Sim')->firstOrFail();
+        $this->spa()->patchJson("/api/devices/{$sim->id}", ['driver' => 'http'])->assertJsonValidationErrors('ref');
+        $rack = Device::where('name', 'Rack 1')->firstOrFail();
+        $this->spa()->patchJson("/api/devices/{$rack->id}", ['ref' => ''])->assertJsonValidationErrors('ref');
+        $this->spa()->patchJson("/api/devices/{$rack->id}", ['name' => 'Rack one'])->assertOk()->assertJsonPath('ref', 'dev-7');
     }
 
     public function test_a_scan_lists_the_plugged_in_phones_and_marks_the_registered_ones(): void

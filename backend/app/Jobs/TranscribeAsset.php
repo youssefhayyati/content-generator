@@ -37,4 +37,13 @@ class TranscribeAsset implements ShouldQueue
             $asset->update(['meta' => [...$asset->fresh()->meta ?? [], 'transcript_status' => 'failed', 'transcript_error' => Str::limit($e->getMessage(), 200)]]);
         }
     }
+
+    /** Killed past its timeout: not left "running", which would refuse every later try (409). */
+    public function failed(?Throwable $e): void
+    {
+        $asset = Asset::find($this->assetId);
+        if ($asset && ($asset->meta['transcript_status'] ?? null) === 'running') {
+            $asset->update(['meta' => [...$asset->meta, 'transcript_status' => 'failed', 'transcript_error' => 'It took too long. Try again, or try a shorter recording.']]);
+        }
+    }
 }

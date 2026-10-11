@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AtSign, Clapperboard, FolderOpen, ImagePlus, LoaderCircle, MessageSquarePlus, Plus, ScanFace, Sparkles, Speech, Upload, Wand2 } from 'lucide-react'
+import { AtSign, Clapperboard, FolderOpen, ImagePlus, MessageSquarePlus, Plus, ScanFace, Sparkles, Speech, Upload, Wand2 } from 'lucide-react'
 import type { Asset, Page } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useApi } from '../data'
 import { fmtShape, MediaThumb } from '../media/Media'
-import { Btn, EmptyState, Label, Modal, Segmented, Skeleton } from '../ui'
+import { Btn, EmptyState, Label, Modal, Segmented, Skeleton, Viewer, viewerMedia } from '../ui'
+import { JobProgress } from './Jobs'
 import { useAssistant, type Picture } from './store'
 
 /** Drag types: a numbered picture from the conversation, or a file from the FlowAI gallery. */
@@ -40,7 +41,7 @@ export function MediaView() {
       {jobs.length > 0 && (
         <div className="space-y-2">
           {jobs.map((j) => (
-            <JobRow key={j.id} label={j.label} started={j.started} failed={j.status === 'failed' ? j.text : null} />
+            <JobProgress key={j.id} job={j} />
           ))}
         </div>
       )}
@@ -120,27 +121,6 @@ function Attach({ onFiles }: { onFiles: (files: File[]) => void }) {
   )
 }
 
-function JobRow({ label, started, failed }: { label: string; started: number; failed: string | null }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 1000)
-    return () => window.clearInterval(t)
-  }, [])
-  const s = Math.round((Date.now() - started) / 1000)
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn('relative flex items-center gap-3 overflow-hidden rounded-lg border px-3.5 py-2.5 text-[12.5px]', failed ? 'border-fail/30 text-fail' : 'border-accent/30 text-fg')}
-    >
-      {!failed && <span className="skeleton pointer-events-none absolute inset-0 opacity-40" />}
-      {failed ? <Sparkles className="relative size-3.5" /> : <LoaderCircle className="relative size-3.5 animate-spin text-accent-soft" />}
-      <span className="relative">{failed ? `Couldn’t make it: ${failed}` : label}</span>
-      {!failed && <span className="relative ml-auto font-mono text-[10.5px] text-dim">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>}
-    </motion.div>
-  )
-}
-
 function PictureTile({ p, className }: { p: Picture; className?: string }) {
   return (
     <span className={cn('relative block aspect-square overflow-hidden rounded-md bg-white/[0.04]', className)}>
@@ -174,77 +154,72 @@ function PictureModal({ p, onClose }: { p: Picture | null; onClose: () => void }
     })
   }
   return (
-    <Modal open={!!p} onClose={onClose} title={p ? `Picture ${p.id}` : ''} className="max-w-2xl">
+    <Modal open={!!p} onClose={onClose} title={p ? `Picture ${p.id}` : ''} full>
       {p && (
-        <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
-            {p.kind === 'video' ? <video src={p.url} controls autoPlay loop playsInline className="max-h-[60vh] w-full" /> : <img src={p.url} alt={p.prompt || p.name} className="max-h-[60vh] w-full object-contain" />}
-          </div>
-          <div className="flex flex-col gap-4">
-            <dl className="space-y-2.5 text-[12.5px]">
-              <div>
-                <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">From</dt>
-                <dd className="mt-0.5">{SOURCE[p.source] ?? p.source}</dd>
-              </div>
-              {p.prompt && (
-                <div>
-                  <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">Prompt</dt>
-                  <dd className="mt-0.5 line-clamp-6 text-muted">{p.prompt}</dd>
-                </div>
-              )}
-            </dl>
-            <div className="mt-auto flex flex-col gap-1.5">
-              {d && (
-                <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('place', { draft: d.id, media: p.id }), onClose())}>
-                  Add to draft {d.id}
-                </Btn>
-              )}
-              <Btn size="sm" icon={MessageSquarePlus} onClick={() => ask(`Make an Instagram post with picture ${p.id}`)}>
-                Make a post with it
-              </Btn>
-              {a.generation && p.kind === 'image' && (
-                <>
-                  <Btn size="sm" icon={Clapperboard} onClick={() => ask(`Animate picture ${p.id} into a short video`)}>
-                    Animate it
-                  </Btn>
-                  <Btn
-                    size="sm"
-                    icon={Wand2}
-                    onClick={() => {
-                      onClose()
-                      a.setInput(`Edit picture ${p.id}: `)
-                      a.inputRef.current?.focus()
-                    }}
-                  >
-                    Edit it…
-                  </Btn>
-                </>
-              )}
-              {a.dubbing && p.kind === 'video' && (
-                <Btn size="sm" icon={Speech} onClick={() => write(`Dub video ${p.id} so they say: `)}>
-                  Change what they say…
-                </Btn>
-              )}
-              {a.generation && (
-                <Btn size="sm" icon={ScanFace} onClick={() => write(`Put the face from picture  on ${p.kind === 'video' ? 'video' : 'picture'} ${p.id}`, 'Put the face from picture '.length)}>
-                  Swap a face…
-                </Btn>
-              )}
-              <Btn
-                size="sm"
-                variant="subtle"
-                icon={AtSign}
-                onClick={() => {
-                  onClose()
-                  a.setInput(`${a.input.trim()} picture ${p.id} `.trimStart())
-                  a.inputRef.current?.focus()
-                }}
-              >
-                Mention it in the chat
-              </Btn>
+        <Viewer media={p.kind === 'video' ? <video src={p.url} controls autoPlay loop playsInline className={viewerMedia} /> : <img src={p.url} alt={p.prompt || p.name} className={viewerMedia} />}>
+          <dl className="space-y-2.5 text-[12.5px]">
+            <div>
+              <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">From</dt>
+              <dd className="mt-0.5">{SOURCE[p.source] ?? p.source}</dd>
             </div>
+            {p.prompt && (
+              <div>
+                <dt className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-dim">Prompt</dt>
+                <dd className="mt-0.5 line-clamp-6 text-muted">{p.prompt}</dd>
+              </div>
+            )}
+          </dl>
+          <div className="mt-auto flex flex-col gap-1.5">
+            {d && (
+              <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('place', { draft: d.id, media: p.id }), onClose())}>
+                Add to draft {d.id}
+              </Btn>
+            )}
+            <Btn size="sm" icon={MessageSquarePlus} onClick={() => ask(`Make an Instagram post with picture ${p.id}`)}>
+              Make a post with it
+            </Btn>
+            {a.generation && p.kind === 'image' && (
+              <>
+                <Btn size="sm" icon={Clapperboard} onClick={() => ask(`Animate picture ${p.id} into a short video`)}>
+                  Animate it
+                </Btn>
+                <Btn
+                  size="sm"
+                  icon={Wand2}
+                  onClick={() => {
+                    onClose()
+                    a.setInput(`Edit picture ${p.id}: `)
+                    a.inputRef.current?.focus()
+                  }}
+                >
+                  Edit it…
+                </Btn>
+              </>
+            )}
+            {a.dubbing && p.kind === 'video' && (
+              <Btn size="sm" icon={Speech} onClick={() => write(`Dub video ${p.id} so they say: `)}>
+                Change what they say…
+              </Btn>
+            )}
+            {a.generation && (
+              <Btn size="sm" icon={ScanFace} onClick={() => write(`Put the face from picture  on ${p.kind === 'video' ? 'video' : 'picture'} ${p.id}`, 'Put the face from picture '.length)}>
+                Swap a face…
+              </Btn>
+            )}
+            <Btn
+              size="sm"
+              variant="subtle"
+              icon={AtSign}
+              onClick={() => {
+                onClose()
+                a.setInput(`${a.input.trim()} picture ${p.id} `.trimStart())
+                a.inputRef.current?.focus()
+              }}
+            >
+              Mention it in the chat
+            </Btn>
           </div>
-        </div>
+        </Viewer>
       )}
     </Modal>
   )
@@ -297,33 +272,32 @@ function AssetModal({ asset, onClose }: { asset: Asset | null; onClose: () => vo
   const a = useAssistant()
   const d = a.current ? a.drafts[a.current] : undefined
   return (
-    <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'From the gallery'} className="max-w-2xl">
+    <Modal open={!!asset} onClose={onClose} title={asset?.name ?? 'From the gallery'} full>
       {asset && (
-        <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <div className="grid max-h-[60vh] place-items-center overflow-hidden rounded-lg bg-black">
-            {asset.kind === 'video' ? (
-              <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className="max-h-[60vh] w-full" />
+        <Viewer
+          media={
+            asset.kind === 'video' ? (
+              <video src={asset.url} poster={asset.poster_url ?? undefined} controls playsInline className={viewerMedia} />
             ) : (
-              <img src={asset.url} alt={asset.name ?? ''} className="max-h-[60vh] w-full object-contain" />
-            )}
+              <img src={asset.url} alt={asset.name ?? ''} className={viewerMedia} />
+            )
+          }
+        >
+          <div>
+            <Label>Shape</Label>
+            <p className="mt-0.5 text-[12.5px]">{fmtShape(asset)}</p>
           </div>
-          <div className="flex flex-col gap-4">
-            <div>
-              <Label>Shape</Label>
-              <p className="mt-0.5 text-[12.5px]">{fmtShape(asset)}</p>
-            </div>
-            <div className="mt-auto flex flex-col gap-1.5">
-              {d && (
-                <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('use_assets', { assets: [asset.id], draft: d.id }), onClose())}>
-                  Add to draft {d.id}
-                </Btn>
-              )}
-              <Btn size="sm" icon={ImagePlus} onClick={() => (a.action('use_assets', { assets: [asset.id] }), onClose())}>
-                Bring into the conversation
+          <div className="mt-auto flex flex-col gap-1.5">
+            {d && (
+              <Btn size="sm" variant="primary" icon={Plus} onClick={() => (a.action('use_assets', { assets: [asset.id], draft: d.id }), onClose())}>
+                Add to draft {d.id}
               </Btn>
-            </div>
+            )}
+            <Btn size="sm" icon={ImagePlus} onClick={() => (a.action('use_assets', { assets: [asset.id] }), onClose())}>
+              Bring into the conversation
+            </Btn>
           </div>
-        </div>
+        </Viewer>
       )}
     </Modal>
   )

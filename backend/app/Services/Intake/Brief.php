@@ -62,7 +62,7 @@ final class Brief
             'question' => 'Describe your visual style and brand colors.',
             'options' => ['Clean & minimal', 'Bright & colorful', 'Dark & luxury', 'Natural & earthy']],
         'photos' => ['group' => 'look', 'label' => 'Reference photos', 'core' => true, 'photo' => true,
-            'question' => 'Can you share photos of you or your product? We’ll use them as references for AI visuals.',
+            'question' => 'Can you share your logo, and photos of your product and of the people who’ll appear? We’ll use them as references for AI visuals.',
             'options' => ['I’ll send them later']],
         'channels' => ['group' => 'content', 'label' => 'Channels', 'core' => true,
             'question' => 'Where should we post?', 'options' => ['Instagram', 'TikTok', 'Facebook', 'LinkedIn']],
@@ -88,10 +88,16 @@ final class Brief
             'options' => ['Under $500', '$500–2,000', '$2,000–10,000', 'Not sure']],
     ];
 
-    /** The only fields a quick interview asks about; Claude suggests the rest. */
-    public const QUICK = ['focus', 'business', 'offer', 'goal', 'audience', 'photos', 'channels', 'timing', 'rhythm'];
+    /**
+     * What each interview asks when the standard list runs it (5 or 10 questions). With AI, these
+     * have to be covered too, but the interviewer picks its own questions to fit the client (two
+     * fields in one question, a follow-up where it matters) and suggests everything it didn't ask.
+     */
+    public const QUICK = ['focus', 'offer', 'audience', 'goal', 'photos'];
 
-    public const MAX_QUESTIONS = ['quick' => 9, 'full' => 22];
+    public const FULL = ['focus', 'offer', 'usp', 'goal', 'audience', 'pains', 'tone', 'look', 'photos', 'cta'];
+
+    public const MAX_QUESTIONS = ['quick' => 5, 'full' => 10];
 
     public const MAX_PHOTOS = 12;
 
@@ -121,9 +127,7 @@ final class Brief
      */
     public static function needed(string $depth): array
     {
-        return $depth === 'quick'
-            ? self::QUICK
-            : array_keys(array_filter(self::FIELDS, fn (array $f) => $f['core']));
+        return $depth === 'quick' ? self::QUICK : self::FULL;
     }
 
     public static function isSuggested(string $value): bool

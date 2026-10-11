@@ -22,6 +22,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Email verification
+    |--------------------------------------------------------------------------
+    |
+    | Off, every account counts as confirmed (AI features open at once) and no
+    | confirmation email is sent: for local work and private installs.
+    |
+    */
+
+    'verify_email' => (bool) env('AUTH_VERIFY_EMAIL', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication Guards
     |--------------------------------------------------------------------------
     |

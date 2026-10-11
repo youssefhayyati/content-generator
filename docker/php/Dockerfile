@@ -2,6 +2,9 @@
 # runs here and nothing has to be installed on the host.
 FROM php:8.4-cli
 
+# yt-dlp for Highlights and Creative Lab's YouTube nodes, and Deno, the JavaScript runtime current
+# yt-dlp needs for YouTube. Pinned and checksummed here; kept current afterwards with `yt-dlp -U`
+# (scheduled: lab:update-ytdlp), since YouTube changes often.
 ARG YT_DLP_VERSION=2026.08.19
 ARG YT_DLP_SHA256=1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
 ARG DENO_VERSION=2.9.7

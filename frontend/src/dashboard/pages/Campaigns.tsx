@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, ArrowUpRight, AudioWaveform, Copy, Download, Images, LoaderCircle, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Copy, Download, Images, LoaderCircle, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import { useLenis } from 'lenis/react'
 import { Serif } from '../../components/ui/Reveal'
 import { api, type Account, type AiOptions, type Campaign, type CampaignSummary } from '../../lib/api'
@@ -22,8 +22,8 @@ import { Btn, Label, Modal, PageHeader, Skeleton, Stagger } from '../ui'
 const GREETING = 'Hi! I’m your campaign strategist. I’ll ask short questions so we can create content that really feels like you. How much time do you have?'
 
 const DEPTHS = [
-  { id: 'quick', name: 'Quick', count: '8', time: '2 min', body: 'The essentials. AI suggests the rest, and you can answer more later.' },
-  { id: 'full', name: 'Full', count: '20', time: '8 min', body: 'Your story, your customers, your voice. The most personal content.' },
+  { id: 'quick', name: 'Quick', count: '5', time: '1 min', body: 'The essentials, picked by the AI for what you promote. It suggests the rest, and you can answer more later.' },
+  { id: 'full', name: 'Thorough', count: '10', time: '3 min', body: 'Your story, your customers, your voice and your look. The most personal content.' },
 ] as const
 
 /** /dashboard/campaigns: start an intake or pick one up. With ?id=, that campaign's studio. */
@@ -119,7 +119,6 @@ function Studio({ initial }: { initial: Campaign }) {
   return (
     <div>
       <PageHeader
-        eyebrow={STAGE_LABEL[campaign.stage]}
         title={
           campaign.title ? (
             <span className="block max-w-[22ch] truncate">{campaign.title}</span>
@@ -134,11 +133,17 @@ function Studio({ initial }: { initial: Campaign }) {
             <Btn variant="subtle" icon={ArrowLeft} onClick={() => navigate('/dashboard/campaigns')} aria-label="All campaigns">
               <span className="hidden xl:inline">All campaigns</span>
             </Btn>
-            {campaign.items_count > 0 && (
-              <Btn icon={AudioWaveform} onClick={() => navigate(`/dashboard/assistant?campaign=${campaign.id}`)} title="Its posts as drafts you change by voice or by hand">
-                <span className="hidden sm:inline">Open in the assistant</span>
-              </Btn>
-            )}
+            <Btn
+              icon={Wand2}
+              title="A Creative Lab project with this campaign’s brief at the start, and a pack of posts to make"
+              onClick={() =>
+                api<{ project: { id: number } }>(`/campaigns/${campaign.id}/lab`, { method: 'POST' })
+                  .then((p) => navigate(`/dashboard/studio?project=${p.project.id}`))
+                  .catch(() => toast('Creative Lab couldn’t open it. Try again.', 'error'))
+              }
+            >
+              <span className="hidden sm:inline">Open in Creative Lab</span>
+            </Btn>
             <Btn icon={Copy} onClick={() => copy(briefText(campaign), 'Brief')}>
               Copy brief
             </Btn>
@@ -209,7 +214,6 @@ function Start() {
   return (
     <div>
       <PageHeader
-        eyebrow="Campaigns"
         title={
           <>
             Campaign <Serif>intake.</Serif>

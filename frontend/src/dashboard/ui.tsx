@@ -6,17 +6,16 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
   type RefObject,
+  type SelectHTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { animate, AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
-import { LoaderCircle, X, type LucideIcon } from 'lucide-react'
+import { ChevronDown, LoaderCircle, X, type LucideIcon } from 'lucide-react'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
 import type { User } from '../lib/api'
 import { PlatformIcon, type PlatformId } from '../components/ui/PlatformIcon'
-import { useRouter } from '../lib/router'
 import { STATE, type PostState } from './data'
-import { pageIndex } from './nav'
 
 /* ------------------------------------------------------------------ */
 /* Surfaces                                                             */
@@ -40,12 +39,12 @@ export function Panel({
   return (
     <section className={cn('min-w-0 rounded-xl border border-line bg-panel', className)}>
       {(title || actions) && (
-        <header className="flex items-start justify-between gap-4 px-4 pt-4 md:px-5 md:pt-5">
+        <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-4 pt-4 md:px-5 md:pt-5">
           <div className="min-w-0">
             {title && <h2 className="text-[13.5px] font-medium">{title}</h2>}
             {sub && <p className="mt-0.5 text-[11.5px] text-dim">{sub}</p>}
           </div>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {actions && <div className="flex max-w-full shrink-0 items-center gap-2">{actions}</div>}
         </header>
       )}
       <div className={cn('p-4 md:p-5', bodyClassName)}>{children}</div>
@@ -58,37 +57,12 @@ export function Label({ children, className }: { children: ReactNode; className?
   return <p className={cn('font-mono text-[10px] uppercase tracking-[0.14em] text-dim', className)}>{children}</p>
 }
 
-/** "(02) — Library", a big title that slides up out of a mask, and the page's actions. */
-export function PageHeader({
-  index: given,
-  eyebrow,
-  title,
-  sub,
-  actions,
-}: {
-  /** Defaults to the page's place in the sidebar. */
-  index?: string
-  eyebrow: string
-  title: ReactNode
-  sub?: ReactNode
-  actions?: ReactNode
-}) {
-  const { path } = useRouter()
-  const index = given ?? pageIndex(path)
+/** A big title that slides up out of a mask, and the page's actions. */
+export function PageHeader({ title, sub, actions }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
       <div className="min-w-0">
-        <motion.p
-          className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-muted"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease }}
-        >
-          <span className="text-fg">({index})</span>
-          <span className="h-px w-8 bg-current opacity-40" />
-          {eyebrow}
-        </motion.p>
-        <h1 className="mt-4 overflow-hidden pb-[0.1em] text-[clamp(1.9rem,3.4vw,2.75rem)] font-medium leading-[1] tracking-[-0.045em]">
+        <h1 className="overflow-hidden pb-[0.1em] text-[clamp(1.9rem,3.4vw,2.75rem)] font-medium leading-[1] tracking-[-0.045em]">
           <motion.span
             className="block"
             initial={{ y: '105%' }}
@@ -181,6 +155,18 @@ export function Btn({ variant = 'ghost', size = 'md', icon: Icon, loading, child
 export const inputClass =
   'h-9 w-full rounded-md border border-line-2 bg-white/[0.02] px-3 text-[13px] text-fg outline-none transition-[border-color,box-shadow,background-color] duration-300 placeholder:text-dim hover:border-white/20 focus:border-accent-soft/60 focus:bg-white/[0.03] focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_18%,transparent)] disabled:opacity-60 [color-scheme:dark]'
 
+/** A native select dressed like the other fields: no browser arrow, the studio's chevron instead. */
+export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className={cn('relative block', className)}>
+      <select {...rest} className={cn(inputClass, 'appearance-none pr-9 [&>option]:bg-panel-3')}>
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
+    </span>
+  )
+}
+
 export function FieldError({ message }: { message: string | null | undefined }) {
   return (
     <AnimatePresence initial={false}>
@@ -258,7 +244,11 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (on: bo
         on ? 'justify-end border-accent/60 bg-accent' : 'justify-start border-line-2 bg-white/5',
       )}
     >
-      <motion.span layout transition={{ type: 'spring', stiffness: 600, damping: 35 }} className="size-3.5 rounded-full bg-white" />
+      <motion.span
+        layout
+        transition={{ type: 'spring', stiffness: 600, damping: 35 }}
+        className={cn('size-3.5 rounded-full transition-colors duration-300', on ? 'bg-on-accent' : 'bg-white')}
+      />
     </button>
   )
 }
@@ -407,12 +397,18 @@ export function Modal({
   title,
   children,
   className,
+  full,
+  wide,
 }: {
   open: boolean
   onClose: () => void
   title: ReactNode
   children: ReactNode
   className?: string
+  /** Nearly the whole page, for looking at a picture or a video: lay it out with Viewer. */
+  full?: boolean
+  /** A wide sheet that scrolls inside, for browsing a set of things. */
+  wide?: boolean
 }) {
   useEffect(() => {
     if (!open) return
@@ -438,7 +434,12 @@ export function Modal({
             aria-label={typeof title === 'string' ? title : undefined}
             data-lenis-prevent
             className={cn(
-              'relative w-full max-w-md overflow-hidden rounded-xl border border-line-2 bg-panel-2 shadow-[0_40px_120px_-30px_rgb(0_0_0_/_0.95)]',
+              'relative w-full overflow-hidden rounded-xl border border-line-2 bg-panel-2 shadow-[0_40px_120px_-30px_rgb(0_0_0_/_0.95)]',
+              full
+                ? 'flex h-[calc(100dvh-2rem)] flex-col md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]'
+                : wide
+                  ? 'flex max-h-[calc(100dvh-2rem)] max-w-5xl flex-col md:max-h-[calc(100dvh-3rem)]'
+                  : 'max-w-md',
               className,
             )}
             initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -452,7 +453,7 @@ export function Modal({
                 <X className="size-4" />
               </button>
             </div>
-            <div className="p-5">{children}</div>
+            <div className={cn('p-5', (full || wide) && 'min-h-0 flex-1 overflow-y-auto')}>{children}</div>
           </motion.div>
         </motion.div>
       )}
@@ -460,6 +461,19 @@ export function Modal({
     document.body,
   )
 }
+
+/** Inside a full Modal: the picture or video as large as it fits, with its details and actions in a column beside it. */
+export function Viewer({ media, children }: { media: ReactNode; children: ReactNode }) {
+  return (
+    <div className="grid gap-5 sm:h-full sm:grid-cols-[minmax(0,1fr)_240px] sm:grid-rows-[minmax(0,1fr)]">
+      <div className="flex h-[60dvh] items-center justify-center overflow-hidden rounded-lg bg-black sm:h-auto">{media}</div>
+      <div className="flex flex-col gap-4 sm:min-h-0 sm:overflow-y-auto">{children}</div>
+    </div>
+  )
+}
+
+/** The classes for the img or video inside a Viewer: as large as it fits, never stretched. */
+export const viewerMedia = 'max-h-full max-w-full object-contain'
 
 export type MenuItem = { label: string; icon?: LucideIcon; onSelect: () => void; danger?: boolean; hint?: ReactNode }
 

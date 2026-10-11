@@ -11,12 +11,12 @@ import { useAssistant, type FontInfo, type TextBox } from './store'
 /** Loaded fonts, by name: each file is fetched once for the whole page. */
 const loading = new Map<string, Promise<void>>()
 
-const family = (f: FontInfo) => `assistant-font-${f.name}`
+export const fontFamily = (f: FontInfo) => `assistant-font-${f.name}`
 
-function load(f: FontInfo): Promise<void> {
+export function loadFont(f: FontInfo): Promise<void> {
   let p = loading.get(f.name)
   if (!p) {
-    const face = new FontFace(family(f), `url(${f.url})`)
+    const face = new FontFace(fontFamily(f), `url(${f.url})`)
     p = face.load().then(
       (done) => void document.fonts.add(done),
       () => undefined, // the tile falls back to the page's font
@@ -32,7 +32,7 @@ function useLoaded(fonts: FontInfo[]) {
   const key = fonts.map((f) => f.name).join(',')
   useEffect(() => {
     let live = true
-    for (const f of fonts) void load(f).then(() => live && setReady((r) => (r.has(f.name) ? r : new Set(r).add(f.name))))
+    for (const f of fonts) void loadFont(f).then(() => live && setReady((r) => (r.has(f.name) ? r : new Set(r).add(f.name))))
     return () => {
       live = false
     }
@@ -117,7 +117,7 @@ export function FontPicker({ t, onChange }: { t: TextBox; onChange: (fields: Rec
             >
               <span
                 className={cn('block w-full truncate text-[19px] leading-tight text-fg transition-opacity', ready.has(f.name) ? 'opacity-100' : 'opacity-30')}
-                style={{ fontFamily: `"${family(f)}", system-ui, sans-serif` }}
+                style={{ fontFamily: `"${fontFamily(f)}", system-ui, sans-serif` }}
               >
                 {sample}
               </span>

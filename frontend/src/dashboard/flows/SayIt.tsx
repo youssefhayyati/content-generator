@@ -27,11 +27,12 @@ type Draft = { name: string; description: string; graph: FlowGraph }
  * "Say it": describe an automation in plain words and watch it draw itself as a flow. Nothing
  * is saved until "Keep it".
  */
-export function SayIt({ catalog, accounts }: { catalog: FlowCatalog; accounts: Account[] | null }) {
+export function SayIt({ catalog, accounts, initial }: { catalog: FlowCatalog; accounts: Account[] | null; initial?: string | null }) {
   const { navigate } = useRouter()
   const toast = useToast()
   const invalidate = useInvalidate()
-  const [prompt, setPrompt] = useState('')
+  // A sentence brought from the showcase starts in the box, ready to be changed or sent.
+  const [prompt, setPrompt] = useState(initial ?? '')
   const [focused, setFocused] = useState(false)
   const [busy, setBusy] = useState(false)
   const [keeping, setKeeping] = useState(false)

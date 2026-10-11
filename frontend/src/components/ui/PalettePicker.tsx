@@ -7,9 +7,9 @@ import { cn } from '../../lib/cn'
  * The choice is kept on this device and applies to the whole site, the landing page included.
  */
 
-type Swatch = { ink: string; card: string; fg: string; accent: string; soft: string }
+export type Swatch = { ink: string; card: string; fg: string; accent: string; soft: string }
 
-const PALETTES: Array<{ id: string; name: string; mood: string; swatch: Swatch }> = [
+export const PALETTES: Array<{ id: string; name: string; mood: string; swatch: Swatch }> = [
   { id: 'indigo', name: 'Indigo', mood: 'Classic AI-tool violet blue', swatch: { ink: '#050505', card: '#101010', fg: '#f5f4f0', accent: '#6366f1', soft: '#a5b4fc' } },
   { id: 'acid', name: 'Acid', mood: 'Electric lime on black, loud and editorial', swatch: { ink: '#070707', card: '#121211', fg: '#f2f1ea', accent: '#c6f432', soft: '#e1fb8f' } },
   { id: 'ember', name: 'Ember', mood: 'Warm black, signal orange, cream type', swatch: { ink: '#0b0908', card: '#161210', fg: '#f4ede3', accent: '#ff5b1f', soft: '#ffb38a' } },
@@ -32,20 +32,23 @@ export function applySavedPalette() {
   }
 }
 
+/** Puts a palette on the page and remembers it on this device. */
+export function applyPalette(id: string) {
+  const root = document.documentElement
+  if (id === 'indigo') delete root.dataset.palette
+  else root.dataset.palette = id
+  try {
+    localStorage.setItem(KEY, id)
+  } catch {
+    /* not remembered, still applied */
+  }
+}
+
 /** A card per palette; picking one applies it straight away. */
 export function PalettePicker() {
   const [current, setCurrent] = useState(() => document.documentElement.dataset.palette ?? 'indigo')
 
-  useEffect(() => {
-    const root = document.documentElement
-    if (current === 'indigo') delete root.dataset.palette
-    else root.dataset.palette = current
-    try {
-      localStorage.setItem(KEY, current)
-    } catch {
-      /* not remembered, still applied */
-    }
-  }, [current])
+  useEffect(() => applyPalette(current), [current])
 
   return (
     <div role="radiogroup" aria-label="Palette" className="grid gap-2 sm:grid-cols-2">
@@ -77,7 +80,7 @@ export function PalettePicker() {
 }
 
 /** A miniature of the page in that palette: background, a card, a line of type, a button. */
-function Chip({ swatch: s }: { swatch: Swatch }) {
+export function Chip({ swatch: s }: { swatch: Swatch }) {
   return (
     <span className="relative block h-12 w-[72px] shrink-0 overflow-hidden rounded-md border border-white/10" style={{ background: s.ink }}>
       <span className="absolute left-1.5 top-1.5 h-1 w-7 rounded-full" style={{ background: s.fg }} />

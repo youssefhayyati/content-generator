@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronDown, Clapperboard, Copy, Cpu, Ear, Film, Image as ImageIcon, LoaderCircle, Mic, Music2, PenLine, Repeat, RotateCcw, Shuffle, Type } from 'lucide-react'
+import { Check, ChevronDown, Clapperboard, Copy, Cpu, Ear, Eraser, FileText, Film, Image as ImageIcon, Languages, LoaderCircle, Mic, Music2, PenLine, Repeat, RotateCcw, ScanFace, Shuffle, Type } from 'lucide-react'
 import { api, type Asset, type Generation, type ModelInfo } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
@@ -10,7 +10,22 @@ import { MediaThumb } from '../media/Media'
 import { Player } from '../sound/Player'
 import { Btn, inputClass } from '../ui'
 
-export const KIND_ICON = { text: Type, image: ImageIcon, video: Clapperboard, voice: Mic, music: Music2, reel: Film, listen: Ear }
+export const KIND_ICON = {
+  text: Type,
+  image: ImageIcon,
+  video: Clapperboard,
+  voice: Mic,
+  music: Music2,
+  reel: Film,
+  listen: Ear,
+  // The Creative Lab's engine and pod tools, with the icons their nodes use.
+  song: Music2,
+  dub: Languages,
+  swap: ScanFace,
+  design: FileText,
+  slideshow: Film,
+  retouch: Eraser,
+}
 
 /** "Local · Ollama" or "Cloud · Claude API". */
 export const reachLabel = (m: Pick<ModelInfo, 'local' | 'reach'>) => `${m.local ? 'Local' : 'Cloud'} · ${m.reach}`

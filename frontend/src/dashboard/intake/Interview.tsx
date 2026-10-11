@@ -41,12 +41,14 @@ export function Interview({
   onChange,
   onNext,
   nextBusy = false,
+  nextLabel = 'Make the content',
 }: {
   initial: Campaign
   embedded?: boolean
   onChange?: (c: Campaign) => void
   onNext?: () => void
   nextBusy?: boolean
+  nextLabel?: string
 }) {
   const user = useUser()
   const toast = useToast()
@@ -225,7 +227,6 @@ export function Interview({
     <div>
       {!embedded && (
         <PageHeader
-          eyebrow="Campaigns"
           title={
             campaign.title ? (
               <span className="block max-w-[22ch] truncate">{campaign.title}</span>
@@ -330,7 +331,7 @@ export function Interview({
                 )}
                 {onNext && (
                   <Btn variant={campaign.kit ? 'primary' : 'ghost'} size="sm" icon={ArrowRight} onClick={onNext} loading={nextBusy}>
-                    Make the content
+                    {nextLabel}
                   </Btn>
                 )}
                 {campaign.ai_available && campaign.brief.some((g) => g.fields.some((f) => f.suggested)) && (

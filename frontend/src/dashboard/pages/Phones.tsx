@@ -5,7 +5,7 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Device, type PublishingRun } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { fmtRelative, useApi, useInvalidate } from '../data'
+import { count, fmtRelative, useApi, useInvalidate } from '../data'
 import { PhoneLive } from '../phones/PhoneLive'
 import { useToast } from '../toast'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Segmented, Skeleton, Stagger } from '../ui'
@@ -49,7 +49,6 @@ export default function Phones() {
   return (
     <div>
       <PageHeader
-        eyebrow="Phones"
         title={
           <>
             The phones that <Serif>post.</Serif>
@@ -343,16 +342,12 @@ function PhoneCard({
           </p>
           <p className="mt-1 truncate text-[12.5px]">{run.goal}</p>
           <p className="mt-0.5 text-[11px] text-dim">
-            {run.totals.steps} steps · started {run.started_at ? fmtRelative(run.started_at) : '—'}
+            {count(run.totals.steps, 'step')} · started {run.started_at ? fmtRelative(run.started_at) : '—'}
           </p>
         </div>
       )}
 
-      {d.screenshot_url && (
-        <a href={d.screenshot_url} target="_blank" rel="noreferrer" className="mx-4 mb-3 block overflow-hidden rounded-lg border border-line" title="The phone's latest screen">
-          <img src={d.screenshot_url} alt={`${d.name}'s latest screen`} className="max-h-44 w-full object-cover object-top" loading="lazy" />
-        </a>
-      )}
+      {d.screenshot_url && <Screen url={d.screenshot_url} name={d.name} />}
 
       {confirming && (
         <div className="mt-auto border-t border-fail/25 bg-fail/[0.05] px-4 py-3">
@@ -400,17 +395,24 @@ function AutomationService() {
   const [token, setToken] = useState<string | null>(null)
   const [shown, setShown] = useState(false)
   const [rotating, setRotating] = useState(false)
+  const [unloaded, setUnloaded] = useState(false)
 
   useEffect(() => {
     api<{ token: string }>('/publishing/agent-token')
       .then((r) => setToken(r.token))
-      .catch(() => {})
+      .catch(() => setUnloaded(true))
   }, [])
 
   const copy = async () => {
     if (!token) return
-    await navigator.clipboard?.writeText(token)
-    toast('Token copied.')
+    try {
+      if (!navigator.clipboard) throw new Error()
+      await navigator.clipboard.writeText(token)
+      toast('Token copied.')
+    } catch {
+      setShown(true)
+      toast('Couldn’t copy it here: it’s shown, select it instead.', 'error')
+    }
   }
 
   const rotate = async () => {
@@ -418,6 +420,7 @@ function AutomationService() {
     try {
       const r = await api<{ token: string }>('/publishing/agent-token/rotate', { method: 'POST' })
       setToken(r.token)
+      setUnloaded(false)
       setShown(true)
       toast('Token rotated. Update the automation service — the old one is dead.')
     } catch (e) {
@@ -451,12 +454,12 @@ function AutomationService() {
             the phone service uses (the team phone is <span className="font-mono text-[11px]">heracles-phone</span>).
           </p>
         </div>
-        <div className="grid gap-5 px-5 py-4 lg:grid-cols-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 px-5 py-4 lg:grid-cols-2">
           <div>
             <Label>Agent token</Label>
             <div className="mt-2 flex items-center gap-2">
               <code className="h-9 flex-1 truncate rounded-md border border-line-2 bg-white/[0.02] px-3 font-mono text-[12px] leading-9 text-muted">
-                {token ? (shown ? token : '•'.repeat(12) + token.slice(-6)) : '…'}
+                {token ? (shown ? token : '•'.repeat(12) + token.slice(-6)) : unloaded ? 'Couldn’t be loaded. Reload, or rotate it.' : '…'}
               </code>
               <Btn size="sm" icon={shown ? EyeOff : Eye} onClick={() => setShown((s) => !s)} disabled={!token}>
                 {shown ? 'Hide' : 'Show'}
@@ -487,6 +490,18 @@ function AutomationService() {
         </div>
       </section>
     </Stagger>
+  )
+}
+
+/** The phone's latest screen; if its file can't be loaded, the card simply goes without. */
+function Screen({ url, name }: { url: string; name: string }) {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [url])
+  if (broken) return null
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="mx-4 mb-3 block overflow-hidden rounded-lg border border-line" title="The phone's latest screen">
+      <img src={url} alt={`${name}'s latest screen`} className="max-h-44 w-full object-cover object-top" loading="lazy" onError={() => setBroken(true)} />
+    </a>
   )
 }
 
@@ -570,8 +585,12 @@ function PhoneFields({ device, onDone }: { device: Device | null; onDone: () => 
       {driver === 'http' && (
         <label className="block">
           <Label>Device ID on the phone-control service</Label>
-          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="phone-1" className={cn(inputClass, 'mt-2')} />
+          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="heracles-phone" className={cn(inputClass, 'mt-2')} />
           <FieldError message={errors.ref} />
+          <p className="mt-1.5 text-[11.5px] text-dim">
+            The phone’s name (Phone: heracles-phone), not the team key: the key signs in to the console and stays in the
+            assistant’s <span className="font-mono text-[11px]">PHONE_API_KEY</span>.
+          </p>
         </label>
       )}
 

@@ -101,7 +101,6 @@ export default function Clips() {
   return (
     <div>
       <PageHeader
-        eyebrow="Highlights"
         title={<>One link. <Serif>Many vertical stories.</Serif></>}
         sub="Paste a YouTube video or an article once. FlowAI analyzes it once, selects several distinct moments or angles, then renders captioned 9:16 drafts for Reels or TikTok."
       />

@@ -29,7 +29,6 @@ export default function Inbox() {
   return (
     <div>
       <PageHeader
-        eyebrow="Inbox"
         title={
           <>
             Waiting on <Serif>you.</Serif>

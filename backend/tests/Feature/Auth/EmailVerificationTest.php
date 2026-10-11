@@ -34,6 +34,18 @@ class EmailVerificationTest extends TestCase
         Event::assertDispatched(Verified::class);
     }
 
+    public function test_with_verification_switched_off_every_account_counts_as_confirmed(): void
+    {
+        Notification::fake();
+        config(['auth.verify_email' => false]);
+        $user = User::factory()->unverified()->create();
+
+        $this->assertTrue($user->hasVerifiedEmail());
+        $user->sendEmailVerificationNotification();
+        Notification::assertNothingSent();
+        $this->actingAs($user)->spa()->getJson('/api/user')->assertJsonPath('email_verified', true);
+    }
+
     public function test_a_link_for_another_address_does_nothing(): void
     {
         $user = User::factory()->unverified()->create();

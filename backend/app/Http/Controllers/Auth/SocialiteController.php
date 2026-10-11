@@ -88,6 +88,7 @@ class SocialiteController extends Controller
                     'name' => $profile->getName() ?: $profile->getNickname() ?: Str::before($email, '@'),
                     'email' => $email,
                     'avatar_url' => $profile->getAvatar(),
+                    'preferences' => ['onboarding' => 'pending'],
                 ]);
                 $user->markEmailAsVerified();
             } elseif (! $user->hasVerifiedEmail()) {

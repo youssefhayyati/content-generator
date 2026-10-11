@@ -1,7 +1,24 @@
 # Everything at once: docker compose up -d
-#   dashboard http://localhost:5173 · API :8002 · assistant :8003 · music :8004 · Mailpit :8025
-# Without an NVIDIA GPU, run the assistant on the CPU instead, and the videos' songs elsewhere (or not):
-#   docker compose --profile assistant-cpu up -d --scale assistant=0 --scale music=0
+#   dashboard http://localhost:5173 · API :8002 · assistant :8003 · Mailpit :8025
+# The GPU models (pictures and videos, voices, songs, lip sync) run on a RunPod pod: runpod/ (one folder,
+# one deploy). Without an NVIDIA GPU here, run the assistant on the CPU instead:
+#   docker compose --profile assistant-cpu up -d --scale assistant=0
+# Settings for everything are in one file, .env next to this one (cp .env.example .env). The API, worker
+# and scheduler read it as backend/.env; the assistant gets it as its environment.
+
+# The Laravel services share the code, its packages and the settings file.
+x-laravel-volumes: &laravel-volumes
+  - ./backend:/app
+  # vendor/ lives in a Docker volume: reading thousands of files across the
+  # Windows bind mount on every request made each one take over a second.
+  - vendor:/app/vendor
+  # The stack's .env, as Laravel's own. Missing, compose stops and says so: cp .env.example .env
+  - type: bind
+    source: ./.env
+    target: /app/.env
+    bind:
+      create_host_path: false
+
 services:
   # The dashboard (React + Vite) on http://localhost:5173, the address the API trusts for its
   # session cookie. It proxies /api, /sanctum and /oauth to the API and /assistant/ to the
@@ -27,19 +44,15 @@ services:
   # Laravel API on http://localhost:8002. The dashboard proxies /api, /sanctum and /oauth here.
   api:
     build: ./docker/php
-    volumes:
-      - ./backend:/app
-      # vendor/ lives in a Docker volume: reading thousands of files across the
-      # Windows bind mount on every request made each one take over a second.
-      - vendor:/app/vendor
+    volumes: *laravel-volumes
     ports:
       # 8000/8001 are taken by other apps on this box; override per stack, e.g. API_PORT=8010.
       - "${API_PORT:-8002}:8000"
     environment:
       # Serve a few requests at once; the SPA fires several in parallel.
       PHP_CLI_SERVER_WORKERS: 4
-    # First start installs dependencies, creates .env, the app key and the SQLite file,
-    # and migrates (docker/php/start.sh). Restart the container after editing .env.
+    # First start installs dependencies, makes the app key (written into .env) and the SQLite
+    # file, and migrates (docker/php/start.sh). Restart the container after editing .env.
     command: start-api
     depends_on:
       - mailpit
@@ -48,20 +61,16 @@ services:
   # Waits for the api service to finish installing dependencies on the first start.
   worker:
     build: ./docker/php
-    volumes:
-      - ./backend:/app
-      - vendor:/app/vendor
-    command: sh -c 'until [ -f vendor/autoload.php ] && [ -f .env ]; do sleep 2; done; exec php artisan queue:work --queue=publishing,agents,media,default --sleep=1 --tries=1 --timeout=900'
+    volumes: *laravel-volumes
+    command: sh -c 'until [ -f vendor/autoload.php ] && grep -q "^APP_KEY=base64:" .env; do sleep 2; done; exec php artisan queue:work --queue=publishing,agents,media,default --sleep=1 --tries=1 --timeout=900'
     depends_on:
       - api
 
   # Fires due posts every minute and polls media generations (routes/console.php).
   scheduler:
     build: ./docker/php
-    volumes:
-      - ./backend:/app
-      - vendor:/app/vendor
-    command: sh -c 'until [ -f vendor/autoload.php ] && [ -f .env ]; do sleep 2; done; exec php artisan schedule:work'
+    volumes: *laravel-volumes
+    command: sh -c 'until [ -f vendor/autoload.php ] && grep -q "^APP_KEY=base64:" .env; do sleep 2; done; exec php artisan schedule:work'
     depends_on:
       - api
 
@@ -70,28 +79,25 @@ services:
   # under 1 GB at its busiest.
   sound:
     build: ./sound
+    # Off by default: voices, songs and speech recognition come from the RunPod pod now (VoiceStudio with
+    # Whisper large-v3, ACE-Step). To run it here anyway: docker compose --profile local-sound up -d sound,
+    # and set SOUND_URL=http://sound:8000 in .env.
+    profiles: [local-sound]
     mem_limit: 1000m
     restart: unless-stopped
 
   # The voice assistant (assistant/) on :8003: the Assistant page talks to it at /assistant/
-  # through the dashboard's proxy. Speech recognition (and its voice, without TTS_URL) runs on an
+  # through the dashboard's proxy. Speech recognition (and its voice, without VOICESTUDIO_URL) runs on an
   # NVIDIA GPU (Docker Desktop, or the NVIDIA container toolkit on Linux).
   # The first start builds the image and downloads its speech models (about 6 GB) into
-  # assistant-models. Settings (the Ollama key, ComfyUI, VoiceStudio) are in assistant/.env, made
-  # from assistant/.env.example; without that file it starts with the defaults.
+  # assistant-models. Its settings (the Ollama Cloud key, the pod's URLs and keys) are in .env.
   assistant:
     build: ./assistant
-    env_file:
-      - path: ./assistant/.env
-        required: false
+    env_file: .env
     environment: &assistant-env
       FLOWAI_URL: http://api:8000
       FLOWAI_DASHBOARD_URL: http://localhost:5173
       BROWSER_ENABLED: "false"
-      SOUND_URL: http://sound:8000  # the composer's moods under the videos it makes from posts
-      # Songs written for each video (ACE-Step, below). Another one, e.g. on a RunPod pod: set MUSIC_URL
-      # (and MUSIC_API_KEY in assistant/.env) in the shell or in .env next to this file
-      MUSIC_URL: ${MUSIC_URL:-http://music:8000}
     ports:
       - "${ASSISTANT_PORT:-8003}:8000"
     volumes: &assistant-volumes
@@ -111,7 +117,7 @@ services:
     restart: unless-stopped
 
   # The same without a GPU: docker compose --profile assistant-cpu up -d --scale assistant=0
-  # Recognition takes about 2 s after you stop talking; set TTS_URL (VoiceStudio) for its voice.
+  # Recognition takes about 2 s after you stop talking; set VOICESTUDIO_URL for its voice.
   # The dashboard finds it under the assistant name too.
   assistant-cpu:
     build:
@@ -119,9 +125,7 @@ services:
       args:
         TORCH: cpu
     profiles: [assistant-cpu]
-    env_file:
-      - path: ./assistant/.env
-        required: false
+    env_file: .env
     environment:
       <<: *assistant-env
       ASR_DEVICE: cpu
@@ -141,14 +145,19 @@ services:
   # Live phone screens for the Phones page (phone-bridge/server.js): scrcpy's H.264 video from a
   # phone plugged into this machine, and touches back, through the host's adb server. The Vite
   # proxy serves it at /phone-bridge/. It checks the API's signed tickets with APP_KEY, read
-  # from backend/.env. On :8006 (8004 is music's, 8005 lipsync's).
+  # from the stack's .env. On :8006 (8004 is music's, 8005 lipsync's).
   phone-bridge:
     image: node:22-alpine
     working_dir: /app
     command: node server.js
     volumes:
       - ./phone-bridge:/app:ro
-      - ./backend:/laravel:ro
+      - type: bind
+        source: ./.env
+        target: /laravel/.env
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       ADB_SERVER_HOST: host.docker.internal
     ports:
@@ -156,11 +165,14 @@ services:
     restart: unless-stopped
 
   # Songs for the assistant's videos: ACE-Step 1.5 (MIT), written from a description of the music
-  # ("upbeat acoustic pop, ukulele, hand claps, 112 bpm"). It shares the NVIDIA GPU with the
-  # assistant: its models wait on the CPU between songs. The first start downloads them (a few GB)
-  # into music-models; the API is on :8004 (POST /release_task, GET /health).
+  # ("upbeat acoustic pop, ukulele, hand claps, 112 bpm"). It runs on the RunPod pod (runpod/music, port
+  # 8003; MUSIC_URL and MUSIC_API_KEY in .env). This is the same service on this machine's GPU:
+  #   docker compose --profile music up -d music, and MUSIC_URL=http://music:8000 in .env
+  # Its models wait on the CPU between songs. The first start downloads them (a few GB) into music-models;
+  # the API is on :8004 (POST /release_task, GET /health).
   music:
-    build: ./music
+    build: ./runpod/music
+    profiles: [music]
     ports:
       - "${MUSIC_PORT:-8004}:8000"
     volumes:
@@ -175,13 +187,13 @@ services:
     restart: unless-stopped
 
   # Lip sync for the assistant's dubs: LatentSync (Apache-2.0) redraws a video's mouth to say new
-  # speech. It runs on the RunPod pod (lipsync/runpod/setup.sh, port 8004; LIPSYNC_URL and LIPSYNC_API_KEY
-  # in assistant/.env). This is the same service on this machine's GPU, for one with 8 GB free or more:
-  #   docker compose --profile lipsync up -d lipsync, and LIPSYNC_URL=http://lipsync:8000 in assistant/.env
+  # speech. It runs on the RunPod pod (runpod/lipsync, port 8004; LIPSYNC_URL and LIPSYNC_API_KEY in
+  # .env). This is the same service on this machine's GPU, for one with 8 GB free or more:
+  #   docker compose --profile lipsync up -d lipsync, and LIPSYNC_URL=http://lipsync:8000 in .env
   # Its model waits on the CPU between videos. 1.5 needs about 8 GB of GPU memory; LATENTSYNC_VERSION=1.6
   # is sharper but needs 18 GB. The first start downloads it (about 5.5 GB) into lipsync-models.
   lipsync:
-    build: ./lipsync
+    build: ./runpod/lipsync
     profiles: [lipsync]
     environment:
       LATENTSYNC_VERSION: ${LATENTSYNC_VERSION:-1.5}
@@ -207,7 +219,10 @@ services:
 
   # Local text models, free and private, at http://ollama:11434 from the API.
   # Pull a model once: docker compose exec ollama ollama pull llama3.1:8b
+  # Off by default: FlowAI writes with Ollama Cloud (OLLAMA_CLOUD_API_KEY in .env). To run models on
+  # this machine anyway: docker compose --profile local-ollama up -d ollama, and set OLLAMA_URL.
   ollama:
+    profiles: [local-ollama]
     image: ollama/ollama:latest
     volumes:
       - ollama:/root/.ollama

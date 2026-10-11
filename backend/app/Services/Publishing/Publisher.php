@@ -17,6 +17,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * The publisher. When a post's time comes it books the phone (one job at a time, R8), and the
@@ -38,11 +39,13 @@ class Publisher
      */
     public function dispatchDue(): int
     {
-        $posts = Post::with(['account.device', 'user'])
+        $posts = Post::with(['account.device', 'device', 'user'])
             ->where('status', PostStatus::Scheduled)
             ->where('scheduled_at', '<=', now())
             ->whereNotNull('approved_at') // only approved content publishes automatically (gate 6B)
-            ->whereHas('account', fn ($q) => $q->where('automation', true)->whereNotNull('device_id'))
+            ->whereHas('account', fn ($q) => $q->where('automation', true))
+            // the account's phone, or the one its Post node chose
+            ->where(fn ($q) => $q->whereNotNull('device_id')->orWhereHas('account', fn ($a) => $a->whereNotNull('device_id')))
             ->oldest('scheduled_at')
             ->limit(20)
             ->get();
@@ -71,12 +74,14 @@ class Publisher
      * Open a run: guard, book the phone atomically, mark the post publishing. Null when the
      * phone is busy — the post stays scheduled and the next minute tries again.
      */
-    public function open(Post $post, int $attempt = 1): ?PublishingRun
+    public function open(Post $post, int $attempt = 1, bool $byHand = false): ?PublishingRun
     {
-        $post->loadMissing(['account.device', 'user']);
+        $post->loadMissing(['account.device', 'device', 'user']);
         $account = $post->account;
-        $device = $account?->device;
-        if (! $account || ! $device || ! $post->isApproved() || ! $account->automation) {
+        $device = $post->device ?? $account?->device;
+        // A person pressing Post now is the go-ahead itself: the account's automated publishing (which
+        // lets scheduled posts go out on their own) isn't needed for that.
+        if (! $account || ! $device || ! $post->isApproved() || (! $account->automation && ! $byHand)) {
             return null;
         }
         if ($post->user->publishingPaused() || $device->isPaused()) {
@@ -150,6 +155,13 @@ class Publisher
             $this->settleFromScreen($run, $shot);
         } catch (PhoneFailed $e) {
             $this->fail($run, $e->getMessage());
+        } catch (Throwable $e) {
+            // Anything else ends the run too, rather than leaving the post "publishing" and the phone booked.
+            report($e);
+            // Never once it has ended (confirmed, say): failing it then would post it a second time.
+            if (($fresh = $run->fresh())?->isRunning()) {
+                $this->fail($fresh, 'The run stopped unexpectedly: '.class_basename($e).'.');
+            }
         }
     }
 
@@ -168,7 +180,9 @@ class Publisher
             'goal' => $run->goal,
             'account' => ['platform' => $account->platform->value, 'handle' => $account->handle, 'app' => $app],
             // id and title: so the agent can say which post it published (and check on it afterwards)
-            'post' => ['id' => $run->post_id, 'title' => $run->post->title, 'caption' => $run->post->body, 'format' => $run->post->format->value, 'placement' => $run->post->placement],
+            // driver: who posts it, the person's own agent (direct), the phone's (agent), or the phone's with
+            // theirs taking over if it fails (auto); null: the phone service's own setting.
+            'post' => ['id' => $run->post_id, 'title' => $run->post->title, 'caption' => $run->post->body, 'format' => $run->post->format->value, 'placement' => $run->post->placement, 'driver' => $run->post->phone_driver],
             'media' => $run->post->assets->map(fn (Asset $a) => ['id' => $a->id, 'kind' => $a->kind, 'mime' => $a->mime, 'url' => "/api/agent/assets/{$a->id}/file"])->values()->all(),
             // R7: the budget the run must stay within, so the agent doesn't have to guess.
             'limits' => ['step_budget' => (int) config('publishing.step_budget'), 'hard_timeout_seconds' => (int) config('publishing.hard_timeout_seconds')],
@@ -258,7 +272,7 @@ class Publisher
         $run = $this->open($post, 1);
         if (! $run) {
             $post->update(['status' => $post->status]); // keep it where a person can see it
-            abort_if($post->account?->device?->booked_run_id, 409, 'The phone is busy with another post. It starts as soon as it’s free.');
+            abort_if(($post->device ?? $post->account?->device)?->booked_run_id, 409, 'The phone is busy with another post. It starts as soon as it’s free.');
             abort(422, 'This post can’t publish automatically: it needs approval, automation on, and a phone that isn’t paused.');
         }
         ActionLog::record($post->user, 'you', 'publish.retry', $post, "Trying “{$run->goal}” again.", 'approved');
@@ -331,6 +345,9 @@ class Publisher
     /** Proven live: the post is Published, with the evidence on the record. */
     private function settle(PublishingRun $run, bool $ok, ?string $postUrl, ?string $note): void
     {
+        if (! $this->claim($run, 'confirmed')) {
+            return;
+        }
         $post = $run->post;
         $run->update([
             'status' => 'confirmed',
@@ -351,6 +368,9 @@ class Publisher
     /** Told to post, nothing proves it: Submitted, and the Inbox asks a person to look. */
     private function uncertain(PublishingRun $run, ?string $note): void
     {
+        if (! $this->claim($run, 'uncertain')) {
+            return;
+        }
         $run->update([
             'status' => 'uncertain',
             'evidence' => array_filter(['kind' => 'screenshot', 'ref' => $run->screenshot_id ? "/api/assets/{$run->screenshot_id}/file" : null, 'note' => $note]),
@@ -365,6 +385,9 @@ class Publisher
     /** It failed: release the phone, wait (R3), and either try again or hand it to a person. */
     private function fail(PublishingRun $run, string $why): void
     {
+        if (! $this->claim($run, 'failed')) {
+            return;
+        }
         $run->update(['status' => 'failed', 'error' => $why, 'ended_at' => now()]);
         $this->release($run);
         $post = $run->post;
@@ -414,6 +437,21 @@ class Publisher
         $post->update(['status' => PostStatus::Failed, 'error' => $why]);
         ActionLog::record($post->user, 'agent:publisher', 'publish.failed', $post, 'Couldn’t publish: '.$why, 'queued');
         rescue(fn () => app(Flows::class)->postFailed($post->fresh()));
+    }
+
+    /**
+     * End a running run, atomically: the agent finishing it and the stale sweep can race, and whichever
+     * comes second must change nothing (a live post failed and rescheduled would go up twice).
+     */
+    private function claim(PublishingRun $run, string $status): bool
+    {
+        $won = PublishingRun::whereKey($run->id)->where('status', 'running')->update(['status' => $status]) === 1;
+        if ($won) {
+            $run->status = $status;
+            $run->syncOriginalAttribute('status');
+        }
+
+        return $won;
     }
 
     private function release(PublishingRun $run): void

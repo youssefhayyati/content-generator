@@ -25,14 +25,16 @@ from pathlib import Path
 
 import httpx
 
-from .comfyui import MEDIA_INPUTS, ComfyClient, ComfyError, describe_error, file_kind, save_description
+from .comfyui import (MEDIA_INPUTS, ComfyClient, ComfyError, describe_error, describe_progress, file_kind,
+                     save_description)
 
 log = logging.getLogger(__name__)
 
 MAX_RUNNING = 10  # generations per conversation at once, e.g. a whole carousel (the pod runs them one by one)
 MAX_UPLOAD = 15 * 1024 * 1024
 MAX_WORKFLOW_DOWNLOAD = 10 * 1024 * 1024
-POLL_ERRORS = 5  # consecutive failed polls before giving up on a job
+POD_BLIP = 90  # seconds the pod may not answer while a job runs (RunPod's proxy, a restart) before it fails
+POLL_ERRORS = 5  # consecutive failed polls before giving up watching an install
 NAME_RE = re.compile(r"[A-Za-z0-9_\-.]{1,120}")
 MEDIA_KEY_RE = re.compile(r"(image|video|audio)(_\d+)?")
 CONTROL_KEYS = {"name", "template", "workflow", "wait", "timeout", "return_base64", "images", "videos", "audios"}
@@ -70,7 +72,10 @@ class MediaJob:
     started: float = field(default_factory=time.monotonic)
     prompt_id: str | None = None  # ComfyUI's id, once queued
     setup_id: str | None = None  # the manager's setup job, for installs
-    progress: str = ""
+    progress: str = ""  # where it is now: its stage, and a detail of it ("Generating · step 12 of 20")
+    stage: str = ""
+    share: float | None = None  # how much is done (0..1), when known
+    log: list[tuple[int, str]] = field(default_factory=list)  # (seconds in, stage) as it moved on
     result: str = ""
     detail: str = ""  # said with the result, e.g. which voice read a dub
     stop: Callable[[], None] | None = None  # stops its work elsewhere when cancelled, e.g. a dub's lip sync
@@ -82,6 +87,10 @@ class MediaJob:
              "seconds": round(time.monotonic() - self.started)}
         if self.progress and self.status == "running":
             d["progress"] = self.progress
+            if self.share is not None:
+                d["percent"] = round(self.share * 100)
+        if self.log:
+            d["steps"] = [f"{s // 60}:{s % 60:02d} {stage}" for s, stage in self.log[-8:]]
         if self.result:
             d["result"] = self.result
         return d
@@ -305,6 +314,7 @@ class MediaSession:
         await self.send(type="media_job", id=job.id, kind="generate", status="started",
                         workflow=job.workflow, prompt=job.prompt, makes=job.makes, label=job.label)
         try:
+            await self.step(job, "sending it to the pod")
             queued = await self.comfy.run(job.workflow, inputs)
             if queued.get("status") == "setting_up":
                 raise ComfyError(f"{job.workflow} is still being installed on the pod; try again in a few minutes")
@@ -313,6 +323,7 @@ class MediaSession:
             files = made_files(res)
             if not files:
                 raise ComfyError("it finished without producing any file")
+            await self.step(job, "downloading the result")
             made = []
             for f in files:
                 data, name = await self.comfy.download(f["url"]), f.get("filename") or "output"
@@ -353,23 +364,26 @@ class MediaSession:
         self.notify(note)
 
     async def _wait_for(self, job: MediaJob) -> dict:
+        """Polls the pod until the job is done, showing how far it has got (stage, step) as it goes."""
         deadline = time.monotonic() + self.timeout_s
-        delay, errors = 1.5, 0
+        delay, failing = 1.0, None  # failing: since when the pod hasn't answered
         while time.monotonic() < deadline:
             await asyncio.sleep(delay)
-            delay = min(delay * 1.25, 5)
+            delay = min(delay * 1.25, 3)
             try:
                 res = await self.comfy.result(job.prompt_id)
-                errors = 0
+                failing = None
             except ComfyError:
-                errors += 1  # a network blip shouldn't lose a five-minute video
-                if errors >= POLL_ERRORS:
+                failing = failing or time.monotonic()  # a blip or a restart shouldn't lose a five-minute video
+                if time.monotonic() - failing > POD_BLIP:
                     raise
                 continue
             if res.get("status") == "done":
                 return res
             if res.get("status") == "error":
                 raise ComfyError(describe_error(res.get("messages")))
+            if where := describe_progress(res.get("progress")):
+                await self.step(job, *where)
         raise ComfyError(f"no result after {_seconds(self.timeout_s)}; the pod may have restarted")
 
     # --- made here and on the pod ------------------------------------------------------
@@ -388,9 +402,21 @@ class MediaSession:
         return {"job": job.id, "status": "started", "makes": makes,
                 "expected_time": "a few minutes" if makes == "video" else "under a minute"}
 
-    async def step(self, job: MediaJob, text: str):
-        job.progress = text
-        await self.send(type="media_job", id=job.id, kind="generate", status="running", text=text)
+    async def step(self, job: MediaJob, stage: str, detail: str = "", share: float | None = None):
+        """Shows where a job has got: its stage (a new line in its log when it changes, e.g. "generating"),
+        a detail of it ("step 12 of 20") and how much is done (0..1) when known."""
+        stage = stage[:1].upper() + stage[1:]
+        if stage != job.stage:
+            job.stage = stage
+            job.log.append((round(time.monotonic() - job.started), stage))
+        job.share = None if share is None else round(max(0.0, min(share, 1.0)), 3)
+        job.progress = f"{stage} · {detail}" if detail else stage
+        await self.send(**self._running(job))
+
+    @staticmethod
+    def _running(job: MediaJob) -> dict:
+        return {"type": "media_job", "id": job.id, "kind": "generate", "status": "running", "text": job.progress,
+                "stage": job.stage, "share": job.share, "at": round(time.monotonic() - job.started)}
 
     async def on_pod(self, job: MediaJob, workflow: str, inputs: dict) -> list[tuple[bytes, str]]:
         """Runs a workflow for a pipeline's job and waits: the files it made, as (bytes, file name)."""
@@ -401,6 +427,7 @@ class MediaSession:
         files = made_files(await self._wait_for(job))
         if not files:
             raise ComfyError("it finished without producing any file")
+        await self.step(job, "downloading the result")
         return [(await self.comfy.download(f["url"]), f.get("filename") or "output") for f in files]
 
     async def _run_pipeline(self, job: MediaJob, work):
@@ -446,7 +473,8 @@ class MediaSession:
 
     def render(self, label: str, prompt: str, work, then=None) -> dict:
         """A file made on this machine in the background, like a generation: work(progress) runs in a
-        thread and returns (bytes, file name, meta); progress(share) may be called with 0..1."""
+        thread and returns (bytes, file name, meta); progress(share, stage=None, detail="") may be called
+        with how much is done (0..1), and the stage it is at when that changes."""
         running = [j for j in self.jobs.values() if j.kind == "render" and j.status == "running"]
         if len(running) >= 2:
             return {"error": "two videos are already being made; wait for one to finish"}
@@ -458,18 +486,17 @@ class MediaSession:
 
     async def _run_render(self, job: MediaJob, work):
         loop = asyncio.get_running_loop()
-        shown = -1
+        shown, stage = None, "starting"  # kept here: job.stage changes later, in the event loop
 
-        def progress(share: float):  # from the worker thread
-            nonlocal shown
+        def progress(share: float, now: str | None = None, detail: str = ""):  # from the worker thread
+            nonlocal shown, stage
             if job.status != "running":
                 raise RuntimeError("cancelled")  # stops the worker
+            stage = now or stage
             pct = int(max(0, min(share, 1)) * 100) // 5 * 5
-            if pct != shown:
-                shown = pct
-                job.progress = f"{pct}%"
-                asyncio.run_coroutine_threadsafe(self.send(type="media_job", id=job.id, kind="generate",
-                                                           status="running", text=job.progress), loop)
+            if (pct, stage, detail) != shown:
+                shown = pct, stage, detail
+                asyncio.run_coroutine_threadsafe(self.step(job, stage, detail, pct / 100), loop)
 
         await self.send(type="media_job", id=job.id, kind="generate", status="started", workflow=job.workflow,
                         prompt=job.prompt, makes="video", label=job.label)
@@ -525,8 +552,7 @@ class MediaSession:
                 raise ComfyError("the name may only use letters, digits, _ - and . (e.g. wan14_i2v)")
             self._pod()
             sources = [s for s in (template, file, url) if s not in (None, "")]
-            kit = self.comfy.descriptions.parent / "workflows" / f"{name}.json"  # one that comes with the assistant
-            if len(sources) != 1 and not (not sources and kit.is_file()):
+            if len(sources) != 1:
                 raise ComfyError("give exactly one of template, file or url")
             try:
                 await self.comfy.refresh()
@@ -535,9 +561,7 @@ class MediaSession:
             if name in self.comfy.workflows and not replace:
                 raise ComfyError(f"a workflow named {name} already exists; pick another name, "
                                  "or set replace if the user wants to overwrite it")
-            if not sources:
-                started = await self.comfy.register(name, json.loads(kit.read_text(encoding="utf-8")))
-            elif template:
+            if template:
                 started = await self.comfy.install_template(str(template), name)
             elif url:
                 started = await self.comfy.register(name, await self._fetch_workflow(str(url)))
@@ -549,7 +573,7 @@ class MediaSession:
                 started = await self.comfy.register(name, item.data)
         except ComfyError as exc:
             return {"error": str(exc)}
-        if description and sources:  # one that comes with the assistant has its line already
+        if description:
             save_description(self.comfy.descriptions, name, description)
         self.job_count += 1
         job = MediaJob(self.job_count, "install", name, setup_id=started["job_id"])
@@ -617,7 +641,7 @@ class MediaSession:
                 raise ComfyError("setup finished but the workflow is not runnable")
             if wf.slots.get("prompt", 0) > 1:
                 problems.append(f"it has {wf.slots['prompt']} prompt inputs, so it may contain more than one "
-                                "pipeline (see comfyui/API.md, Recipe A)")
+                                "pipeline (see runpod/comfyui/API.md, Recipe A)")
             job.status = "done"
             job.result = wf.summary() + (f" Problems: {'; '.join(problems)}." if problems else "")
             await self.send(type="media_job", id=job.id, kind="install", status="done", text=job.result)
@@ -660,10 +684,11 @@ class MediaSession:
                                             i.get("workflow", ""), i.get("prompt", ""), i.get("data"), i.get("meta"))
 
     def running(self) -> list[dict]:
-        """Generations and videos still going, as the page shows them when the conversation is reopened."""
-        return [{"type": "media_job", "id": j.id, "kind": "generate", "status": "started", "workflow": j.workflow,
-                 "prompt": j.prompt, "makes": j.makes, "label": j.label,
-                 "seconds": round(time.monotonic() - j.started)}
+        """Generations and videos still going, as the page shows them when the conversation is reopened: where
+        each is, and the stages it went through."""
+        return [{**self._running(j), "status": "started", "workflow": j.workflow, "prompt": j.prompt,
+                 "makes": j.makes, "label": j.label, "seconds": round(time.monotonic() - j.started),
+                 "log": [{"at": at, "stage": stage} for at, stage in j.log]}
                 for j in self.jobs.values() if j.kind in ("generate", "render") and j.status == "running"]
 
     # --- status / cancel ------------------------------------------------------------

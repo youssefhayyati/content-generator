@@ -83,6 +83,16 @@ def _archetype(a: dict) -> dict:
             "use": a.get("use_case") or "", "featured": bool(a.get("is_featured"))}
 
 
+def _ok(r: httpx.Response) -> httpx.Response:
+    """The server's own answer. RunPod's proxy answers 200 with a web page while VoiceStudio restarts: that
+    is an error too (as speech it would be read as noise)."""
+    r.raise_for_status()
+    if "text/html" in r.headers.get("content-type", ""):
+        raise httpx.HTTPStatusError(f"{r.request.url} answered with a web page, not VoiceStudio (is it restarting?)",
+                                    request=r.request, response=r)
+    return r
+
+
 def _wav(data: bytes) -> np.ndarray:
     """16-bit WAV -> 24 kHz float32 mono."""
     with wave.open(io.BytesIO(data)) as w:
@@ -109,16 +119,32 @@ class VoiceStudioTTS:
         self.speed, self.model = speed, model
         self._catalog: list[dict] | None = None
         self._catalog_lock = threading.Lock()
+        self._wanted, self._default_voice = voice, None
         t0 = time.perf_counter()
-        self.default = self._default(voice)
-        self._speech("Warming up.", self.default["id"])  # the server loads the model on its first request (about a minute)
-        log.info("TTS: VoiceStudio at %s, ready in %.1f s; voice %s (%s)", url, time.perf_counter() - t0,
-                 self.default["name"], self.default["id"])
+        try:
+            self._speech("Warming up.", self.default["id"])  # the server loads the model on its first request (about a minute)
+            log.info("TTS: VoiceStudio at %s, ready in %.1f s; voice %s (%s)", url, time.perf_counter() - t0,
+                     self.default["name"], self.default["id"])
+        except httpx.HTTPError as exc:
+            # The pod restarting mustn't keep the assistant (and the phone's publishing) from starting
+            log.warning("TTS: VoiceStudio at %s isn't answering yet (%s); speech stays silent until it does", url, exc)
+
+    @property
+    def default(self) -> dict:
+        """TTS_VOICE as a profile, looked up once VoiceStudio answers (it may be down when we start)."""
+        if self._default_voice is None:
+            try:
+                self._default_voice = self._default(self._wanted)
+            except httpx.HTTPError as exc:
+                log.warning("VoiceStudio's voices can't be read yet: %s", exc)
+                return {"id": "default", "name": "VoiceStudio default", "description": "VoiceStudio isn't answering",
+                        "language": "", "archetype": None}
+        return self._default_voice
 
     def _default(self, wanted: str) -> dict:
         """TTS_VOICE as a profile: a profile's id or name, or a catalog voice's id. Otherwise the
         server's oldest profile (its demo voice on a fresh install), which stays put as more are added."""
-        profiles = sorted(self.http.get("/profiles").raise_for_status().json(), key=lambda p: p.get("created_at") or 0)
+        profiles = sorted(_ok(self.http.get("/profiles")).json(), key=lambda p: p.get("created_at") or 0)
         wanted = wanted.strip()
         if wanted.lower() in OPENAI_VOICES:
             log.warning("TTS_VOICE=%s gives a different voice every sentence on VoiceStudio; using a profile instead",
@@ -142,7 +168,7 @@ class VoiceStudioTTS:
         if seconds:
             body["duration"] = round(seconds, 2)
         r = self.http.post("/v1/audio/speech", json=body, **({"timeout": 300} if seconds else {}))
-        r.raise_for_status()
+        _ok(r)
         return np.frombuffer(r.content, dtype="<i2").astype(np.float32) / 32768.0
 
     def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None) -> np.ndarray:
@@ -158,7 +184,7 @@ class VoiceStudioTTS:
 
     def profiles(self) -> list[dict]:
         """The server's voices, oldest first."""
-        found = self.http.get("/profiles").raise_for_status().json()
+        found = _ok(self.http.get("/profiles")).json()
         return [_profile(p) for p in sorted(found, key=lambda p: p.get("created_at") or 0)]
 
     def catalog(self, q: str = "", lang: str = "", exclude: set[str] = frozenset()) -> tuple[list[dict], int, list[str]]:
@@ -187,7 +213,7 @@ class VoiceStudioTTS:
             if self._catalog is None:
                 voices, offset = [], 0
                 while True:
-                    page = self.http.get("/archetypes", params={"limit": 500, "offset": offset}).raise_for_status().json()
+                    page = _ok(self.http.get("/archetypes", params={"limit": 500, "offset": offset})).json()
                     voices += [_archetype(a) for a in page["items"]]
                     offset += 500
                     if offset >= page["total"] or not page["items"]:
@@ -235,25 +261,25 @@ class VoiceStudioTTS:
 
     def adopt(self, archetype: str) -> dict:
         """A catalog voice as a profile: rendered the first time (about 3 s), the same one after that."""
-        pid = self.http.post(f"/archetypes/{archetype}/use").raise_for_status().json()["profile_id"]
-        return _profile(self.http.get(f"/profiles/{pid}").raise_for_status().json())
+        pid = _ok(self.http.post(f"/archetypes/{archetype}/use")).json()["profile_id"]
+        return _profile(_ok(self.http.get(f"/profiles/{pid}")).json())
 
     def clone(self, name: str, wav: bytes, text: str = "") -> dict:
         """A voice cloned from a recording (a WAV of one person speaking, best 5 to 20 seconds) as a
         profile. text: what the recording says, which makes the clone closer."""
         r = self.http.post("/profiles", timeout=180, files={"ref_audio": ("reference.wav", wav, "audio/wav")},
                            data={"name": name, "kind": "clone", "ref_text": text, "language": "Auto"})
-        r.raise_for_status()
+        _ok(r)
         made = r.json()
         if "kind" not in made:  # only its id came back
-            made = self.http.get(f"/profiles/{made['id']}").raise_for_status().json()
+            made = _ok(self.http.get(f"/profiles/{made['id']}")).json()
         return _profile(made)
 
     def listen(self, wav: bytes) -> str:
         """What a recording says (the server's speech recognition, in any language)."""
         r = self.http.post("/v1/audio/transcriptions", timeout=300, files={"file": ("speech.wav", wav, "audio/wav")},
                            data={"model": "whisper-1", "response_format": "json"})
-        r.raise_for_status()
+        _ok(r)
         return " ".join(str(r.json().get("text") or "").split())
 
     def sample(self, voice: str | None = None, archetype: str | None = None) -> np.ndarray:
@@ -261,5 +287,5 @@ class VoiceStudioTTS:
         first time it is asked for)."""
         path = f"/archetypes/{archetype}/preview" if archetype else f"/profiles/{voice or self.default['id']}/audio"
         r = self.http.get(path, timeout=120)
-        r.raise_for_status()
+        _ok(r)
         return _wav(r.content)[: SAMPLE_SECONDS * SAMPLE_RATE]

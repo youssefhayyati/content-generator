@@ -45,7 +45,54 @@ class HiggsfieldClient
      */
     public function status(string $statusUrl): array
     {
-        return $this->call(fn () => $this->http()->get($statusUrl))->json() ?? [];
+        $status = $this->call(fn () => $this->http()->get($statusUrl))->json();
+        // A gateway's error page (HTML, 200) isn't an answer: it must not read as a failed generation.
+        if (! is_array($status) || ! isset($status['status'])) {
+            throw new GenerationFailed('Higgsfield’s status answer wasn’t readable. Asking again shortly.');
+        }
+
+        return $status;
+    }
+
+    /**
+     * Start training a Soul ID character from pictures (public URLs). It isn't a generation: it answers
+     * with the character's id, polled at /v1/custom-references/{id} until it's completed.
+     *
+     * @param  list<string>  $imageUrls
+     * @return array{id: string, status_url: string}
+     */
+    public function createCharacter(string $name, string $version, array $imageUrls, string $idempotencyKey): array
+    {
+        $r = $this->call(fn () => $this->http()->withHeaders(['Idempotency-Key' => $idempotencyKey])->post('/v1/custom-references', [
+            'name' => mb_substr($name, 0, 100),
+            'model_version' => $version,
+            'input_images' => array_map(fn ($url) => ['type' => 'image_url', 'image_url' => $url], $imageUrls),
+        ]));
+        $id = (string) ($r->json('id') ?? throw new GenerationFailed('Higgsfield didn’t start training the character.'));
+
+        return ['id' => $id, 'status_url' => "/v1/custom-references/{$id}"];
+    }
+
+    /**
+     * Cancel a request while it's still queued, so a stopped node isn't paid for. Once it has started
+     * Higgsfield refuses (400), and that's fine: nothing more can be done.
+     */
+    public function cancel(string $requestId): void
+    {
+        rescue(fn () => $this->http()->timeout(10)->post("/requests/{$requestId}/cancel"), report: false);
+    }
+
+    /**
+     * A tool's style presets (Restyle's looks): id, name and a preview picture each.
+     *
+     * @return list<array{id: string, name: string, preview_url: string|null}>
+     */
+    public function presets(string $path): array
+    {
+        return collect($this->call(fn () => $this->http()->timeout(20)->get($path))->json('items') ?? [])
+            ->filter(fn ($p) => is_array($p) && filled($p['id'] ?? null))
+            ->map(fn ($p) => ['id' => (string) $p['id'], 'name' => (string) ($p['name'] ?? 'Style'), 'preview_url' => $p['preview_url'] ?? null])
+            ->values()->all();
     }
 
     /**
@@ -54,9 +101,16 @@ class HiggsfieldClient
     public function upload(string $contents, string $mime): string
     {
         $slot = $this->call(fn () => $this->http()->post('/files/generate-upload-url', ['content_type' => $mime]));
+        if (! is_string($slot->json('upload_url')) || ! is_string($slot->json('public_url'))) {
+            throw new GenerationFailed('Higgsfield didn’t give a place to upload the input to.');
+        }
         // The presigned URL gets the file and its own headers, never the API credentials.
-        $put = Http::timeout(120)->withHeaders((array) $slot->json('upload_headers', []) + ['Content-Type' => $mime])
-            ->withBody($contents, $mime)->put($slot->json('upload_url'));
+        try {
+            $put = Http::timeout(120)->withHeaders((array) $slot->json('upload_headers', []) + ['Content-Type' => $mime])
+                ->withBody($contents, $mime)->put($slot->json('upload_url'));
+        } catch (ConnectionException) {
+            throw new GenerationFailed('Couldn’t upload the input to Higgsfield. Try again in a moment.');
+        }
         if (! $put->successful()) {
             throw new GenerationFailed('Couldn’t upload the input image to Higgsfield.');
         }

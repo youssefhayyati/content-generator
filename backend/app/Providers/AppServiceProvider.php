@@ -43,6 +43,12 @@ class AppServiceProvider extends ServiceProvider
         ]);
 
         // The campaign intake: one request per answer, so faster than writing, but still capped per day.
+        // Creative Lab runs, per person: a graph runs many nodes at once, so it's roomier than writing.
+        RateLimiter::for('lab', fn (Request $request) => [
+            Limit::perMinute(60)->by('lab-minute:'.$request->user()->id),
+            Limit::perDay(2000)->by('lab-day:'.$request->user()->id),
+        ]);
+
         RateLimiter::for('intake', fn (Request $request) => [
             Limit::perMinute(20)->by('intake-minute:'.$request->user()->id),
             Limit::perDay(300)->by('intake-day:'.$request->user()->id),

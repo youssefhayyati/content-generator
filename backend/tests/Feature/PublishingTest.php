@@ -285,6 +285,22 @@ class PublishingTest extends TestCase
         $this->spa()->actingAs(User::factory()->create())->get("/api/devices/{$this->phone->id}/screenshot")->assertForbidden();
     }
 
+    public function test_a_run_ends_once_when_the_agent_and_the_sweep_race(): void
+    {
+        $http = Device::factory()->for($this->user)->create(['driver' => 'http', 'ref' => 'phone-1']);
+        $account = Account::factory()->for($this->user)->automated()->create(['device_id' => $http->id]);
+        $post = Post::factory()->for($this->user)->for($account)->scheduled(now()->subMinute())->create(['approved_at' => now()]);
+        $run = app(Publisher::class)->open($post);
+
+        // The sweep loaded the run while it was still running; the agent confirms it meanwhile.
+        $seenBySweep = PublishingRun::find($run->id);
+        app(Publisher::class)->finish($run, 'confirmed', 'https://instagram.com/p/abc', null);
+        app(Publisher::class)->finish($seenBySweep, 'failed', null, 'The agent went quiet before finishing.');
+
+        $this->assertSame('confirmed', $run->refresh()->status);
+        $this->assertSame(PostStatus::Published, $post->refresh()->status); // not rescheduled, so not posted twice
+    }
+
     public function test_an_http_phones_run_waits_for_the_agent(): void
     {
         $http = Device::factory()->for($this->user)->create(['driver' => 'http', 'ref' => 'phone-1']);

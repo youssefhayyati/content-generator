@@ -70,8 +70,8 @@ final class Interviewer
             'asked' => 1,
         ]);
         $campaign->say('agency', self::GREETING);
-        $campaign->say('client', $depth === 'quick' ? 'Quick' : 'Full');
-        $campaign->say('agency', ($depth === 'quick' ? 'Quick it is. ' : 'Great, let’s do it properly. ').$first['question']);
+        $campaign->say('client', $depth === 'quick' ? 'Quick: 5 questions' : 'Thorough: 10 questions');
+        $campaign->say('agency', ($depth === 'quick' ? 'Five it is. ' : 'Great, ten questions to get it right. ').$first['question']);
         $campaign->save();
 
         return $campaign;
@@ -119,7 +119,7 @@ final class Interviewer
         $campaign->fields = array_map(fn (string $v) => Brief::isSuggested($v) ? '' : $v, $campaign->fields);
         $campaign->depth = 'full';
         $campaign->completed_at = null;
-        $campaign->asked = min($campaign->asked, 6);
+        $campaign->asked = min($campaign->asked, Brief::MAX_QUESTIONS['quick']);
         $campaign->say('client', 'Answer more questions');
         $campaign->save();
 
@@ -202,8 +202,7 @@ final class Interviewer
 
     private function askScripted(Campaign $campaign): void
     {
-        $next = collect(Brief::keys())->first(fn (string $key) => $campaign->value($key) === ''
-            && ($campaign->depth === 'full' || in_array($key, Brief::QUICK, true)));
+        $next = collect(Brief::needed($campaign->depth))->first(fn (string $key) => $campaign->value($key) === '');
 
         if (! $next) {
             $this->finish($campaign);
@@ -247,7 +246,7 @@ final class Interviewer
         if ($last && $last['who'] === 'client' && empty($last['photos'])) {
             $key = $campaign->pending && $campaign->value($campaign->pending) === ''
                 ? $campaign->pending
-                : collect(Brief::keys())->first(fn (string $k) => $campaign->value($k) === '');
+                : collect(Brief::needed($campaign->depth))->first(fn (string $k) => $campaign->value($k) === '');
             if ($key) {
                 $campaign->fields = [...$campaign->fields, $key => Str::limit($last['text'], 500)];
             }

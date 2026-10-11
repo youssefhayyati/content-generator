@@ -1,0 +1,514 @@
+{
+    "picture-models": {
+        "media": {
+            "model-a": {
+                "kind": "image",
+                "src": "/showcase/lab/picture-models/model-a.webp",
+                "sm": "/showcase/lab/picture-models/model-a-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#807b6f"
+            }
+        },
+        "words": {
+            "The caption": "Cold brew season is open at Low Tide. The seagulls heard first and they've been insufferable about it.\n\nNo fanfare needed. Slow-steeped coffee over ice, taken on the harbour wall while the light goes gold and the boats blur into the background. Some things don't need improving.\n\nCome by the harbour. The brew's cold, the stone's warm, the season's open.\n\n#LowTideCoffee #ColdBrewSeason #IcedColdBrew #HarbourSide #ColdBrewCoffee"
+        }
+    },
+    "product-scene": {
+        "media": {
+            "scene": {
+                "kind": "image",
+                "src": "/showcase/lab/product-scene/scene.webp",
+                "sm": "/showcase/lab/product-scene/scene-sm.webp",
+                "w": 880,
+                "h": 1168,
+                "tone": "#afab9e"
+            }
+        },
+        "words": {
+            "The caption": "Some mornings your skin asks for something quieter. This is 4% niacinamide and green tea, drawn one measured drop at a time.\n\nInside the frosted glass: niacinamide at four percent, held in balance with green tea. Nothing loud, nothing rushed — a formula that keeps to its measure.\n\nOne dropper is the whole ritual. Calm skin by morning, said quietly, because it does not need more volume.\n\nTry the 7 ml sample. A small bottle, sized for deciding.\n\n#DewTheory #NiacinamideSerum #CalmingSkincare #MorningRitual #GreenTeaSkincare"
+        }
+    },
+    "words-over-picture": {
+        "media": {
+            "design": {
+                "kind": "image",
+                "src": "/showcase/lab/words-over-picture/design.webp",
+                "sm": "/showcase/lab/words-over-picture/design-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#7a684c"
+            }
+        },
+        "words": {
+            "The caption": "Pastel peonies and ranunculus, still cool from the morning market, waiting to be carried home to Mum.\n\nMother's Day is nearly here, and the shop is full of the season's best: blush peonies, layered ranunculus, stems that open gently over the week.\n\nEach bouquet is made to order, so tell us when you'd like to collect yours and we'll have it wrapped and waiting, paper the colour of the petals.\n\nOrder by Thursday through the link in our bio, and we'll take care of the rest.\n\n#WildStem #MothersDayBouquets #PeonySeason #Ranunculus #NeighbourhoodFlorist"
+        }
+    },
+    "moving-pictures": {
+        "media": {
+            "reel": {
+                "kind": "video",
+                "src": "/showcase/lab/moving-pictures/reel.mp4",
+                "poster": "/showcase/lab/moving-pictures/reel-poster.webp",
+                "w": 406,
+                "h": 720,
+                "tone": "#a88972",
+                "seconds": 20.6,
+                "sound": true
+            },
+            "frame": {
+                "kind": "image",
+                "src": "/showcase/lab/moving-pictures/frame.webp",
+                "sm": "/showcase/lab/moving-pictures/frame-sm.webp",
+                "w": 732,
+                "h": 1280,
+                "tone": "#a8886f"
+            }
+        },
+        "words": {
+            "The lines the voice reads": "All afternoon our ragù has been simmering slowly, the way Nonna insisted.\nTonight we fold it through fresh pappardelle, rolled by hand this morning. Tonight's special: pappardelle al ragù.\nThe candle is lit and your table is waiting at Osteria Nove. Book a table tonight.",
+            "The caption": "Tonight’s special at Osteria Nove: pappardelle al ragù, slow-cooked and folded through fresh pasta ribbons for your table.\n\nThe pasta is fresh, the ragù has taken its time, and the room is set with linen, warm candlelight and the quiet promise of another forkful.\n\nBook a table tonight.\n#OsteriaNove #PappardelleAlRagu #SlowCookedRagu #FreshPasta #CandlelitDinner"
+        }
+    },
+    "moving-pictures-translated": {
+        "media": {
+            "reel": {
+                "kind": "video",
+                "src": "/showcase/lab/moving-pictures-translated/reel.mp4",
+                "poster": "/showcase/lab/moving-pictures-translated/reel-poster.webp",
+                "w": 406,
+                "h": 720,
+                "tone": "#704c33",
+                "seconds": 11.8,
+                "sound": true
+            }
+        },
+        "words": {
+            "The lines, in English": "Every cup starts as a block of clay.\nWe throw it, trim it and glaze it by hand.\nWeekend wheel classes are open: come make your own.",
+            "Translated, read in French": "Chaque tasse naît d'un bloc d'argile.\nOn la tourne, on l'ébarbe et on l'émaille à la main.\nLes cours de tournage du week-end sont ouverts : venez faire la vôtre."
+        }
+    },
+    "video-models": {
+        "media": {
+            "wan": {
+                "kind": "video",
+                "src": "/showcase/lab/video-models/wan.mp4",
+                "poster": "/showcase/lab/video-models/wan-poster.webp",
+                "w": 396,
+                "h": 720,
+                "tone": "#878276",
+                "seconds": 5,
+                "sound": false
+            }
+        },
+        "words": {
+            "The caption": "The mist still sits on the river. The light is just breaking gold. And the bridges are ours — 6:30, every Saturday.\n\nNorthline Run Club runs the river bridges at sunrise. All paces. Fast, slow, first time, coming back. Nobody left behind.\n\nShow up once. The rest takes care of itself.\n\n#NorthlineRunClub #SunriseRun #SaturdayMiles #BridgeRun #NobodyLeftBehind"
+        }
+    },
+    "recording-to-posts": {
+        "media": {
+            "memo": {
+                "kind": "audio",
+                "src": "/showcase/lab/recording-to-posts/memo.mp3",
+                "w": 0,
+                "h": 0,
+                "tone": "#222222",
+                "seconds": 21.5,
+                "sound": true
+            }
+        },
+        "words": {
+            "The post": "Nobody stays late on the last Friday anymore.\n\nThat's what Northwind's controller told me. Not \"we saved six days.\" Not \"the reports are cleaner.\" That.\n\nWhen they came to us, their close took nine days. Nine. Most of it was the same ten spreadsheets, copied by hand, every month.\n\nWe connected their bank feeds and let the reconciliation run overnight. Last month they closed in three days.\n\nThe speed is good. But the part nobody puts in a business case is this: a shorter close gives people their evenings back. Month-end stops being something the team braces for.\n\nIf your close still runs on copied spreadsheets, read how Northwind did it.\n\n#Accounting #MonthEndClose #Finance",
+            "The moment it found": "Their controller told me, the best part is not the speed, it is that nobody stays late on the last Friday anymore."
+        }
+    },
+    "voiceover-video": {
+        "media": {
+            "reel": {
+                "kind": "video",
+                "src": "/showcase/lab/voiceover-video/reel.mp4",
+                "poster": "/showcase/lab/voiceover-video/reel-poster.webp",
+                "w": 406,
+                "h": 720,
+                "tone": "#58402a",
+                "seconds": 11.7,
+                "sound": true
+            },
+            "picture": {
+                "kind": "image",
+                "src": "/showcase/lab/voiceover-video/picture.webp",
+                "sm": "/showcase/lab/voiceover-video/picture-sm.webp",
+                "w": 732,
+                "h": 1280,
+                "tone": "#74563e"
+            }
+        },
+        "words": {
+            "The script": "Something new at Margins Books. A whole table of short novels. Every one under 200 pages. Start one after lunch. Finish it by dinner. Your to-be-read pile has officially been warned. Come browse this weekend."
+        }
+    },
+    "thought": {
+        "media": {
+            "picture": {
+                "kind": "image",
+                "src": "/showcase/lab/thought/picture.webp",
+                "sm": "/showcase/lab/thought/picture-sm.webp",
+                "w": 1280,
+                "h": 732,
+                "tone": "#a6becc"
+            }
+        },
+        "words": {
+            "The post": "Most closes run slow because of copying, not accounting.\n\nThink about where the days actually go. Totals pasted from one spreadsheet into another. Invoice numbers re-keyed. Bank lines moved by hand into the reconciliation file.\n\nThat's not finance work. That's transcription.\n\nNorthwind cut its month-end close from 9 days to 3. The accounting didn't change. The copying did. Ledgerly moves the data, so the team spends close week closing.\n\nIf your close runs long, count the copy-paste steps before you question the accountants.\n\nRead how they did it: [link]\n\n#MonthEndClose #FinanceLeadership #Accounting"
+        }
+    },
+    "hf-ads": {
+        "media": {
+            "ad-1": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-ads/ad-1.webp",
+                "sm": "/showcase/lab/hf-ads/ad-1-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#4f5e3f"
+            },
+            "ad-2": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-ads/ad-2.webp",
+                "sm": "/showcase/lab/hf-ads/ad-2-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#a1a989"
+            },
+            "ad-3": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-ads/ad-3.webp",
+                "sm": "/showcase/lab/hf-ads/ad-3-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#bfb7a8"
+            },
+            "ad-4": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-ads/ad-4.webp",
+                "sm": "/showcase/lab/hf-ads/ad-4-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#caccbc"
+            }
+        },
+        "words": {
+            "The caption": "Soft green light on wet stone. A few quiet drops before the day begins.\n\nDew Theory's morning serum pairs 4% niacinamide with green tea in a frosted glass dropper bottle — measured, uncomplicated, kind to skin that wakes up reactive.\n\nNo noise, no rush. Just a calmer way to start the morning.\n\nTry the 7 ml sample at the link in bio.\n\n#DewTheory #MorningSerum #Niacinamide #GreenTeaSkincare #CalmSkinByMorning"
+        }
+    },
+    "campaign-pack": {
+        "media": {
+            "picture": {
+                "kind": "image",
+                "src": "/showcase/lab/campaign-pack/picture.webp",
+                "sm": "/showcase/lab/campaign-pack/picture-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#baaea8"
+            },
+            "reel": {
+                "kind": "video",
+                "src": "/showcase/lab/campaign-pack/reel.mp4",
+                "poster": "/showcase/lab/campaign-pack/reel-poster.webp",
+                "w": 406,
+                "h": 720,
+                "tone": "#978f85",
+                "seconds": 19.8,
+                "sound": true
+            }
+        },
+        "words": {
+            "The headline": "Mother’s Day bouquets — order by Thursday",
+            "The caption": "Pastel peonies and ranunculus, gathered loosely — our Mother’s Day bouquets are open for orders.\n\nBuilt low and airy, the way we like them: blush, cream, a little rose, nothing stiff.\n\nOne for her kitchen table, sent with whatever you still haven’t said out loud.\n\nOrder by Thursday, and hers will be ready in time for the day.\n\n#WildStem #PeonySeason #MothersDayBouquets #Ranunculus #NeighbourhoodFlorist",
+            "The lines the voice reads": "The peonies have arrived, all blush and pastels. Spring doesn't stay long.\nThis Mother's Day, give her a Wild Stem bouquet of peonies and ranunculus, made right here in the neighbourhood.\nOrder by Thursday, and hers will be ready for Mother's Day.",
+            "The short post": "Peonies and ranunculus in soft pastels — our Mother’s Day bouquets have landed in the shop.\n\nEach one is arranged by hand, light and airy, using the best stems the season has to offer. Wrapped simply, ready for the woman who deserves them.\n\nOrder by Thursday and we’ll have hers ready in time.\n\n#WildStem #MothersDayBouquets #PeonySeason #Ranunculus #NeighbourhoodFlorist"
+        }
+    },
+    "product-picture": {
+        "media": {
+            "picture": {
+                "kind": "image",
+                "src": "/showcase/lab/product-picture/picture.webp",
+                "sm": "/showcase/lab/product-picture/picture-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#877463"
+            },
+            "design": {
+                "kind": "image",
+                "src": "/showcase/lab/product-picture/design.webp",
+                "sm": "/showcase/lab/product-picture/design-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#867463"
+            }
+        },
+        "words": {
+            "The headline": "Ember & Fig, back for six weeks only",
+            "The caption": "Smoky fig, cedar, and a thread of black pepper. Ember & Fig is back, for six weeks only.\n\nIt arrives the way autumn evenings do, slowly. Fig drawn through smoke, cedar settling underneath, pepper staying just long enough to be noticed.\n\nEach candle is poured by hand into amber glass, the kind that holds low window light a little longer before letting it go.\n\nSix weeks, then it’s gone again. Order before it’s gone.\n\n#EmberAndFig #SmokyFig #HandPouredCandles #AutumnCandle #CedarAndBlackPepper"
+        }
+    },
+    "tips-carousel": {
+        "media": {
+            "slide-1": {
+                "kind": "image",
+                "src": "/showcase/lab/tips-carousel/slide-1.webp",
+                "sm": "/showcase/lab/tips-carousel/slide-1-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#a59f98"
+            },
+            "slide-2": {
+                "kind": "image",
+                "src": "/showcase/lab/tips-carousel/slide-2.webp",
+                "sm": "/showcase/lab/tips-carousel/slide-2-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#978c7a"
+            },
+            "slide-3": {
+                "kind": "image",
+                "src": "/showcase/lab/tips-carousel/slide-3.webp",
+                "sm": "/showcase/lab/tips-carousel/slide-3-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#9b9081"
+            },
+            "slide-4": {
+                "kind": "image",
+                "src": "/showcase/lab/tips-carousel/slide-4.webp",
+                "sm": "/showcase/lab/tips-carousel/slide-4-sm.webp",
+                "w": 1024,
+                "h": 1280,
+                "tone": "#95846f"
+            }
+        },
+        "words": {
+            "The headline": "Five things before your first wheel class",
+            "The caption": "Thinking about your first wheel class? Here are five things worth knowing before your hands touch the clay.\n\nSwipe through for what to wear, what the clay really feels like on the wheel, and the small things most beginners get wrong at the start.\n\nEvery stoneware cup in our studio began as a lump of clay and two hands willing to learn. Book a class through the link in our bio. Save this for later.\n\n#WheelThrowing #PotteryClass #HandmadeStoneware #CeramicsStudio #KilnAndCo"
+        }
+    },
+    "animated-picture": {
+        "media": {
+            "still": {
+                "kind": "image",
+                "src": "/showcase/lab/animated-picture/still.webp",
+                "sm": "/showcase/lab/animated-picture/still-sm.webp",
+                "w": 732,
+                "h": 1280,
+                "tone": "#59524a"
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/animated-picture/clip.mp4",
+                "poster": "/showcase/lab/animated-picture/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#565049",
+                "seconds": 5.1,
+                "sound": true
+            }
+        },
+        "words": {
+            "The caption": "The harbour wakes up at seven, and so do we. Flat white, ceramic cup, the good seat on the wall.\n\nThe boats are already out, the gulls are already loud, and the steam is doing most of the talking. Golden hour doesn't wait around, but your coffee will.\n\nCome by the harbour. We'll be the ones awake on purpose.\n\n#FlatWhite #HarbourMornings #DawnCoffee #WeatheredStone #FishingBoats"
+        }
+    },
+    "hf-trend": {
+        "media": {
+            "him": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-trend/him.webp",
+                "sm": "/showcase/lab/hf-trend/him-sm.webp",
+                "w": 732,
+                "h": 1280,
+                "tone": "#b39788"
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/hf-trend/clip.mp4",
+                "poster": "/showcase/lab/hf-trend/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#b3968b",
+                "seconds": 5,
+                "sound": false
+            }
+        },
+        "words": {
+            "The caption": "Run club is the new night out.\nSaturdays, 6:30. All paces, nobody left behind.\nShow up once.\n#RunClub #RunningTok #SunriseRun #NorthlineRunClub #SaturdayMorning"
+        }
+    },
+    "talking-portrait": {
+        "media": {
+            "portrait": {
+                "kind": "image",
+                "src": "/showcase/lab/talking-portrait/portrait.webp",
+                "sm": "/showcase/lab/talking-portrait/portrait-sm.webp",
+                "w": 732,
+                "h": 1280,
+                "tone": "#7b726a"
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/talking-portrait/clip.mp4",
+                "poster": "/showcase/lab/talking-portrait/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#7a6f67",
+                "seconds": 5.1,
+                "sound": true
+            },
+            "english": {
+                "kind": "video",
+                "src": "/showcase/lab/talking-portrait/english.mp4",
+                "poster": "/showcase/lab/talking-portrait/english-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#796f68",
+                "seconds": 5.1,
+                "sound": true
+            }
+        },
+        "words": {
+            "What she says": "Morning! Cold brew season is open at Low Tide. Come by the harbour."
+        }
+    },
+    "dub-language": {
+        "media": {
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/dub-language/clip.mp4",
+                "poster": "/showcase/lab/dub-language/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#796e67",
+                "seconds": 5.2,
+                "sound": true
+            }
+        },
+        "words": {
+            "What she said": "Morning. Cold brew season is open at low tide. Come by the harbor.",
+            "What she says now": "Bonjour. La saison du cold brew est ouverte chez Low Tide. Passez par le port."
+        }
+    },
+    "youtube-clips": {
+        "media": {
+            "episode": {
+                "kind": "video",
+                "src": "/showcase/lab/youtube-clips/episode.mp4",
+                "poster": "/showcase/lab/youtube-clips/episode-poster.webp",
+                "w": 720,
+                "h": 414,
+                "tone": "#6b5544",
+                "seconds": 5.1,
+                "sound": true
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/youtube-clips/clip.mp4",
+                "poster": "/showcase/lab/youtube-clips/clip-poster.webp",
+                "w": 406,
+                "h": 720,
+                "tone": "#5b473e",
+                "seconds": 5,
+                "sound": true
+            }
+        },
+        "words": {
+            "The caption": "It's not the close that's painful. It's copying the same ten spreadsheets by hand, month after month after month.\n\nOn this episode of the Ledgerly podcast, we get into why month-end feels like Groundhog Day for so many finance teams, and why the problem usually isn't the people doing the work.\n\nWhen the same numbers get retyped into ten different files, errors don't just sneak in. They multiply. The teams with calmer closes didn't get faster at copying. They stopped doing it.\n\nHear the full conversation at the link in bio.\n\n#MonthEndClose #FinanceTeams #AccountingLife #LedgerlyPodcast #SpreadsheetProblems"
+        }
+    },
+    "face-swap": {
+        "media": {
+            "face": {
+                "kind": "image",
+                "src": "/showcase/lab/face-swap/face.webp",
+                "sm": "/showcase/lab/face-swap/face-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#816553"
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/face-swap/clip.mp4",
+                "poster": "/showcase/lab/face-swap/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#786d65",
+                "seconds": 5.1,
+                "sound": true
+            }
+        },
+        "words": []
+    },
+    "hf-character": {
+        "media": {
+            "her": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-character/her.webp",
+                "sm": "/showcase/lab/hf-character/her-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#887566"
+            },
+            "scene-1": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-character/scene-1.webp",
+                "sm": "/showcase/lab/hf-character/scene-1-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#927964"
+            },
+            "scene-2": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-character/scene-2.webp",
+                "sm": "/showcase/lab/hf-character/scene-2-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#937c6e"
+            },
+            "scene-3": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-character/scene-3.webp",
+                "sm": "/showcase/lab/hf-character/scene-3-sm.webp",
+                "w": 896,
+                "h": 1152,
+                "tone": "#4e3624"
+            }
+        },
+        "words": {
+            "The caption": "Weekend wheel classes are open. A warm studio, a turning wheel, and a lump of clay waiting for your hands.\n\nYou will learn to centre the clay, raise the walls, and shape a cup with your own two hands, guided by the same people who throw our stoneware every day. No experience needed, just sleeves you can roll up.\n\nYour piece gets fired and glazed in our kiln, ready to pick up when it is done.\n\nBook a class through the link in our bio.\n\n#KilnAndCo #StonewareCups #WheelThrowing #HandmadeCeramics #PotteryClass"
+        }
+    },
+    "hf-restyle": {
+        "media": {
+            "clay": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-restyle/clay.webp",
+                "sm": "/showcase/lab/hf-restyle/clay-sm.webp",
+                "w": 722,
+                "h": 1280,
+                "tone": "#9d938b"
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/hf-restyle/clip.mp4",
+                "poster": "/showcase/lab/hf-restyle/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#9a877d",
+                "seconds": 5,
+                "sound": false
+            }
+        },
+        "words": {
+            "The hook over it": "Cold brew season is open at Low Tide. Plan accordingly.",
+            "The caption": "Cold brew season is open at Low Tide. The ice machine has been training all winter for this exact moment.\n\nEighteen hours of slow steep, poured over ice, no fuss beyond that. It tastes like the quay at golden hour, weathered stone and all, and frankly it's the best-looking thing in the harbour besides that one boat we won't name.\n\nCome by the harbour and get one before the regulars clear us out.\n\n#LowTideCoffee #ColdBrewSeason #IcedColdBrew #HarbourSide"
+        }
+    }
+}

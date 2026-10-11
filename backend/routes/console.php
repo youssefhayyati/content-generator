@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Flows\Flows;
+use App\Services\Lab\Engine;
 use App\Services\Publishing\Publisher;
 use Illuminate\Support\Facades\Schedule;
 
@@ -12,3 +13,6 @@ Schedule::call(fn () => app(Publisher::class)->sweepStale())->name('publishing:s
 
 // Flows: start the scheduled ones, wake runs whose Wait is over, read the feeds being watched.
 Schedule::call(fn () => app(Flows::class)->tick())->name('flows:tick')->everyMinute()->withoutOverlapping();
+
+// Creative Lab: runs that went quiet (a worker restarted, the pod lost a job) end honestly, or start again.
+Schedule::call(fn () => app(Engine::class)->sweep())->name('lab:sweep')->everyFiveMinutes()->withoutOverlapping();

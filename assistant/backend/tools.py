@@ -123,7 +123,7 @@ async def cancel_browser_task(session):
 # --- Images and video (ComfyUI on the RunPod pod) --------------------------------
 
 MEDIA_TOOLS = {"generate_media", "media_status", "cancel_media", "list_media_workflows",
-               "search_workflow_templates", "add_media_workflow", "edit_area", "swap_face"}
+               "search_workflow_templates", "add_media_workflow", "edit_area"}
 
 
 @tool(
@@ -159,7 +159,8 @@ async def generate_media(workflow: str, prompt: str, session, image: str | None 
     return await session.media.generate(workflow, prompt, image, options)
 
 
-@tool("media_status", "Check progress of picture/video generations and workflow installs.")
+@tool("media_status", "Check progress of picture/video generations, videos, dubs, face swaps and workflow installs: "
+      "the stage each is at, its steps and percent when known, and the stages it went through.")
 def media_status(session):
     return session.media.status()
 
@@ -183,7 +184,8 @@ async def list_media_workflows(session):
 
 @tool(
     "search_workflow_templates",
-    "Search ComfyUI's built-in workflow templates, to find one to add.",
+    "Search ComfyUI's built-in workflow templates, to find one to add. Not for face swaps or dubbing: those are "
+    "swap_face and dub_video.",
     {
         "type": "object",
         "properties": {"query": {"type": "string", "description": "Keywords, e.g. \"wan image to video\""}},
@@ -197,8 +199,8 @@ async def search_workflow_templates(query: str, session):
 @tool(
     "add_media_workflow",
     "Add a new workflow to the pod from a built-in template, a workflow file the user attached, or a URL "
-    "of a workflow JSON, or one that comes with the assistant (face_swap, face_swap_video: give only its name "
-    "and description). Installing its nodes and models runs in the background and can take minutes.",
+    "of a workflow JSON. Installing its nodes and models runs in the background and can take minutes. Not for "
+    "face swaps or dubbing: those are swap_face and dub_video.",
     {
         "type": "object",
         "properties": {
@@ -221,6 +223,7 @@ async def add_media_workflow(name: str, session, description: str = "", template
 # --- Voices, dubbing and face swaps (backend/dub.py) -----------------------------
 
 LIPSYNC_TOOLS = {"dub_video"}  # with LIPSYNC_URL
+FACESWAP_TOOLS = {"swap_face"}  # with FACESWAP_URL
 
 @tool(
     "clone_voice",
@@ -280,20 +283,26 @@ async def dub_video(session, script: str, video: int | None = None, voice: str |
 
 @tool(
     "swap_face",
-    "Put the face from one picture onto the person in another picture or in a video (face swap, inswapper). The "
-    "result is a new picture or video; it runs in the background and you are told when it is ready. Only with "
-    "the consent of the person whose face it is.",
+    "Put the face from one picture onto the person in another picture or in a video (face swap: inswapper_128, "
+    "the face restored with GFPGAN; the video keeps its sound). The result is a new picture or video, or with a "
+    "draft it takes the place of that slide's picture or video. It runs in the background and you are told when it "
+    "is ready. Only with the consent of the person whose face it is.",
     {
         "type": "object",
         "properties": {
             "face": {"type": "integer", "description": "Number of the picture with the face to use"},
-            "target": {"type": "integer", "description": "Number of the picture or video to put it on"},
+            "target": {"type": "integer", "description": "Number of the picture or video to put it on (or give draft)"},
+            "draft": {"type": "integer", "description": "Put it on this draft's slide instead: its picture or video is "
+                                                        "changed and replaced"},
+            "slide": {"type": "integer", "description": "Which slide of the draft (default 1)"},
+            "every": {"type": "boolean", "description": "Change every face, not only the largest (default false)"},
         },
-        "required": ["face", "target"],
+        "required": ["face"],
     },
 )
-async def swap_face(session, face: int, target: int):
-    return await session.swap_face(face, target)
+async def swap_face(session, face: int, target: int | None = None, draft: int | None = None, slide: int | None = None,
+                    every: bool = False):
+    return await session.swap_face(face, target, draft, slide, bool(every))
 
 
 # --- Post drafts for Instagram and X (backend/studio.py) -------------------------
@@ -792,3 +801,7 @@ async def answer_phone(session, approve: bool | None = None, text: str | None = 
 @tool("cancel_phone_task", "Stop what the phone is doing, and the posts waiting their turn.")
 async def cancel_phone_task(session):
     return await session.phone.cancel()
+
+
+# Creative Lab: building and running node graphs in FlowAI (lab_tools.py registers its tools here)
+from . import lab_tools  # noqa: E402,F401

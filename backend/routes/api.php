@@ -28,9 +28,11 @@ use App\Http\Controllers\InboxController;
 use App\Http\Controllers\InboxNoteController;
 use App\Http\Controllers\InspirationController;
 use App\Http\Controllers\InvestigationController;
+use App\Http\Controllers\LabController;
 use App\Http\Controllers\LinkClipController;
 use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
+use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\OverviewController;
 use App\Http\Controllers\PasswordController;
 use App\Http\Controllers\PostController;
@@ -157,12 +159,39 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::apiResource('projects', ProjectController::class);
 
+    // Creative Lab: nodes on a canvas. Every change is an operation; nodes run through the engine.
+    Route::get('lab/catalog', [LabController::class, 'catalog']);
+    Route::get('lab/voices', [LabController::class, 'voices']);
+    Route::get('lab/voices/list', [LabController::class, 'voiceList']);
+    Route::get('lab/voices/sample', [LabController::class, 'voiceSample']);
+    Route::get('lab/higgsfield/presets/{tool}', [LabController::class, 'presets']);
+    Route::post('lab/projects', [LabController::class, 'create']);
+    Route::post('campaigns/{campaign}/lab', [LabController::class, 'fromCampaign']);
+    Route::get('projects/{project}/lab', [LabController::class, 'show']);
+    Route::get('projects/{project}/lab/state', [LabController::class, 'state']);
+    Route::post('projects/{project}/lab/ops', [LabController::class, 'ops']);
+    Route::post('projects/{project}/lab/template', [LabController::class, 'saveTemplate']);
+    Route::delete('lab/templates/{template}', [LabController::class, 'deleteTemplate']);
+    Route::get('projects/{project}/lab/nodes/{node}/plan', [LabController::class, 'plan']);
+    Route::get('projects/{project}/lab/nodes/{node}/history', [LabController::class, 'history']);
+    Route::post('projects/{project}/lab/nodes/{node}/stop', [LabController::class, 'stop']);
+    Route::get('lab/youtube/{source}', [LabController::class, 'source']);
+    Route::post('lab/youtube/{source}/permission', [LabController::class, 'permission']);
+    Route::middleware(['verified', 'throttle:lab'])->group(function () {
+        Route::post('projects/{project}/lab/nodes/{node}/run', [LabController::class, 'run']);
+        Route::post('projects/{project}/lab/run-all', [LabController::class, 'runAll']);
+        Route::post('lab/youtube/inspect', [LabController::class, 'inspect']);
+        Route::post('lab/voices/use', [LabController::class, 'useVoice']);
+        Route::post('lab/voices/clone', [LabController::class, 'cloneVoice']);
+    });
+
     Route::get('queue-slots', [QueueSlotController::class, 'index']);
     Route::put('queue-slots', [QueueSlotController::class, 'update']);
 
     Route::get('ai', [WritingController::class, 'options']);
     // Every request spends API credit: confirmed accounts only, and not too fast.
     Route::post('ai/write', [WritingController::class, 'write'])->middleware(['verified', 'throttle:ai']);
+    Route::post('onboarding/first-post', [OnboardingController::class, 'firstPost'])->middleware('throttle:ai');
 
     // Campaign intake. The interview also runs without AI (the standard question list), so only
     // the content kit insists on a confirmed account; every step that may call Claude is throttled.
@@ -273,4 +302,6 @@ Route::prefix('agent')->middleware('agent')->group(function () {
     Route::post('runs/{run:uuid}/screenshot', [AgentController::class, 'screenshot']);
     Route::post('runs/{run:uuid}/finish', [AgentController::class, 'finish']);
     Route::get('assets/{asset}/file', [AgentController::class, 'assetFile']);
+    // How a post it published is doing, as the phone last read it (shown on the post's Creative Lab node).
+    Route::post('posts/{post}/metrics', [AgentController::class, 'metrics']);
 });

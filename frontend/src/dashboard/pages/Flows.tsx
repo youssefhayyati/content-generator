@@ -5,7 +5,7 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Account, type FlowCatalog, type FlowDetail, type FlowList, type FlowSummary, type FlowTemplate } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { useRouter } from '../../lib/router'
+import { useQueryParam, useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { FlowEditor } from '../flows/Editor'
 import { RunStatus } from '../flows/Runs'
@@ -24,6 +24,7 @@ export default function Flows() {
 
 function FlowsHome() {
   const { navigate } = useRouter()
+  const say = useQueryParam('say')
   const toast = useToast()
   const invalidate = useInvalidate()
   const { data, loading } = useApi<FlowList>('/flows')
@@ -48,7 +49,6 @@ function FlowsHome() {
   return (
     <div className="pb-16">
       <PageHeader
-        eyebrow="Flows"
         title={
           <>
             Set it <Serif>once.</Serif>
@@ -63,7 +63,7 @@ function FlowsHome() {
       />
 
       <Stagger i={0} className="mt-8">
-        {catalog ? <SayIt catalog={catalog} accounts={accounts} /> : <Skeleton className="h-[108px] rounded-2xl" />}
+        {catalog ? <SayIt catalog={catalog} accounts={accounts} initial={say} /> : <Skeleton className="h-[108px] rounded-2xl" />}
       </Stagger>
 
       {data && (data.stats.on > 0 || data.stats.runs_today > 0 || data.stats.waiting_on_you > 0) && (

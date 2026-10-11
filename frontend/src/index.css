@@ -92,11 +92,6 @@
     outline-offset: 3px;
     border-radius: 4px;
   }
-
-  html.has-cursor,
-  html.has-cursor * {
-    cursor: none !important;
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -297,9 +292,32 @@ html[data-palette='mono'] {
   animation: flow-think 1.4s linear infinite;
   pointer-events: none;
 }
+/* Creative Lab: a run whose progress isn't known yet. */
+@keyframes lab-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+/* Creative Lab's examples: a before and after, the after wiping across and back. */
+@keyframes lab-wipe {
+  0%, 12% { clip-path: inset(0 100% 0 0); }
+  45%, 62% { clip-path: inset(0 0 0 0); }
+  95%, 100% { clip-path: inset(0 100% 0 0); }
+}
+@keyframes lab-wipe-line {
+  0%, 12% { left: 0%; }
+  45%, 62% { left: 100%; }
+  95%, 100% { left: 0%; }
+}
+/* A recording's bars, breathing. */
+@keyframes lab-wave {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
 @media (prefers-reduced-motion: reduce) {
   .flow-thinking::before { animation: none; }
   [class*='flow-dash'] { animation: none !important; }
+  [class*='lab-indeterminate'] { animation: none !important; }
+  [class*='lab-wipe'], [class*='lab-wave'] { animation: none !important; }
 }
 
 /* Reel previews: a gradient that drifts, a photo that slowly pushes in. */
@@ -374,28 +392,70 @@ html[data-palette='mono'] {
   }
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(var(--color-accent) / 0.16) transparent;
-}
+/* ------------------------------------------------------------------ */
+/* Scrollbars: a pill riding a hairline rail, tinted by the palette.   */
+/* Under the pointer it widens and takes the accent; dragged, it glows. */
+/* ------------------------------------------------------------------ */
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-track {
+  background: linear-gradient(90deg, transparent calc(50% - 0.5px), var(--color-line) 0 calc(50% + 0.5px), transparent 0);
+}
+::-webkit-scrollbar-track:horizontal {
+  background: linear-gradient(180deg, transparent calc(50% - 0.5px), var(--color-line) 0 calc(50% + 0.5px), transparent 0);
+}
+::-webkit-scrollbar-thumb {
+  min-width: 40px;
+  min-height: 40px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in oklab, var(--color-accent-soft) 26%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-image: linear-gradient(var(--color-accent-soft), var(--color-accent));
+}
+::-webkit-scrollbar-thumb:horizontal:hover {
+  background-image: linear-gradient(90deg, var(--color-accent-soft), var(--color-accent));
+}
+::-webkit-scrollbar-thumb:active {
+  border-width: 2px;
+  background-image: linear-gradient(var(--color-accent-glow), var(--color-accent-soft));
 }
 
-::-webkit-scrollbar-track {
+/* Only the page's own scrollbar draws the rail; boxes inside it stay clean. */
+body *::-webkit-scrollbar-track:vertical,
+body *::-webkit-scrollbar-track:horizontal {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgb(var(--color-accent) / 0.16);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  background-clip: padding-box;
+/* Firefox has no scrollbar pseudo-elements: a thin tinted bar instead. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--color-accent-soft) 34%, transparent) transparent;
+  }
+}
+/* ------------------------------------------------------------------ */
+/* Onboarding                                                           */
+/* ------------------------------------------------------------------ */
+
+/* Picking a palette washes it over the screen from the swatch: the new page is revealed
+   by a growing circle (set from script), so the browser's own crossfade is switched off. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--color-accent) / 0.28);
-  background-clip: padding-box;
+@keyframes onb-fade-in {
+  to { opacity: 1; }
 }

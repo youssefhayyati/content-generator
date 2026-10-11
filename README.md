@@ -7,16 +7,16 @@ The split: this repo is the **studio** (Laravel API + React dashboard). The
 [publishing-agent](publishing-agent/) is the **automation worker** that drives the phones,
 built on the [publishing-studio](publishing-studio/) device layer (adb or simulator).
 
-## Run it (keyless demo, ~5 minutes)
+## Run it (~5 minutes)
 
-Needs Docker. No API keys, no phone: text runs on a local Ollama model, phones are simulated
-end-to-end and still produce run records with proof.
+Needs Docker, an Ollama Cloud key (text) and the RunPod pod (`runpod/`: pictures, videos, voices,
+transcripts, songs, lip sync, face swaps). Phones can be simulated end-to-end and still produce run records
+with proof.
 
 ```sh
-# 1. Everything: the dashboard (:5173), the API (Laravel, :8002), queue worker, scheduler,
-#    FlowAI Sound, the voice assistant (:8003), its music model (:8004), Mailpit (:8025), Ollama
+# 1. The stack: the dashboard (:5173), the API (Laravel, :8002), queue worker, scheduler,
+#    the voice assistant (:8003, also the engine Creative Lab runs the pod's models through), Mailpit (:8025)
 docker compose up -d
-docker compose exec ollama ollama pull llama3.2:1b        # once; 3b/8b need more RAM than ~2.5 GB free
 
 # 2. Demo data: demo user, two phones, Instagram + X accounts, photos
 docker compose exec api php artisan db:seed --class=DemoSeeder
@@ -27,13 +27,22 @@ FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=ig-phon
 FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=x-phone  DRIVER=simulator .venv/bin/python agent.py
 ```
 
+Settings: one file, `.env` next to `docker-compose.yml` (`cp .env.example .env`), for the API, the worker, the
+scheduler and the assistant alike. It takes `OLLAMA_CLOUD_API_KEY` (FlowAI's writer and the assistant's own model,
+with `AI_DEFAULT_TEXT` and `AI_AGENTS_MODEL` set to an Ollama Cloud model, e.g. `ollama_cloud/glm-5.3-flash`),
+`VOICESTUDIO_URL` and `VOICESTUDIO_KEY` (the pod's VoiceStudio: voices, the assistant's voice and, with Whisper
+large-v3, transcripts), the pod's other URLs and keys (`COMFYUI_*`, `MUSIC_*`, `LIPSYNC_*`, `FACESWAP_*`), and
+`ENGINE_URL` / `ENGINE_KEY` (the assistant's engine, `http://assistant:8000`; both sides read the same key).
+docker compose mounts it into the API as `backend/.env`. The Models page (`/dashboard/models`) shows each
+connector's settings, which are filled in, and whether the assistant has picked them up.
+
 The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models
-(about 6 GB), the music model downloads ACE-Step, and the dashboard installs its packages. The
-assistant and the music model need an NVIDIA GPU; without one, `docker compose --profile
-assistant-cpu up -d --scale assistant=0 --scale music=0` runs the assistant on the CPU. Its
-settings (Ollama cloud key, ComfyUI, VoiceStudio) are in `assistant/.env`, from
-`assistant/.env.example`. To run the dashboard outside Docker instead: `docker compose stop
-frontend`, then `cd frontend && npm install && API_ORIGIN=http://localhost:8002 npm run dev`.
+(about 6 GB), and the dashboard installs its packages. The assistant's speech recognition uses an
+NVIDIA GPU; without one, `docker compose --profile assistant-cpu up -d --scale assistant=0` runs it on
+the CPU. The GPU models run on a RunPod pod, deployed from `runpod/` in one command (`runpod/README.md`).
+FlowAI Sound and local Ollama are off by default (`--profile local-sound`, `--profile local-ollama` to run them
+here anyway). To run the dashboard outside Docker instead: `docker compose stop frontend`, then
+`cd frontend && npm install && API_ORIGIN=http://localhost:8002 npm run dev`.
 
 Sign in at http://localhost:5173 as **demo@flowai.test / password**.
 
@@ -50,6 +59,44 @@ RESUME_CAMPAIGN=<id> ../publishing-agent/.venv/bin/python   # resume from gate 6
 
 Every stage is visible live in the dashboard: Campaigns (brief, plan, review), Calendar,
 **Publishing** (run history, steps, evidence, JSON records), Phones, Inbox.
+
+## Creative Lab
+
+**Creative Lab** (`/dashboard/studio`, the only tab under Create) is where all content is made: every project is a
+canvas of **nodes** joined from an output (right) to an input (left), with typed ports (picture, video, sound,
+text, brief, moments, transcript, online video, where it goes, post), so only what fits connects.
+
+- **Campaign first.** A new project starts with a short brief, asked like a marketing agency would: **Quick** (5
+  questions) or **Thorough** (10), picked by the AI for what's promoted, the rest suggested. It asks for the logo
+  and photos of the product and the people. Or start from a campaign you have, or a blank canvas. The brief
+  becomes the **Brief** node at the start (its style goes into picture and video prompts, the Design node's
+  colours and font, and how words are written; `{product}`, `{offer}`, `{cta}`… fill any prompt), and the photos
+  Media nodes under it (Logo, The product, People).
+- **The assistant** sits beside the home page and every canvas: it can ask the same questions in its chat (photos
+  dropped there come along), make the project and build its nodes.
+- **Nodes**: Media, Text, Brief, YouTube video; Write, Translate; Picture, Edit picture, Paint to change, Frame
+  from video; Video, Animate picture, Moving pictures (zoom and pan with a voice), Reel look, Cut & reframe,
+  Captions, Add sound, Join; Voiceover, Music, Transcript; Face swap, Dub (lip sync); Find moments; Design (words
+  on pictures), **Where it goes** (an account and a kind of post: the media fitted to its shape and length, the
+  caption to its rules) and **Post** (a draft, a date, the queue or now, from a phone; the run, its screenshot,
+  the post's link and its numbers come back to the node).
+- **Every model**: the pod's (Z-Image, FLUX.2 Klein, Wan 2.2, ACE-Step, LatentSync, inswapper, VoiceStudio and its
+  Whisper) and the cloud's (Higgsfield, Gemini, Veo, the text models) in one picker per node, with its time and
+  cost. Pod models run through the assistant's engine (`assistant/backend/engine.py`).
+- **Running**: nothing runs until you press **Run** (each node says how long it takes and what it costs);
+  **Run all** runs everything out of date. **Keep up to date** (per project, off by default) lets the quick, free
+  nodes you've run once run again by themselves when what they use changes. Every run is kept as a version (pin
+  an older one); **Branch** copies a node and everything after it to try another option.
+- **Templates** by kind of content (a picture from a prompt across models, a picture with words, moving
+  pictures, an animated picture, a talking portrait, dubbing, clips from a long video…), never by platform:
+  where it goes is a node of its own before posting. **Save as template** keeps your own.
+- **The assistant** is beside the canvas from the start and works on the same graph (`lab_` tools); **Let it take
+  control** lets it build and run on its own. Scheduling, permissions and consent stay a person's.
+- **YouTube clipping**: a YouTube node reads the video's details, and nothing downloads until a person records
+  whose video it is (theirs, with permission, or Creative Commons; the credit goes into every caption). Then its
+  sound and YouTube's captions (or Whisper on the pod), **Find moments** (the model quotes each moment; the
+  times come from the timed words), and **Cut & reframe** downloads only that part (yt-dlp), crops it vertical
+  around the speaker, and cuts out silences; Captions burn the words in as they're said.
 
 ## Flows and Storm Guard
 
@@ -114,9 +161,9 @@ when a reel is rendered, the same way uploaded audio is treated.
 48 hours, the phones and what they're doing, flows at work, Storm Guard weather and the studio's
 latest work, polled every few seconds, with a fullscreen mode for a screen in the room.
 
-The Sound service keeps one model in memory at a time and unloads when idle (about 140 MB at
-rest, under 1 GB at its busiest). Without it, everything else works and the Sound tab says how
-to start it: `docker compose up -d sound`.
+The Sound service is off by default now: voices come from VoiceStudio on the pod, transcripts from its
+Whisper large-v3, and songs from ACE-Step. To run it here anyway: `docker compose --profile local-sound up -d sound`
+and `SOUND_URL=http://sound:8000` in `.env`. It keeps one model in memory at a time and unloads when idle.
 
 ## The assistant
 
@@ -161,8 +208,8 @@ picked after a reload.
 It is its own service (`assistant/`, Python, needs an NVIDIA GPU) and starts with the rest:
 
 ```sh
-cp assistant/.env.example assistant/.env      # once: OLLAMA_API_KEY at least
-docker compose up -d                          # no GPU: --profile assistant-cpu --scale assistant=0, with TTS_URL set
+cp .env.example .env                          # once: OLLAMA_CLOUD_API_KEY at least
+docker compose up -d                          # no GPU: --profile assistant-cpu --scale assistant=0, with VOICESTUDIO_URL set
 ```
 
 The first start downloads its speech models (about 6 GB). The Vite proxy serves it at
@@ -194,24 +241,26 @@ are locked while a publishing run is driving the phone. Both reach the host's ad
 
 ## Real models
 
-Keys go in `backend/.env`, then `docker compose restart api`:
+Keys go in `.env`, then `docker compose restart api worker scheduler` (and `docker compose up -d` for the assistant):
 
 | Provider | Variable | Notes |
 | --- | --- | --- |
 | Anthropic | `ANTHROPIC_API_KEY` | composer, campaign agents, intake are tuned for Claude |
 | Groq | `GROQ_API_KEY` | free at console.groq.com/keys |
 | OpenRouter | `OPENROUTER_API_KEY` | free at openrouter.ai/keys; picker lists `:free` models |
-| Ollama | `OLLAMA_URL` | already wired (`http://ollama:11434` in compose) |
+| Ollama Cloud | `OLLAMA_CLOUD_API_KEY` | the default writer (`ollama_cloud/glm-5.3-flash`); local Ollama: `--profile local-ollama` and `OLLAMA_URL` |
 | Higgsfield | `HIGGSFIELD_KEY_ID` / `HIGGSFIELD_KEY_SECRET` | image + video generation |
-| VoiceStudio | `VOICESTUDIO_URL` / `VOICESTUDIO_KEY` | cloned + designed voices; key only off-loopback |
+| VoiceStudio | `VOICESTUDIO_URL` / `VOICESTUDIO_KEY` | the pod's voices, and transcripts once Whisper large-v3 is installed (`runpod/voicestudio/README.md`) |
+| The assistant's engine | `ENGINE_URL` / `ENGINE_KEY` | Creative Lab's pod models and drawing (`http://assistant:8000`) |
+| yt-dlp | `YTDLP_COOKIES` | optional: a cookies file, when YouTube asks the server to sign in |
 
 `AI_DEFAULT_TEXT` and `AI_AGENTS_MODEL` choose which registry model writes and plans
-(the demo points both at `ollama/llama3.2:1b`).
+(both point at `ollama_cloud/glm-5.3-flash`).
 
 ## Everyday commands
 
 ```sh
-docker compose exec api php artisan test --testsuite=Feature   # backend tests (185)
+docker compose exec api php artisan test --testsuite=Feature   # backend tests (210)
 docker compose exec api vendor/bin/pint         # PHP style
 npm run build                                   # in frontend/: type-check + build
 docker compose logs -f worker                   # queue log (agents, media, publishing)
@@ -224,9 +273,11 @@ docker compose exec api php artisan migrate     # after adding a migration
 - `frontend/` — React + Vite dashboard (`src/dashboard`)
 - `publishing-agent/` — the phone-driving worker (`agent.py`, Python)
 - `publishing-studio/` — the device layer it uses (adb + simulator, Instagram/X recipes, named targets)
-- `sound/` — FlowAI Sound: voices, listening and the composer (Python, CPU)
-- `music/` — ACE-Step 1.5 for songs under the assistant's videos (GPU; MIT, licensed training data)
-- `lipsync/` — LatentSync for the assistant's dubbed videos (GPU; Apache-2.0): on the RunPod pod (`lipsync/runpod/setup.sh`, port 8004), or here with `--profile lipsync`
+- `sound/` — FlowAI Sound: voices, listening and the composer (Python, CPU; off by default, `--profile local-sound`)
+- `runpod/` — everything on the GPU pod, deployed in one command (`runpod/deploy.sh`): ComfyUI (pictures and videos),
+  VoiceStudio (voices), ACE-Step 1.5 (songs under videos; MIT), LatentSync (dubbed videos' lips; Apache-2.0) and
+  face swaps (inswapper_128 and GFPGAN, ONNX).
+  Music and lip sync also run here on a local GPU: `docker compose --profile music` / `--profile lipsync`
 - `assistant/` — the voice assistant behind the Assistant page (Python, GPU; copied from the gamechange repo, where it's developed)
 - `demo/` — the one-command full cycle
 - `deploy/` — production stack for the VPS (nginx + PHP-FPM + Postgres)

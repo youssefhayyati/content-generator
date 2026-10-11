@@ -2,6 +2,7 @@
 
 namespace App\Services\Social;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -64,19 +65,23 @@ class Trends
 
     private function run(string $actor, array $input): array
     {
-        $response = Http::withToken(config('trends.apify.token'))
-            ->timeout((int) config('trends.apify.timeout'))
-            ->post(config('trends.apify.url')."/acts/{$actor}/run-sync-get-dataset-items", $input);
+        try {
+            $response = Http::withToken(config('trends.apify.token'))
+                ->timeout((int) config('trends.apify.timeout'))
+                ->post(config('trends.apify.url')."/acts/{$actor}/run-sync-get-dataset-items", $input);
+        } catch (ConnectionException) {
+            abort(504, 'The trend source took too long to answer. Try again in a moment.');
+        }
 
         if ($response->status() === 401 || $response->status() === 403) {
-            abort(502, 'Apify rejected the token. Check APIFY_TOKEN in backend/.env.');
+            abort(502, 'Apify rejected the token. Check APIFY_TOKEN in .env.');
         }
         if ($response->status() === 402) {
             abort(502, 'The Apify account is out of monthly credit, so no new trends can be fetched.');
         }
         abort_unless($response->successful(), 502, 'Could not reach the trend source. Try again in a moment.');
 
-        return $response->json() ?? [];
+        return is_array($response->json()) ? $response->json() : [];
     }
 
     private function fromTikTok(array $row): array

@@ -172,6 +172,14 @@ class Publisher(PhoneWork):
                                       f"{platforms.label(platform, placement)}")
         job.run = run
         job.budget = int((fj.get("limits") or {}).get("step_budget") or 40)
+        # Who the post asks to post it: our own agent (direct), the phone's (agent), or the phone's with ours
+        # taking over if it fails (auto). Without ours set up, the phone's agent does it, and says so.
+        job.prefer = post_in.get("driver") if post_in.get("driver") in ("agent", "direct", "auto") else None
+        if job.prefer in ("direct", "auto") and not self.client.driver:
+            note = "our own agent isn't set up here (it needs OLLAMA_CLOUD_API_KEY): the phone's agent posts it"
+            job.steps.append(note)
+            job.prefer = "agent"
+            log.warning("FlowAI run %s: %s", run, note)
         self.runs[run] = None
         folder = self.dir / "runs" / run
         try:
@@ -228,9 +236,23 @@ class Publisher(PhoneWork):
             a = job.actions[-1]
             await self.report(job.run, a["action"], a["ok"], a["ms"], a["note"] or result, job, job.budget)
 
+    async def send_metrics(self, job: PhoneJob):
+        """How a FlowAI post is doing, as the phone read it, onto FlowAI's record (its Creative Lab Post node shows it)."""
+        data = job.data if isinstance(job.data, dict) else None
+        if not data or data.get("found") is False or not job.post.flowai_post:
+            return
+        body = {k: _count(data.get(k)) for k in ("likes", "comments", "shares", "saves", "views")}
+        body["latest_comments"] = [{"author": str(c.get("author") or "")[:80], "text": str(c.get("text") or "")[:500]}
+                                   for c in (data.get("latest_comments") or [])[:10] if isinstance(c, dict)]
+        try:
+            await self.call("POST", f"/api/agent/posts/{job.post.flowai_post}/metrics", json=body)
+        except Exception as exc:
+            log.warning("the numbers of FlowAI post %s couldn't be saved: %s", job.post.flowai_post, exc)
+
     async def on_finished(self, job: PhoneJob):
         if job.kind == "feedback" and job.post:
             log.info("%s", feedback_note(job.post, job.snapshot, job.result, job.data).split("\n")[0])
+            await self.send_metrics(job)
         if job.kind != "publish" or job.status == "cancelled" or not job.post:
             return
         if job.success and job.status != "failed":
@@ -325,3 +347,17 @@ async def agent_token(flowai_url: str, dashboard_url: str, email: str, password:
         raise FlowAIAgentError(f"the agent token couldn't be fetched: {exc}") from None
     finally:
         await client.close()
+
+
+def _count(value) -> int | None:
+    """A number as the app shows it ("1,204", "1.2K", "3M") as an integer; None when there isn't one."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip().upper().replace(",", "").replace(" ", "")
+    scale = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get(text[-1:], 1)
+    try:
+        return int(float(text[:-1] if scale > 1 else text) * scale)
+    except ValueError:
+        return None

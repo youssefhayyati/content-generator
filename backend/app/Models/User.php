@@ -44,6 +44,19 @@ class User extends Authenticatable implements MustVerifyEmail
         });
     }
 
+    /** With email verification switched off (auth.verify_email), every account counts as confirmed. */
+    public function hasVerifiedEmail(): bool
+    {
+        return ! config('auth.verify_email') || parent::hasVerifiedEmail();
+    }
+
+    public function sendEmailVerificationNotification(): void
+    {
+        if (config('auth.verify_email')) {
+            parent::sendEmailVerificationNotification();
+        }
+    }
+
     /**
      * @return HasMany<Post, $this>
      */
@@ -146,6 +159,22 @@ class User extends Authenticatable implements MustVerifyEmail
     public function projects(): HasMany
     {
         return $this->hasMany(Project::class);
+    }
+
+    /**
+     * @return HasMany<VideoSource, $this>
+     */
+    public function videoSources(): HasMany
+    {
+        return $this->hasMany(VideoSource::class);
+    }
+
+    /**
+     * @return HasMany<LabTemplate, $this>
+     */
+    public function labTemplates(): HasMany
+    {
+        return $this->hasMany(LabTemplate::class);
     }
 
     /**

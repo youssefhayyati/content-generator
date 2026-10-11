@@ -25,7 +25,9 @@ Wire protocol
                                                samples of voices still play
             {"type": "conversations"}          the list of the user's conversations
             {"type": "new", "campaign": 3}     a new conversation; with campaign, that FlowAI campaign's
-                                               posts in it as drafts
+                                               posts in it as drafts; with "quick": true (Creative Lab's
+                                               New post), the assistant asks what to make and skips the
+                                               campaign questions
             {"type": "open" | "delete", "id": "..."}
             {"type": "rename", "id": "...", "title": "..."}
             {"type": "focus", "draft": 1, "slide": 1, "text": 2}
@@ -139,13 +141,13 @@ from . import dub, reel, tools
 from .asr import ASREngine, StreamingTranscription, resample
 from .browser import Browser
 from .browser_agent import BrowserAgent
-from .comfyui import ComfyClient, ComfyError, file_kind
+from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import Conversation, ConversationStore
 from .flowai import FlowAIClient, FlowAISession
 from .llm import LLM
-from .lipsync import LipSync
-from .media import MAX_UPLOAD, MediaSession, data_url
+from .podjobs import FaceSwap, LipSync
+from .media import MAX_UPLOAD, MediaSession
 from .music import SongWriter
 from .phone import PhoneClient, PhoneError, PhoneSession
 from .skills import catalogue, load_skills
@@ -172,6 +174,21 @@ CASTING = (
     "right for the brand and its audience; no vocals, no song or artist names.")
 
 
+def with_user_turn(messages: list) -> list:
+    """Ollama Cloud's models answer nothing to a chat with no user turn yet (a new conversation that speaks
+    first, like Creative Lab's New post): a stand-in one after the notes, sent to the model, never kept."""
+    if any(m.get("role") == "user" for m in messages):
+        return messages
+    i = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    return [*messages[:i], {"role": "user", "content": "(Nothing said yet: go by the notes above.)"}, *messages[i:]]
+
+
+def _log_failure(task: asyncio.Task):
+    """Background work has nobody to tell when it fails: the log at least says so."""
+    if not task.cancelled() and (exc := task.exception()):
+        log.error("background work failed", exc_info=exc)
+
+
 @dataclass
 class Models:
     asr: ASREngine
@@ -182,6 +199,7 @@ class Models:
     comfy: ComfyClient | None = None
     music: SongWriter | None = None  # songs written for videos (ACE-Step), when MUSIC_URL is set
     lipsync: LipSync | None = None  # lips redrawn for dubbed videos (LatentSync), when LIPSYNC_URL is set
+    faceswap: FaceSwap | None = None  # faces swapped in pictures and videos (inswapper), when FACESWAP_URL is set
     phone: PhoneClient | None = None  # the team's phone, posting drafts from its apps, when PHONE_API_URL is set
     conversations: ConversationStore | None = None  # set once comfy is
 
@@ -220,6 +238,7 @@ class VoiceSession:
         self.stream: StreamingTranscription | None = None
         self.utterance: list[np.ndarray] = []
         self.background: set[asyncio.Task] = set()
+        self.lab: dict | None = None  # the Creative Lab project open on screen, and its selected node (lab_tools.py)
         self.actions: set[asyncio.Task] = set()  # buttons on the page being done; a switch waits for them
         self.user_speaking = False
         self.job: BrowserJob | None = None
@@ -261,6 +280,7 @@ class VoiceSession:
         task = asyncio.create_task(coro)
         group.add(task)
         task.add_done_callback(group.discard)
+        task.add_done_callback(_log_failure)
         return task
 
     def system_prompt(self) -> str:
@@ -277,26 +297,39 @@ class VoiceSession:
         if self.m.comfy:
             prompt += (
                 "\n\nYou can make pictures and videos with ComfyUI workflows by calling generate_media. It runs "
-                "in the background: say one short sentence such as 'Sure, making it now', and never say it is "
-                "ready until you are told. When it is, it is already on the user's screen, so just say so "
-                "briefly. Pictures take seconds; videos take several minutes, so tell the user. Write the prompt "
+                "in the background, and the user watches its progress live on screen (each stage the model goes "
+                "through, its steps and the time): say one short sentence such as 'Making it now, you can follow "
+                "it on screen', and never say it is ready until you are told. When it is, it is already on the "
+                "user's screen, so just say so briefly. Pictures take seconds; videos take several minutes, so "
+                "tell the user. If they ask how far it has got, media_status has its stage, steps and percent. "
+                "Write the prompt "
                 "in English as a rich visual description (subject, setting, style, lighting, camera, and motion "
                 "for videos), expanding on what the user asked for. Every picture, video and attached file has a "
                 "number the user can refer to; to change or animate a picture, use a workflow that needs an image "
                 "and pass its number (the latest one is used by default). Use list_media_workflows when asked "
                 "which workflows exist, media_status for progress, and cancel_media to stop one. To add a "
                 "workflow, find it with search_workflow_templates (or use a workflow file the user attached, or "
-                "a URL they give), confirm the choice with the user, then call add_media_workflow. "
-                "To put the face from one picture onto someone in another picture or a video, call swap_face; it "
-                "runs in the background like the others. Workflows on the pod:\n" + self.m.comfy.catalogue()
+                "a URL they give), confirm the choice with the user, then call add_media_workflow. Face swaps "
+                "and dubbing are not ComfyUI workflows: never search for, add or run a workflow or template for "
+                "them; they are swap_face and dub_video. "
+                "Workflows on the pod:\n" + self.m.comfy.catalogue()
             )
         if self.m.lipsync:
             prompt += (
                 "\n\nTo make the person in a video say other words, call dub_video with the new words: they are "
                 "read in the person's own voice, cloned from the video, and their lips are redrawn to match. Keep "
                 "the words about as long as what they say now (transcribe_media says what that is and how many "
-                "words fit); translating is fine. It takes a few minutes in the background: say one short "
-                "sentence, and you are told when it is ready.")
+                "words fit); translating is fine. It takes a few minutes in the background, its progress live on "
+                "screen: say one short sentence, and you are told when it is ready.")
+        if self.m.faceswap:
+            prompt += (
+                "\n\nTo put the face from one picture onto the person in another picture or in a video, call "
+                "swap_face: it is the face swap, a service of its own on the pod (inswapper_128), ready to use. With "
+                "a draft (and slide), the swapped picture or video takes that slide's place by itself (undo_draft "
+                "goes back). A picture takes seconds, a video a minute or so, in the background, its progress live "
+                "on screen: say one short sentence, and you are told when it is ready. It is the only way to swap a face: if anything "
+                "earlier in the conversation said face swaps weren't set up or needed a ComfyUI workflow, that is "
+                "out of date; never install or use one for this, just call swap_face.")
         prompt += (
             "\n\nclone_voice makes a voice from a recording in the conversation (an audio file, or a video's "
             "sound): it can then read videos or be the voice you speak in. transcribe_media says what is said in "
@@ -400,6 +433,14 @@ class VoiceSession:
                 "themselves. Phone skills:\n"
                 + catalogue(self.phone.skills())
             )
+        if self.lab is not None and self.flowai:
+            prompt += ("\n\nThe user is in FlowAI's Creative Lab now, "
+                       + (f"with project {self.lab['project']} open" if self.lab.get("project") else
+                          "on its home page with no project open")
+                       + ": make what they ask for there, as nodes on the canvas with the lab_ tools, following the "
+                       "creative-lab skill, not as drafts here. With no project open, a request to make something "
+                       "starts a project: the campaign questions first (quick, 5, or thorough, 10, one at a time), "
+                       "then lab_new_project; after New post, skip the questions and make what they ask for.")
         # The date, not the time, so the prompt stays the same all day (the time is a tool call away)
         today = datetime.now(self.flowai.tz if self.flowai else None)
         prompt += f"\n\nToday is {today:%A} {today.day} {today:%B %Y}."
@@ -449,7 +490,13 @@ class VoiceSession:
                 if msg.get("bytes"):
                     await self.on_audio(msg["bytes"])
                 elif msg.get("text"):
-                    await self.on_message(json.loads(msg["text"]))
+                    try:
+                        await self.on_message(json.loads(msg["text"]))
+                    except WebSocketDisconnect:
+                        raise
+                    except Exception as exc:  # one bad message mustn't end the connection
+                        log.exception("message %.200r failed", msg["text"])
+                        await self.try_send(type="error", message=f"That didn't work: {exc}")
         except WebSocketDisconnect:
             pass
         finally:
@@ -605,6 +652,25 @@ class VoiceSession:
             result = await self.phone.post(draft, again=bool(msg.get("again")))
             done = f"pressed Post on the phone for draft {draft}, driven by {self.m.phone.driven_by()}: " + \
                    json.dumps(result, ensure_ascii=False)[:400] + ". You are told when it's up, like any post"
+        elif name == "lab":  # the page says which Creative Lab project (and node) is open: nothing to answer
+            if msg.get("left"):  # the user left Creative Lab
+                self.lab = None
+                return
+            before = self.lab or {}
+            self.lab = {"project": msg.get("project"), "node": msg.get("node"), "control": bool(msg.get("control"))}
+            if msg.get("project") and msg.get("project") != before.get("project"):
+                self.remember(f"The user has Creative Lab project {msg.get('project')} open on screen. lab_graph shows it; "
+                              "build and run its nodes with the lab_ tools (the creative-lab skill says how).")
+            elif not msg.get("project") and (not before or before.get("project")):
+                self.remember("The user is on Creative Lab's home page, with no project open. When they want something "
+                              "made, start a project with them: the campaign questions first, then lab_new_project "
+                              "(the creative-lab skill says how).")
+            if self.lab["control"] != bool(before.get("control")):
+                self.remember("The user handed you control of the Creative Lab project: build it and run its nodes yourself, "
+                              "slow and paid ones included, without asking first; say what you did as you go. Scheduling, "
+                              "posting now, permissions and consent stay theirs." if self.lab["control"] else
+                              "The user took back control of the Creative Lab project: ask before running slow or paid nodes.")
+            return
         elif name == "open_campaign" and self.flowai:
             if self.flowai_loading:
                 await self.flowai_loading  # its accounts say which platform each post is for
@@ -641,6 +707,17 @@ class VoiceSession:
                 await self.switch(self.store.new(owner))
                 if msg.get("campaign") not in (None, ""):
                     await self.on_action({"type": "action", "name": "open_campaign", "campaign": msg["campaign"]})
+                elif msg.get("quick") and self.flowai:  # Creative Lab's New post: it speaks first
+                    self.lab = {"project": None, "node": None, "control": False}
+                    self.add_note("The user pressed New post in Creative Lab: they want something made straight away, "
+                                  "without the campaign questions. Ask in English, in one short line, what they want "
+                                  "to make (a post, a reel, a story, for which account), with two or three quick "
+                                  "ideas. From their answer, start the project at once with lab_new_project: "
+                                  "interview with depth quick and every field, what they didn't say suggested (ending "
+                                  "the value with \" (suggested)\"). Ask one more question only if you can't tell "
+                                  "what to make. Build the nodes (creative-lab skill, step 2), then say in one line "
+                                  "what's ready and run it once they say yes. If they answer in another language, "
+                                  "carry on in theirs.")
             elif kind == "open":
                 found = await self.store.open(owner, cid) if owner else None
                 if not found:
@@ -815,12 +892,12 @@ class VoiceSession:
             chosen = self.voice
         tts, speaker = self.m.tts, chosen["id"]
 
-        def compose(recipe: dict, seconds: float) -> bytes | None:  # in the render's thread
+        def compose(recipe: dict, seconds: float, progress=None) -> bytes | None:  # in the render's thread
             mood = recipe["music"]
             if mood == "song":
                 if songs:
                     try:
-                        return songs.song(recipe["song"], seconds, recipe.get("seed"))
+                        return songs.song(recipe["song"], seconds, recipe.get("seed"), progress)
                     except Exception as exc:
                         log.warning("no song for the video, the composer's music instead: %s", exc)
                 mood = "golden-hour"
@@ -1019,17 +1096,6 @@ class VoiceSession:
         item.meta = {**(item.meta or {}), "speaker": voice}
         return voice
 
-    async def needs(self, workflow: str, what: str):
-        """Raises when a workflow this machine relies on isn't on the pod (or still installing)."""
-        try:
-            await self.media.workflow(workflow)
-        except ComfyError as exc:
-            if "no workflow named" not in str(exc):
-                raise
-            raise ComfyError(f"{what} isn't set up on the ComfyUI pod yet. It comes with the assistant: once the "
-                             f"user agrees, call add_media_workflow with name {workflow} (it installs in the "
-                             "background, can take a while the first time)") from None
-
     async def dub_video(self, video=None, script: str = "", voice: str | None = None) -> dict:
         tts, script = self.m.tts, " ".join(str(script or "").split())
         try:
@@ -1058,12 +1124,11 @@ class VoiceSession:
             speech, seconds = await asyncio.to_thread(dub.fit, audio, info["duration"])
             await self.media.step(job, "preparing the video")
             clip = await asyncio.to_thread(dub.for_pod, item.path, dub.LIPSYNC_FPS, False)
-            await self.media.step(job, "syncing the lips")
             stop = threading.Event()
             job.stop = stop.set
 
-            def progress(text: str):  # from the lip sync's thread
-                asyncio.run_coroutine_threadsafe(self.media.step(job, text), self.loop)
+            def progress(stage: str, share: float | None):  # from the lip sync's thread
+                asyncio.run_coroutine_threadsafe(self.media.step(job, stage, share=share), self.loop)
 
             made = await asyncio.to_thread(self.m.lipsync.sync, clip, speech, progress, stop.is_set)
             data = await asyncio.to_thread(dub.with_sound, made, speech)
@@ -1074,36 +1139,55 @@ class VoiceSession:
         return {**started, "video": item.id, "voice": chosen["name"] if chosen else "the speaker's own, cloned "
                 "from the video", "video_seconds": info["duration"]}
 
-    async def swap_face(self, face=None, target=None) -> dict:
+    async def swap_face(self, face=None, target=None, draft=None, slide=None, every: bool = False) -> dict:
+        """The face from one picture put on the person in another picture or a video: a number, or a draft's
+        slide, whose picture or video the result then replaces. every: every face, not only the largest."""
+        swapper, then = self.m.faceswap, None
         try:
+            if not swapper:
+                raise dub.DubError("face swapping is off (FACESWAP_URL is not set)")
             source = self.media.item(face, "image")
-            into = self.media.item(target, "image", "video")
+            if draft not in (None, ""):
+                d, n, current = self.studio.slide_media(draft, slide)
+                into = self.media.item(current, "image", "video")
+                then = self.studio.into_slide(d, n)
+            elif target not in (None, ""):
+                into = self.media.item(target, "image", "video")
+            else:
+                raise dub.DubError("swap_face needs what to put the face on: a picture or video number (target), "
+                                   "or a draft (and its slide)")
             if into.id == source.id:
                 raise dub.DubError("the face and what to put it on are the same picture")
-            workflow = dub.FACE_SWAP_VIDEO if into.kind == "video" else dub.FACE_SWAP
-            await self.needs(workflow, "Face swapping" + (" in videos" if into.kind == "video" else ""))
             if into.kind == "video":
                 await asyncio.to_thread(dub.check, into.path)
-        except ComfyError as exc:
+        except (ComfyError, StudioError) as exc:
             return {"error": str(exc)}
 
         async def work(job):
-            face_url = data_url(source.path.read_bytes(), source.path.name)
             if into.kind == "video":
                 await self.media.step(job, "preparing the video")
-                clip = await asyncio.to_thread(dub.for_pod, into.path)
-                inputs = {"video": data_url(clip, "target.mp4"), "image": face_url}
+                target_file = ("target.mp4", await asyncio.to_thread(dub.for_pod, into.path))  # its sound and rate kept
             else:
-                inputs = {"image": data_url(into.path.read_bytes(), into.path.name), "image_2": face_url}
-            await self.media.step(job, "swapping the face on the pod")
-            files = await self.media.on_pod(job, workflow, inputs)
-            return [(d, n, await asyncio.to_thread(dub.meta, d) if file_kind(n) == "video" else None)
-                    for d, n in files if file_kind(n) == into.kind]
+                target_file = (into.path.name, await asyncio.to_thread(into.path.read_bytes))
+            face_file = (source.path.name, await asyncio.to_thread(source.path.read_bytes))
+            stop = threading.Event()
+            job.stop = stop.set
+
+            def progress(stage: str, share: float | None):  # from the face swap's thread
+                asyncio.run_coroutine_threadsafe(self.media.step(job, stage, share=share), self.loop)
+
+            made = await asyncio.to_thread(swapper.swap, face_file, target_file, bool(every), progress, stop.is_set)
+            if into.kind == "video":
+                return [(made, f"faceswap-{into.id}.mp4", await asyncio.to_thread(dub.meta, made))]
+            return [(made, f"faceswap-{into.id}.png", None)]
 
         what = f"{'video' if into.kind == 'video' else 'picture'} {into.id}"
-        started = self.media.pipeline(f"Swapping the face in {what}", workflow, f"the face from picture {source.id}",
-                                      into.kind, work)
-        return {**started, "face": f"picture {source.id}", "into": what}
+        started = self.media.pipeline(f"Swapping the face in {what}", "face swap", f"the face from picture {source.id}",
+                                      into.kind, work, then=then)
+        reply = {**started, "face": f"picture {source.id}", "into": what}
+        if then and "error" not in started:
+            reply.update(draft=d, slide=n, note="the result takes the slide's place by itself when it is ready")
+        return reply
 
     def focus_note(self) -> str | None:
         """What the user selected or painted on screen, for "this" and "it", when it changed since the LLM
@@ -1242,13 +1326,14 @@ class VoiceSession:
                   (set() if self.flowai else tools.FLOWAI_TOOLS) | \
                   (set() if self.m.phone else tools.PHONE_TOOLS) | \
                   (set() if self.m.lipsync else tools.LIPSYNC_TOOLS) | \
+                  (set() if self.m.faceswap else tools.FACESWAP_TOOLS) | \
                   ({"load_skill"} if self.skills_inline else set())
         try:
             for _ in range(settings.llm_max_tool_rounds):
                 content, calls, chunker = "", [], SentenceChunker()
                 rounds += 1
                 try:
-                    async for msg in self.m.llm.stream([system, *conv.messages], tools.schemas(exclude), usage):
+                    async for msg in self.m.llm.stream([system, *with_user_turn(conv.messages)], tools.schemas(exclude), usage):
                         if msg.content:
                             if first_token:
                                 log.info("LLM first token %.0f ms", (time.perf_counter() - t0) * 1000)

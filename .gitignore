@@ -3,3 +3,11 @@ dist
 *.local
 .DS_Store
 deploy/.env
+
+# The stack's settings (.env.example lists them), and the per-service files they replaced
+/.env
+/.env.*
+!/.env.example
+
+# The RunPod kit's keys (runpod/env.example lists them)
+runpod/env

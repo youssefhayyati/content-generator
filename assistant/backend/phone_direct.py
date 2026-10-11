@@ -11,7 +11,9 @@ It speaks the API agent's language: run() yields the same events (step, action, 
 backend/phone.py follows either one the same way (PHONE_DRIVER: direct, or agent for the API's).
 
 A post it says is up is checked once more, independently, on the screen it ended on (like the API's pro
-mode): if that screen doesn't show the post, the post is unsure rather than posted.
+mode). If that look can't tell, it opens the profile and finds the post, only looking (CONFIRM), and that
+screen is checked and kept as the proof; a post it can't find there is unsure rather than posted. Going back
+and forth (the same few moves over and over) gets it told to try another way or stop (STUCK).
 """
 
 import asyncio
@@ -34,9 +36,11 @@ PROOF_WIDTH = 1080
 HISTORY = 14  # steps the model is reminded of
 SETTLE_S = {"tap": 1.6, "long_press": 1.6, "open_app": 3.0, "key": 1.2, "swipe": 1.2, "type": 0.4}
 INPUT_TRIES = 3
+ACTION_GAP_S = 5.0  # at least this long between two inputs to the phone (PHONE_ACTION_GAP_SECONDS): one at a time
 MODEL_TRIES = 3
 KEYS = {"enter", "back", "home", "tab", "esc", "search"}
-# Apps the phone won't start by name (only a few system apps are on its allowlist): opened from the app list
+# Apps that, if the phone won't start them by name (it once allowed only a few system apps), are opened from the
+# app list instead
 APP_NAMES = {"com.instagram.android": "Instagram", "com.twitter.android": "X"}
 
 FIND_APP = """This is an Android phone's app list. Where is the icon of the app named "{name}" (its label under it \
@@ -77,10 +81,21 @@ Rules:
 - Be quick: no extra steps once the task is done."""
 
 VERIFY = """This is the screen of the team's phone right after it was asked to publish {what}. Does this screen \
-show that it is published? For example: the feed with the new post at the top, a "Posted" or "Your post was \
-sent" message, the upload finished, or the new post first on the profile. A compose, caption or editing \
-screen, or an error, means it is not.
+show that it is published? Yes when it shows that post itself, out of the editor: in the feed, the Reels feed, \
+the profile or the post's own page, under the phone's own account with the caption's first words (a reel may be \
+playing); or a "Posted", "Your reel was shared" or "Your post was sent" message; or an upload bar that finished. \
+No when it shows a compose, caption, editing or share screen, an upload still going, an error, or another post.
 Reply with JSON only: {{"verified": true or false, "why": "what the screen shows, in one sentence"}}"""
+
+# When that look can't tell: find the post on the profile, only looking
+CONFIRM = """Check that {what} is now published on this phone's account, only by looking. Open the app's profile \
+(Instagram: your profile picture at the far right of the bottom bar; X: your picture at the top left, then \
+Profile). For a reel, open the Reels tab (the film icon above the grid). The newest one should be it: open it and \
+check its caption's first words. Never tap Share, Post or anything that publishes, likes, comments or changes \
+something. Report with done: success true if you found it published (and leave it open on screen), false if not."""
+CONFIRM_STEPS = 8
+STUCK = ("Note: your last steps went back and forth without getting anywhere. Look at the screen afresh and try "
+         "another way; if what you need isn't there, report done with success false and say what you see.\n")
 
 
 class VisionModel:
@@ -113,9 +128,12 @@ class VisionModel:
 class DirectDriver:
     """Runs a goal on the phone with its direct controls, one look and a few actions at a time."""
 
-    def __init__(self, client: "PhoneClient", model: VisionModel, verify_posts: bool = True):
+    def __init__(self, client: "PhoneClient", model: VisionModel, verify_posts: bool = True,
+                 gap_s: float | None = None):
         self.client, self.model, self.verify_posts = client, model, verify_posts
+        self.gap_s = ACTION_GAP_S if gap_s is None else gap_s
         self.size = (1080, 2400)  # the screen, in pixels (GET /phone/geometry)
+        self.last_input = 0.0  # when the last input went to the phone (monotonic)
 
     async def ready(self):
         try:
@@ -136,9 +154,13 @@ class DirectDriver:
         raise PhoneError("the phone's screen can't be read (GET /phone/screenshot keeps failing)")
 
     async def input(self, path: str, body: dict) -> dict:
-        """One input, tried again on a hiccup; a PhoneError that stays is the phone dropping out."""
+        """One input, at least gap_s after the one before (the phone gets one thing at a time, calmly), tried
+        again on a hiccup; a PhoneError that stays is the phone dropping out."""
         from .phone import PhoneError
         for attempt in range(1, INPUT_TRIES + 1):
+            if (wait := self.last_input + self.gap_s - time.monotonic()) > 0:
+                await asyncio.sleep(wait)
+            self.last_input = time.monotonic()
             try:
                 return await self.client.call("POST", path, json=body) or {}
             except PhoneError as exc:
@@ -202,11 +224,15 @@ class DirectDriver:
 
     async def open_app(self, package: str):
         """By its package name when the phone allows it, else from the app list: home, swipe up, its icon."""
-        from .phone import PhoneError
+        from .phone import DROPPED, PhoneError
         name = APP_NAMES.get(package)
-        if not name:
+        try:
             await self.input("/phone/app-start", {"package": package})
             return
+        except PhoneError as exc:
+            if not name or DROPPED.search(str(exc)):
+                raise
+            log.info("the phone won't start %s by name (%s): opening it from the app list", package, exc)
         await self.input("/phone/key", {"key": "home"})
         await asyncio.sleep(1.0)
         for swipe in ("medium", "long"):
@@ -226,8 +252,9 @@ class DirectDriver:
     async def run(self, job: "PhoneJob", goal: str, max_steps: int, schema: dict | None = None,
                   check: str | None = None) -> AsyncIterator[dict]:
         """The goal, done on the phone: yields the API agent's events. check: what a post that went up looks
-        like, for the independent look at the screen it ended on."""
-        from .phone import DROPPED, PhoneError
+        like. The screen it ended on is looked at once more, independently; if that look can't tell, it opens
+        the profile to find the post (CONFIRM), so the proof shows the post itself."""
+        from .phone import PhoneError
         seq = 0
 
         def event(kind: str, **data) -> dict:
@@ -235,64 +262,94 @@ class DirectDriver:
             seq += 1
             return {"seq": seq, "type": kind, "data": data}
 
-        history: list[str] = []
         task = goal + ("\n\nWhen you report with done, put the answer in data, as JSON matching this schema:\n"
                        + json.dumps(schema) if schema else "")
         started = time.monotonic()
         try:
-            for n in range(1, max_steps + 1):
-                screen = await self.shot()
-                job.shot = screen
-                so_far = "\n".join(history[-HISTORY:]) or "(nothing yet: this is the first step)"
-                reply = await self.model.ask(SYSTEM, f"The task:\n{task}\n\nWhat you did so far:\n{so_far}\n\n"
-                                                     f"Step {n} of at most {max_steps}. The screen now (points as "
-                                                     "fractions, 0.0 to 1.0):", screen)
-                goal_now = str(reply.get("next_goal") or "")[:300]
-                yield event("step", n=n, next_goal=goal_now, evaluation=str(reply.get("evaluation") or "")[:300])
-                actions = reply.get("actions")
-                actions = actions if isinstance(actions, list) else [reply] if "done" in reply else []
-                done_list, finish = [], None
-                for a in actions[:6]:
-                    if not isinstance(a, dict):
-                        continue
-                    if a.get("done"):
-                        finish = a
-                        break
-                    try:
-                        name, params, settle = await self.act(a)
-                        ok, error = True, None
-                    except (ValueError, TypeError, KeyError) as exc:
-                        name, params, settle, ok, error = str(next(iter(a), "?")), {}, "", False, str(exc)
-                    except PhoneError as exc:
-                        if DROPPED.search(str(exc)):
-                            raise
-                        name, params, settle, ok, error = str(next(iter(a), "?")), {}, "", False, str(exc)
-                    yield event("action", n=n, name=name, params=params, ok=ok, error=error)
-                    done_list.append(f"{name} {json.dumps(params)[:90]}" + ("" if ok else f" FAILED: {error}"))
-                    if settle:
-                        await asyncio.sleep(SETTLE_S.get(settle, 1.0))
-                    if not ok or name in SCREEN_CHANGERS and not _typing_follows(actions, a):
-                        break  # the screen may have changed: look again before doing more
-                history.append(f"{n}. {goal_now} -> " + ("; ".join(done_list) or "no action"))
-                if finish is not None:
-                    success = bool(finish.get("success", True))
-                    text = str(finish.get("text") or "").strip() or ("done" if success else "it couldn't be done")
-                    data = finish.get("data") if isinstance(finish.get("data"), dict) else None
-                    if success and check and self.verify_posts:
-                        success = await self._verify(job, check)
-                    else:
-                        job.shot = await self.shot(PROOF_WIDTH)
-                    yield event("result", success=success, text=text, data=data)
-                    yield event("status", status="succeeded")
-                    log.info("direct phone run: %s in %d steps, %d s", "done" if success else "not done", n,
-                             round(time.monotonic() - started))
-                    return
-            job.shot = await self.shot(PROOF_WIDTH)
-            yield event("status", status="failed", detail=f"it ran out of steps ({max_steps}) before the task was done")
+            end: dict = {}
+            async for e in self._loop(job, task, max_steps, event, end):
+                yield e
+            finish, n = end.get("done"), end.get("n", max_steps)
+            if finish is None:
+                job.shot = await self.shot(PROOF_WIDTH)
+                yield event("status", status="failed", detail=f"it ran out of steps ({max_steps}) before the task "
+                                                               "was done")
+                return
+            success = bool(finish.get("success", True))
+            text = str(finish.get("text") or "").strip() or ("done" if success else "it couldn't be done")
+            data = finish.get("data") if isinstance(finish.get("data"), dict) else None
+            if success and check and self.verify_posts and not await self._verify(job, check):
+                first = job.verdict
+                looked: dict = {}
+                async for e in self._loop(job, CONFIRM.format(what=check), CONFIRM_STEPS, event, looked, n):
+                    yield e
+                n = looked.get("n", n)
+                found = bool((looked.get("done") or {}).get("success"))
+                success = found and await self._verify(job, check)
+                if not found:
+                    job.shot = await self.shot(PROOF_WIDTH)
+                if not success:
+                    job.verdict = f"{first} Then on the profile: {job.verdict if found else 'not found'}"
+            elif not (success and check and self.verify_posts):
+                job.shot = await self.shot(PROOF_WIDTH)
+            yield event("result", success=success, text=text, data=data)
+            yield event("status", status="succeeded")
+            log.info("direct phone run: %s in %d steps, %d s", "done" if success else "not done", n,
+                     round(time.monotonic() - started))
         except PhoneError as exc:
             yield event("status", status="failed", detail=str(exc))
         except RuntimeError as exc:  # the vision model
             yield event("status", status="failed", detail=str(exc))
+
+    async def _loop(self, job: "PhoneJob", task: str, max_steps: int, event, end: dict,
+                    first: int = 0) -> AsyncIterator[dict]:
+        """Look, decide, act, until the model reports done (end["done"], at step end["n"]) or the steps run out.
+        Steps are numbered on from `first`; after the task's own (a CONFIRM), its actions are marked as looking."""
+        from .phone import DROPPED, PhoneError
+        history: list[str] = []
+        moves: list[str] = []  # each step's actions in short, to notice going back and forth
+        for i in range(1, max_steps + 1):
+            n = first + i
+            screen = await self.shot()
+            job.shot = screen
+            so_far = "\n".join(history[-HISTORY:]) or "(nothing yet: this is the first step)"
+            stuck = STUCK if len(moves) >= 4 and len(set(moves[-4:])) <= 2 else ""
+            reply = await self.model.ask(SYSTEM, f"The task:\n{task}\n\nWhat you did so far:\n{so_far}\n{stuck}\n"
+                                                 f"Step {i} of at most {max_steps}. The screen now (points as "
+                                                 "fractions, 0.0 to 1.0):", screen)
+            goal_now = str(reply.get("next_goal") or "")[:300]
+            yield event("step", n=n, next_goal=goal_now, evaluation=str(reply.get("evaluation") or "")[:300])
+            actions = reply.get("actions")
+            actions = actions if isinstance(actions, list) else [reply] if "done" in reply else []
+            done_list, finish, move = [], None, []
+            for a in actions[:6]:
+                if not isinstance(a, dict):
+                    continue
+                if a.get("done"):
+                    finish = a
+                    break
+                try:
+                    name, params, settle = await self.act(a)
+                    ok, error = True, None
+                except (ValueError, TypeError, KeyError) as exc:
+                    name, params, settle, ok, error = str(next(iter(a), "?")), {}, "", False, str(exc)
+                except PhoneError as exc:
+                    if DROPPED.search(str(exc)):
+                        raise
+                    name, params, settle, ok, error = str(next(iter(a), "?")), {}, "", False, str(exc)
+                yield event("action", n=n, name=name, params=params, ok=ok, error=error, **({"look": True} if first else {}))
+                done_list.append(f"{name} {json.dumps(params)[:90]}" + ("" if ok else f" FAILED: {error}"))
+                move.append(_move(name, params))
+                if settle:
+                    await asyncio.sleep(SETTLE_S.get(settle, 1.0))
+                if not ok or name in SCREEN_CHANGERS and not _typing_follows(actions, a):
+                    break  # the screen may have changed: look again before doing more
+            history.append(f"{i}. {goal_now} -> " + ("; ".join(done_list) or "no action"))
+            moves.append(" ".join(move))
+            if finish is not None:
+                end["done"], end["n"] = finish, n
+                return
+        end["n"] = first + max_steps
 
     async def _verify(self, job: "PhoneJob", check: str) -> bool:
         """An independent look at the screen it ended on, like the API's pro mode: job.verdict says what it saw."""
@@ -305,6 +362,13 @@ class DirectDriver:
             return True  # the agent's word stands
         job.verdict = str(answer.get("why") or "")[:500]
         return bool(answer.get("verified"))
+
+
+def _move(name: str, params: dict) -> str:
+    """An action in short (taps to the nearest 100 px), to tell when the same few repeat."""
+    if name in ("tap", "long_press"):
+        return f"{name}@{round(params.get('x', 0), -2)},{round(params.get('y', 0), -2)}"
+    return f"{name}:{params.get('direction') or params.get('key') or params.get('package') or ''}"
 
 
 def _typing_follows(actions: list, a: dict) -> bool:

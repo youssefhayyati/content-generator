@@ -23,6 +23,7 @@ import { useOverview } from '../Shell'
 import { useToast } from '../toast'
 import { MediaLibrary } from '../media/Media'
 import { ClipsGallery } from '../media/ClipsGallery'
+import { NEW_POST } from '../nav'
 import { Btn, EmptyState, Menu, Modal, PageHeader, Platforms, Segmented, Skeleton, StateBadge, Stagger, inputClass } from '../ui'
 
 const TABS: Array<{ value: PostStatus | ''; label: string }> = [
@@ -99,7 +100,6 @@ export default function Library() {
   return (
     <div>
       <PageHeader
-        eyebrow="Gallery"
         title={
           <>
             Everything you’ve <Serif>made.</Serif>
@@ -128,7 +128,7 @@ export default function Library() {
                 navigate('/dashboard/library?view=' + v, { replace: true })
               }}
             />
-            <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
+            <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
               New post
             </Btn>
           </>
@@ -238,7 +238,7 @@ export default function Library() {
                 icon={FolderOpen}
                 title="Your library is empty"
                 body="Everything you write lands here: drafts, scheduled posts and what’s already out."
-                action={<Btn variant="primary" icon={PenLine} onClick={() => navigate('/dashboard/create')}>Write the first one</Btn>}
+                action={<Btn variant="primary" icon={PenLine} onClick={() => navigate(NEW_POST)}>Write the first one</Btn>}
               />
             )
           ) : (
