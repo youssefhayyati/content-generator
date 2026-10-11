@@ -82,6 +82,9 @@ function remember(key: string, value: unknown) {
 
 /* ------------------------------------------------------------------ */
 
+/** The cards that answer the pointer: clickable ones, as index.css selects them. */
+const SPOT_CARD = ":is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)"
+
 export function Shell({ children }: { children: ReactNode }) {
   const user = useUser()
   const overview = useApi<Overview>('/overview')
@@ -157,6 +160,21 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.add('glass-app')
     return () => document.documentElement.classList.remove('glass-app')
+  }, [])
+
+  // Cards you can click catch the light where the pointer is (index.css, "Cards that answer the
+  // pointer"): the hovered one is told where, in its own coordinates.
+  useEffect(() => {
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return
+    const onMove = (e: PointerEvent) => {
+      const el = (e.target as Element | null)?.closest?.<HTMLElement>(SPOT_CARD)
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      el.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`)
+      el.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`)
+    }
+    document.addEventListener('pointermove', onMove, { passive: true })
+    return () => document.removeEventListener('pointermove', onMove)
   }, [])
 
   // A picture whose file is missing shows the browser's broken-image text. Anywhere in the studio

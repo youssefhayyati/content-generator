@@ -87,6 +87,20 @@
     color: var(--color-on-accent);
   }
 
+  /* Headings break into even lines, and paragraphs don't leave one word alone on the last. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  p,
+  li,
+  figcaption,
+  blockquote {
+    text-wrap: pretty;
+  }
+
   /* A select's open list is drawn by the browser from the select's own colours: ours are see-through, so
      Chromium on Windows fell back to a white list. Every select in the app gets the panel's instead. */
   select {
@@ -683,6 +697,45 @@ html.glass-app .glass-solid :is(.bg-panel-3, .bg-panel-3\/95)[class*='shadow'] {
     --color-panel-2: #0f0f11;
     --color-panel-3: #131315;
     --glass-blur: none;
+  }
+}
+
+/* Cards that answer the pointer: a clickable card (a link or button built as a rounded panel)
+   catches a soft light where the pointer is, and its rim brightens nearest to it. Shell tells the
+   hovered card where (--mx, --my). White, not the accent, and only under a mouse. In the layer
+   below the utilities, so a card's own positioning still wins over the `relative` it needs. */
+@layer components {
+  @media (hover: hover) and (pointer: fine) {
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking) {
+      position: relative;
+      isolation: isolate;
+    }
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::before,
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.4s var(--ease-quint);
+    }
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::before {
+      background: radial-gradient(480px circle at var(--mx, 50%) var(--my, 50%), rgb(255 255 255 / 0.06), transparent 45%);
+    }
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::after {
+      z-index: 1;
+      padding: 1px;
+      background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgb(255 255 255 / 0.36), transparent 70%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+    }
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking):hover::before,
+    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking):hover::after {
+      opacity: 1;
+    }
   }
 }
 

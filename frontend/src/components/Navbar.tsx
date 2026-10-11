@@ -27,7 +27,6 @@ export function Navbar() {
   const [open, setOpen] = useState(false)
   const [paper, setPaper] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
-  const bar = useRef<HTMLElement>(null)
 
   useMotionValueEvent(scrollY, 'change', (y) => {
     const prev = scrollY.getPrevious() ?? 0
@@ -43,9 +42,8 @@ export function Navbar() {
     let raf = 0
     const look = () => {
       raf = 0
-      const r = bar.current?.getBoundingClientRect()
-      const y = r ? r.top + 32 : 32
-      const under = document.elementsFromPoint(window.innerWidth / 2, y).find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.surface)
+      // Where the bar sits when it's showing, even if right now it's tucked away above the page.
+      const under = document.elementsFromPoint(window.innerWidth / 2, 40).find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.surface)
       setPaper(under?.dataset.surface === 'paper')
     }
     const onScroll = () => {
@@ -82,7 +80,6 @@ export function Navbar() {
   return (
     <>
       <motion.header
-        ref={bar}
         initial={{ y: -100, opacity: 0 }}
         animate={ready ? { y: shown ? 0 : -110, opacity: 1 } : undefined}
         transition={{ duration: 0.8, ease }}
