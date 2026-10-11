@@ -32,6 +32,7 @@ services:
     environment:
       API_ORIGIN: http://api:8000
       ASSISTANT_ORIGIN: http://assistant:8000
+      PHONE_BRIDGE_ORIGIN: http://phone-bridge:8004
     # Installs packages on the first start and whenever package-lock.json changes
     command: sh -c '[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci --no-audit --no-fund; exec npx vite --host 0.0.0.0 --port 5173 --strictPort'
     ports:
