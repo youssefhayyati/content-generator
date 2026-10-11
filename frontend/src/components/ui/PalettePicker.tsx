@@ -80,7 +80,7 @@ export function PalettePicker() {
   useEffect(() => applyPalette(current), [current])
 
   return (
-    <div role="radiogroup" aria-label="Palette" className="grid gap-2 sm:grid-cols-2">
+    <div role="radiogroup" aria-label="Palette" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {PALETTES.map((p) => {
         const on = p.id === current
         return (
