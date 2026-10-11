@@ -236,7 +236,7 @@ class PhoneClient:
         if driver not in ("agent", "direct"):
             raise PhoneError(f"no driver {driver!r}: agent or direct")
         if not self.driver and (driver == "direct" or fallback):
-            raise PhoneError("direct control isn't available: it needs a vision model on Ollama (OLLAMA_API_KEY)")
+            raise PhoneError("direct control isn't available: it needs a vision model on Ollama (OLLAMA_CLOUD_API_KEY)")
         self.prefer = "direct" if driver == "direct" else "auto" if fallback else "agent"
         self.agent_down_until = 0.0  # picked by hand: the phone's agent gets the next job if that's the pick
         log.info("The phone is driven by %s", self.driven_by())

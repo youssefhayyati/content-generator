@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Asset;
+use App\Models\Post;
 use App\Models\PublishingRun;
 use App\Services\Publishing\Publisher;
 use Illuminate\Http\JsonResponse;
@@ -82,6 +83,23 @@ class AgentController extends Controller
         abort_unless($asset->user()->is($request->user()), 404);
 
         return response()->file(Storage::disk('local')->path($asset->path), ['Content-Type' => $asset->mime]);
+    }
+
+    /**
+     * How a post it published is doing, as the phone read it: likes, comments, shares, saves, views
+     * (null where it couldn't see), and the newest comments.
+     */
+    public function metrics(Request $request, Post $post): JsonResponse
+    {
+        abort_unless($post->user()->is($request->user()), 404);
+        $data = $request->validate([
+            'likes' => ['nullable', 'integer', 'min:0'], 'comments' => ['nullable', 'integer', 'min:0'], 'shares' => ['nullable', 'integer', 'min:0'],
+            'saves' => ['nullable', 'integer', 'min:0'], 'views' => ['nullable', 'integer', 'min:0'],
+            'latest_comments' => ['nullable', 'array', 'max:10'], 'latest_comments.*.author' => ['nullable', 'string', 'max:80'], 'latest_comments.*.text' => ['nullable', 'string', 'max:500'],
+        ]);
+        $post->update(['metrics' => $data, 'metrics_at' => now()]);
+
+        return response()->json(['ok' => true]);
     }
 
     private function ownRun(Request $request, PublishingRun $run): void

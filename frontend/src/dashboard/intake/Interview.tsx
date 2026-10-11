@@ -41,12 +41,14 @@ export function Interview({
   onChange,
   onNext,
   nextBusy = false,
+  nextLabel = 'Make the content',
 }: {
   initial: Campaign
   embedded?: boolean
   onChange?: (c: Campaign) => void
   onNext?: () => void
   nextBusy?: boolean
+  nextLabel?: string
 }) {
   const user = useUser()
   const toast = useToast()
@@ -329,7 +331,7 @@ export function Interview({
                 )}
                 {onNext && (
                   <Btn variant={campaign.kit ? 'primary' : 'ghost'} size="sm" icon={ArrowRight} onClick={onNext} loading={nextBusy}>
-                    Make the content
+                    {nextLabel}
                   </Btn>
                 )}
                 {campaign.ai_available && campaign.brief.some((g) => g.fields.some((f) => f.suggested)) && (

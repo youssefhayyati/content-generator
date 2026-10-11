@@ -38,11 +38,13 @@ class Publisher
      */
     public function dispatchDue(): int
     {
-        $posts = Post::with(['account.device', 'user'])
+        $posts = Post::with(['account.device', 'device', 'user'])
             ->where('status', PostStatus::Scheduled)
             ->where('scheduled_at', '<=', now())
             ->whereNotNull('approved_at') // only approved content publishes automatically (gate 6B)
-            ->whereHas('account', fn ($q) => $q->where('automation', true)->whereNotNull('device_id'))
+            ->whereHas('account', fn ($q) => $q->where('automation', true))
+            // the account's phone, or the one its Post node chose
+            ->where(fn ($q) => $q->whereNotNull('device_id')->orWhereHas('account', fn ($a) => $a->whereNotNull('device_id')))
             ->oldest('scheduled_at')
             ->limit(20)
             ->get();
@@ -73,9 +75,9 @@ class Publisher
      */
     public function open(Post $post, int $attempt = 1): ?PublishingRun
     {
-        $post->loadMissing(['account.device', 'user']);
+        $post->loadMissing(['account.device', 'device', 'user']);
         $account = $post->account;
-        $device = $account?->device;
+        $device = $post->device ?? $account?->device;
         if (! $account || ! $device || ! $post->isApproved() || ! $account->automation) {
             return null;
         }
@@ -258,7 +260,7 @@ class Publisher
         $run = $this->open($post, 1);
         if (! $run) {
             $post->update(['status' => $post->status]); // keep it where a person can see it
-            abort_if($post->account?->device?->booked_run_id, 409, 'The phone is busy with another post. It starts as soon as it’s free.');
+            abort_if(($post->device ?? $post->account?->device)?->booked_run_id, 409, 'The phone is busy with another post. It starts as soon as it’s free.');
             abort(422, 'This post can’t publish automatically: it needs approval, automation on, and a phone that isn’t paused.');
         }
         ActionLog::record($post->user, 'you', 'publish.retry', $post, "Trying “{$run->goal}” again.", 'approved');

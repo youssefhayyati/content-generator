@@ -53,4 +53,15 @@ export PYTHONUNBUFFERED=1 PYTHONPATH=$SRC/backend OMNIVOICE_SERVER_MODE=1 \
 mkdir -p "$OMNIVOICE_DATA_DIR"
 setsid nohup "$VENV/bin/python" -m uvicorn backend.main:app --host 0.0.0.0 --port "$PORT" \
   > "$APP/server.log" 2>&1 < /dev/null &
+# Speech recognition: Whisper large-v3 (faster-whisper, 2.9 GB, once). FlowAI hears with it since FlowAI Sound
+# stopped running locally: Creative Lab's transcripts, captions and found moments, and the assistant's dubs. Asked
+# for in the background once the server answers; already installed, it's a no-op.
+(
+  for _ in $(seq 1 120); do
+    curl -sf "http://127.0.0.1:${PORT}/health" > /dev/null && break
+    sleep 5
+  done
+  curl -s -X POST "http://127.0.0.1:${PORT}/models/install" -H "Authorization: Bearer ${OMNIVOICE_API_KEY:-}" \
+    -H 'Content-Type: application/json' -d '{"repo_id":"Systran/faster-whisper-large-v3"}' >> "$APP/server.log" 2>&1
+) > /dev/null 2>&1 &
 echo "VoiceStudio starting: https://${RUNPOD_POD_ID}-${PORT}.proxy.runpod.net  (log: $APP/server.log, key: OMNIVOICE_API_KEY in $ROOT/env)"

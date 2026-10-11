@@ -13,6 +13,8 @@ from .browser import Browser
 from .comfyui import ComfyClient, ComfyError
 from .config import ROOT, settings
 from .conversations import ConversationStore
+from .engine import Engine
+from .engine import router as engine_router
 from .llm import LLM
 from .podjobs import FaceSwap, JobService, LipSync
 from .music import SongWriter
@@ -98,7 +100,7 @@ async def check_comfy(comfy: ComfyClient):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not settings.ollama_api_key:
-        log.warning("OLLAMA_API_KEY is not set; LLM calls to Ollama cloud will fail")
+        log.warning("OLLAMA_CLOUD_API_KEY is not set; LLM calls to Ollama cloud will fail")
     log.info("Loading models...")
     asr = ASREngine(settings.asr_model, settings.asr_device, getattr(torch, settings.asr_dtype),
                     settings.asr_language, settings.asr_lookahead)
@@ -159,7 +161,7 @@ async def lifespan(app: FastAPI):
                                                            settings.phone_vision_model), settings.phone_verify_posts,
                                        settings.phone_action_gap_seconds)
         elif settings.phone_driver != "agent":
-            log.warning("PHONE_DRIVER=%s needs OLLAMA_API_KEY for our own agent: the phone's agent drives it",
+            log.warning("PHONE_DRIVER=%s needs OLLAMA_CLOUD_API_KEY for our own agent: the phone's agent drives it",
                         settings.phone_driver)
             phone.prefer = "agent"
         phone.load_choice(ROOT / settings.data_dir / "phone" / "driver.json")  # the switch's last position
@@ -173,6 +175,8 @@ async def lifespan(app: FastAPI):
     app.state.models.conversations = ConversationStore(
         ROOT / settings.data_dir / "conversations", app.state.models.comfy, MEDIA_DIR, ROOT / settings.fonts_dir,
         settings.comfyui_timeout_minutes * 60, app.state.models.phone)
+    # Creative Lab's nodes: the pod's models and this service's drawing, as jobs (engine.py)
+    app.state.engine = Engine(app.state.models, MEDIA_DIR, ROOT / settings.fonts_dir)
     log.info("Ready")
     yield
     for check in (getattr(app.state, "lipsync_check", None), getattr(app.state, "faceswap_check", None)):
@@ -191,6 +195,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Voice Agent", lifespan=lifespan)
+app.include_router(engine_router)
 
 
 @app.get("/health")

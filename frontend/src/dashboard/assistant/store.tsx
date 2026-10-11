@@ -192,7 +192,10 @@ export type FontList = { styles: Array<{ id: string; label: string }>; fonts: Fo
 export type CurrentConversation = { id: string; title: string; kept: boolean; campaign: { id: number; name: string; stage: string } | null }
 /** A numbered picture or video in the conversation. */
 export type Picture = { id: number; kind: 'image' | 'video'; name: string; source: string; url: string; workflow: string; prompt: string }
-export type Job = { id: number; label: string; started: number; status: string; text: string }
+/** A picture, video, dub or face swap being made: where it is now (stage, its detail in text, share done 0..1 when
+ * known) and the stages it went through, each with when it began (ms). status: running, failed, or done for a moment. */
+export type Job = { id: number; label: string; started: number; status: string; text: string; stage: string; share: number | null; log: JobStage[] }
+export type JobStage = { at: number; text: string }
 export type AssistantAccount = { id: number; platform: 'instagram' | 'x'; handle: string; label: string; name: string | null }
 /** What the person selected on screen: "this", "it". */
 export type Focus = { draft?: number; slide?: number; text?: number }
@@ -557,15 +560,25 @@ function onEvent(s: State, m: AssistantEvent): State {
       if (m.kind === 'install') return s
       const id = Number(m.id)
       const before = s.jobs[id]
+      const share = typeof m.share === 'number' ? m.share : null
       if (m.status === 'started') {
         const started = Date.now() - Number(m.seconds ?? 0) * 1000 // still going in a conversation just reopened
         const label = String(m.label || (m.makes === 'video' ? 'Making the video' : 'Making the picture'))
-        return { ...s, jobs: { ...s.jobs, [id]: { id, label, started, status: 'running', text: '' } } }
+        const log = ((m.log as Array<{ at: number; stage: string }> | undefined) ?? []).map((l) => ({ at: started + Number(l.at) * 1000, text: String(l.stage) }))
+        return { ...s, jobs: { ...s.jobs, [id]: { id, label, started, status: 'running', text: String(m.text ?? ''), stage: String(m.stage ?? ''), share, log } } }
       }
       if (!before) return s
       const jobs = { ...s.jobs }
-      if (m.status === 'done' || m.status === 'cancelled') delete jobs[id]
-      else jobs[id] = { ...before, status: String(m.status), text: String(m.text ?? '') }
+      if (m.status === 'cancelled') delete jobs[id]
+      else if (m.status === 'done') jobs[id] = { ...before, status: 'done', share: 1, text: String(m.text ?? '') } // shown done for a moment
+      else if (m.status === 'failed') jobs[id] = { ...before, status: 'failed', text: String(m.text ?? '') }
+      else {
+        // A new stage starts a new line of its log
+        const stage = String(m.stage ?? '')
+        const at = typeof m.at === 'number' ? before.started + m.at * 1000 : Date.now()
+        const log = stage && before.log[before.log.length - 1]?.text !== stage ? [...before.log, { at, text: stage }] : before.log
+        jobs[id] = { ...before, status: 'running', text: String(m.text ?? ''), stage: stage || before.stage, share, log }
+      }
       return { ...s, jobs }
     }
     case 'draft': {
@@ -879,6 +892,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
             queued.current = null
           }
           break
+        case 'lab_open':
+          // The assistant made a Creative Lab project: show it (Dashboard listens and navigates).
+          window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: `/dashboard/studio?project=${Number(m.project)}` }))
+          break
         case 'conversation':
           conversation.current = String(m.id)
           autoApprove.current.clear()
@@ -910,7 +927,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           break
         }
         case 'media_job':
-          if (m.status === 'failed') window.setTimeout(() => dispatch({ type: 'job-expired', id: Number(m.id) }), 8000)
+          if (m.status === 'failed' || m.status === 'done') window.setTimeout(() => dispatch({ type: 'job-expired', id: Number(m.id) }), m.status === 'done' ? 4000 : 8000)
           break
       }
     },

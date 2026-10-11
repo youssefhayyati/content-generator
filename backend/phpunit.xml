@@ -30,6 +30,8 @@
         <env name="AI_GATEWAY_IMAGE_MODELS" value=""/>
         <env name="AI_GATEWAY_LOCAL_MODELS" value=""/>
         <env name="OLLAMA_URL" value=""/>
+        <env name="ENGINE_URL" value=""/>
+        <env name="ENGINE_KEY" value=""/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
@@ -41,6 +43,7 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <!-- Tests fake the generator bindings; never let a real .env point the agents elsewhere. -->
         <env name="AI_DEFAULT_TEXT" value="anthropic/claude-opus-5" force="true"/>
+        <env name="AUTH_VERIFY_EMAIL" value="true" force="true"/>
         <env name="AI_AGENTS_MODEL" value="anthropic/claude-opus-5-5" force="true"/>
         <!-- Provider keys off: tests decide per-test what's configured. -->
         <env name="OLLAMA_CLOUD_API_KEY" value="" force="true"/>

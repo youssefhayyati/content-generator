@@ -128,8 +128,8 @@ class CampaignTest extends TestCase
             ->assertJsonPath('filled', 0)
             ->assertJsonPath('total', 25)
             ->assertJsonPath('pending', 'focus')
-            ->assertJsonPath('messages.1', ['who' => 'client', 'text' => 'Quick'])
-            ->assertJsonPath('messages.2.text', 'Quick it is. Are we promoting you as a person, a product, or your business?')
+            ->assertJsonPath('messages.1', ['who' => 'client', 'text' => 'Quick: 5 questions'])
+            ->assertJsonPath('messages.2.text', 'Five it is. Are we promoting you as a person, a product, or your business?')
             ->assertJsonPath('prompt.options.0', 'Me (personal brand)')
             ->assertJsonPath('brief.0.label', 'Basics')
             ->assertJsonPath('brief.0.fields.0', ['key' => 'focus', 'label' => 'What we’re promoting', 'value' => '', 'suggested' => false]);
@@ -146,8 +146,8 @@ class CampaignTest extends TestCase
         $this->spa()->postJson("/api/campaigns/{$campaign->id}/turn", ['text' => 'A product'])
             ->assertOk()
             ->assertJsonPath('brief.0.fields.0.value', 'A product')
-            ->assertJsonPath('pending', 'business')
-            ->assertJsonPath('messages.4.text', 'Tell me about your business or what you do.');
+            ->assertJsonPath('pending', 'offer')
+            ->assertJsonPath('messages.4.text', 'What exactly should this campaign promote?');
 
         // A quick interview only covers the quick fields, then wraps up.
         foreach (array_slice(Brief::QUICK, 1) as $key) {
@@ -287,7 +287,7 @@ class CampaignTest extends TestCase
             ->assertOk()
             ->assertJsonPath('mode', 'script')
             ->assertJsonPath('brief.0.fields.2.value', 'Lavender candles')
-            ->assertJsonPath('pending', 'business');
+            ->assertJsonPath('pending', 'audience');
 
         $this->assertContains(
             ['who' => 'note', 'text' => 'AI isn’t available right now, so I’ll continue with a standard question list.'],
@@ -382,7 +382,7 @@ class CampaignTest extends TestCase
         $this->spa()->post("/api/campaigns/{$campaign->id}/photos", ['photos' => [$this->png()]])
             ->assertOk()
             ->assertJsonPath('brief.4.fields.1.value', '1 photo')
-            ->assertJsonPath('pending', 'channels');
+            ->assertJsonPath('complete', true);
     }
 
     public function test_the_content_kit_streams_in_and_is_saved(): void
@@ -403,7 +403,7 @@ class CampaignTest extends TestCase
 
         $call = $fake->calls[1];
         $this->assertSame(['stream', 'medium'], [$call['kind'], $call['effort']]);
-        $this->assertStringContainsString('- **Business / who you are:** Lyon candles', $call['prompt']);
+        $this->assertStringContainsString('- **Product or offer:** Lyon candles', $call['prompt']);
         $this->assertStringContainsString('[needs client photo]', $call['prompt']);
         $this->assertStringContainsString('Today is ', $call['prompt']);
 

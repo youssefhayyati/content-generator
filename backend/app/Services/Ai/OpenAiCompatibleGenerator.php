@@ -7,6 +7,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Text from any OpenAI-compatible chat API: a team gateway, OpenRouter, vLLM, LM Studio, or
@@ -78,7 +79,9 @@ class OpenAiCompatibleGenerator implements TextGenerator
         $messages = [
             ['role' => 'system', 'content' => $system."\n\nReply with one JSON object only."],
             // Some providers ignore response_format entirely; the shape goes in the prompt too.
-            ['role' => 'user', 'content' => (is_string($content) ? $content : $this->blocks($content))."\n\nReply with one JSON object of exactly this shape: ".$this->shapeHint($schema)],
+            ['role' => 'user', 'content' => is_string($content)
+                ? $content."\n\n".$this->shapeLine($schema)
+                : [...$this->blocks($content), ['type' => 'text', 'text' => $this->shapeLine($schema)]]],
         ];
 
         // Structured output is a promise some providers keep loosely: check the required keys
@@ -100,11 +103,17 @@ class OpenAiCompatibleGenerator implements TextGenerator
                 return $data;
             }
 
+            Log::warning('A model answered off the asked shape', ['provider' => $this->provider, 'model' => $model, 'attempt' => $attempt, 'problem' => $problem, 'answer' => mb_substr($text, 0, 300)]);
             $messages[] = ['role' => 'assistant', 'content' => $text];
             $messages[] = ['role' => 'user', 'content' => $problem.'. Reply again with one JSON object exactly in the asked shape, nothing else.'];
         }
 
         throw new GenerationFailed('The model’s answer didn’t match what was asked for. Try again, or switch model.');
+    }
+
+    private function shapeLine(array $schema): string
+    {
+        return 'Reply with one JSON object of exactly this shape: '.$this->shapeHint($schema);
     }
 
     /**
@@ -144,7 +153,8 @@ class OpenAiCompatibleGenerator implements TextGenerator
             return 'It missed the required keys: '.implode(', ', $missing);
         }
         foreach (($schema['properties'] ?? []) as $key => $prop) {
-            if (($prop['type'] ?? null) !== 'array' || ! isset($data[$key]) || ! is_array($data[$key])) {
+            // Only lists of objects have keys to check; a list of strings is fine as it is.
+            if (($prop['type'] ?? null) !== 'array' || ($prop['items']['type'] ?? 'object') !== 'object' || ! isset($data[$key]) || ! is_array($data[$key])) {
                 continue;
             }
             $itemRequired = $prop['items']['required'] ?? [];

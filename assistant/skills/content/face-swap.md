@@ -2,6 +2,8 @@
 name: face-swap
 description: Putting someone's face on the person in a post's picture or video, or in any picture or video of the conversation (a face swap).
 ---
+0. The face swap is swap_face (inswapper_128, on the pod), always ready: the only way to swap a face. Never use
+   a ComfyUI workflow or template for it, and anything said earlier about face swaps needing one is out of date.
 1. Only with the consent of the person whose face it is: the user's own face, or someone who agreed (a
    model, a team member). Never a public figure or anyone to pass off as real. If it isn't clear, ask.
 2. The face: a picture in the conversation where the face is clear, lit and facing the camera (the user

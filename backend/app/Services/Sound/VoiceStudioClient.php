@@ -74,6 +74,28 @@ class VoiceStudioClient
     }
 
     /**
+     * A voice cloned from a recording (one person speaking, best 5 to 20 seconds, as WAV) as a new
+     * profile, then readable like any other. `$text`, what the recording says, makes it closer.
+     *
+     * @return array{id: string, name: string, lang: string, language: string, gender: string, style: string, sample: string}
+     */
+    public function clone(string $name, string $wav, string $text = ''): array
+    {
+        try {
+            $made = $this->ok($this->http()->timeout(180)->attach('ref_audio', fopen($wav, 'r'), 'reference.wav')
+                ->post($this->url().'/profiles', ['name' => $name, 'kind' => 'clone', 'ref_text' => $text, 'language' => 'Auto']))->json();
+            if (! isset($made['kind']) && isset($made['id'])) {
+                $made = $this->get('/profiles/'.$made['id'])->json();
+            }
+        } catch (ConnectionException) {
+            throw new GenerationFailed($this->down());
+        }
+        Cache::forget('voicestudio.voices');
+
+        return $this->shape($made);
+    }
+
+    /**
      * Speak a script in a profile's voice. Returns the WAV and how long it is; word timings are
      * empty because VoiceStudio doesn't time words — the Listener aligns the audio when a reel
      * or the karaoke player needs them.

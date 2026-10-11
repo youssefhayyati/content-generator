@@ -42,6 +42,24 @@ class AssetStore
         return $this->finish($user, $path, $mime, $name, $source, $meta);
     }
 
+    /**
+     * A file made on this server (a cut, a mix, a download), moved into the library.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    public function fromFile(User $user, string $file, string $mime, string $name, string $source, array $meta = []): Asset
+    {
+        $path = $this->directory($user).'/'.Str::random(32).'.'.$this->extension($mime, pathinfo($file, PATHINFO_EXTENSION));
+        $disk = Storage::disk('local');
+        $disk->makeDirectory(dirname($path));
+        if (! @rename($file, $disk->path($path))) {
+            copy($file, $disk->path($path));
+            @unlink($file);
+        }
+
+        return $this->finish($user, $path, $mime, $name, $source, $meta);
+    }
+
     public static function kindOf(string $mime): ?string
     {
         return match (true) {

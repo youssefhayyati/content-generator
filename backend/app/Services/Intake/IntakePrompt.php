@@ -33,30 +33,31 @@ final class IntakePrompt
             Each turn you get the brief so far, the photos shared, and the interview so far. Reply with the whole brief, updated, and your next question.
 
             Rules:
+            - You have a fixed number of questions (below). Spend them on what matters most for THIS client and what they want to make: what they promote decides what you ask next. Everything you don't ask about, you suggest at the end.
             - Ask ONE short, friendly question at a time (max 20 words, everyday words, no marketing jargon). You may cover two closely related fields in one question.
             - Never ask about something already answered. Fill fields from everything the client said, including details given early. Keep each value short (max 15 words) but concrete: keep names, places, numbers, and real details.
             - Adapt to what's being promoted. Personal brand: ask about their personality, expertise, daily life, values, and being on camera. Product: ask about how it's used, how it feels, who uses it, where, and the moment it helps. Business: the people behind it and customer experiences.
             - Go after relatable material: real stories, everyday moments, customer situations, the "why". If an answer is vague, ask one follow-up to get a specific detail, then move on.
-            - For "photos": ask the client to share photos of themselves and/or their product to use as references for AI visuals, and set "photo_request" to true for that question. Only fill the photos field yourself if the client says they will send them later or have none.
+            - For "photos": ask the client to share what the visuals should be built on, fitted to them: their logo, photos of the product or objects, and of the people who'll appear (themselves, their team). Set "photo_request" to true for that question. Only fill the photos field yourself if the client says they will send them later or have none.
             - For "language": fill it without asking if the client clearly writes in one language and nothing suggests otherwise; otherwise ask.
             - If the client doesn't know, propose a sensible default for them and record it.
             - Any value you invent rather than hear from the client must end with the exact English marker "{$suggested}", even when the rest is in another language.
             - "options": 2-4 short tap-able answer suggestions (max 5 words each) fitted to THIS client. Use an empty list for open questions where they should describe something in their own words.
             - "topic": the key of the field your question is mainly about.
-            - Write the question, options and field values in the language the client writes in.
+            - Write the question, options and field values in the language of the client's own messages (not the language of a place or a name they mention). Until they've written a sentence, use the language of the interview so far.
             TXT;
     }
 
     public static function interview(Campaign $campaign, bool $finishNow = false): string
     {
         $fields = json_encode($campaign->fields, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $max = Brief::MAX_QUESTIONS['full'];
+        $max = Brief::MAX_QUESTIONS[$campaign->depth] ?? Brief::MAX_QUESTIONS['full'];
         $suggested = ' '.Brief::SUGGESTED;
 
-        $rules = $campaign->depth === 'quick'
-            ? '- QUICK MODE: the client wants to be fast. Only ask about these fields: '.implode(', ', Brief::QUICK).'. Combine related ones into one question (for example start date and posting rhythm together). No follow-up questions. Aim for about 7 questions in total.'."\n"
-                .'- When those fields are covered, set "done" to true and fill EVERY other empty field with a sensible, specific suggestion based on everything you know about this client.'
-            : "- Set \"done\" to true when every core field is filled and optional ones have been asked, or after about {$max} questions.";
+        $rules = ($campaign->depth === 'quick'
+            ? "- QUICK MODE: {$max} questions in total, no more. They must cover at least: ".implode(', ', Brief::QUICK).'. Combine related ones into one question. No follow-up questions.'
+            : "- THOROUGH MODE: {$max} questions in total, no more. They must cover at least: ".implode(', ', Brief::FULL).'. Combine related ones where it helps, and spend a question on a follow-up only when an answer is too vague to make content from.')."\n"
+            .'- When those fields are covered or the questions are used up, set "done" to true and fill EVERY other empty field with a sensible, specific suggestion (with the "'.trim($suggested).'" marker) based on everything you know about this client.';
 
         if ($finishNow) {
             $rules .= "\n- THE CLIENT ASKED TO FINISH NOW. Do not ask anything. Fill every empty field with a sensible, specific suggestion (with the \"{$suggested}\" marker), set \"question\" to \"\" and \"done\" to true.";
@@ -112,7 +113,7 @@ final class IntakePrompt
     public static function photosSystem(): string
     {
         return <<<'TXT'
-            A client sent reference photos to their marketing agency. The agency will use them as references for AI-generated social media images and videos. For each image, describe exactly what is visible so an image generator can reproduce the subject faithfully: subject, appearance (for people: hair, build, clothing, expression; for products: shape, materials, colors, packaging, labels), lighting, background, mood.
+            A client sent reference photos to their marketing agency. The agency will use them as references for AI-generated social media images and videos. For each image, describe exactly what is visible so an image generator can reproduce the subject faithfully: subject, appearance (for people: hair, build, clothing, expression; for products: shape, materials, colors, packaging, labels; for a logo: the mark, its lettering, its colours), lighting, background, mood.
 
             For each photo, in order: its kind, a 2-4 word title, and a 1-2 sentence description.
             TXT;

@@ -8,8 +8,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * A studio project: a canvas of notes, drafts, images and videos, arranged by hand.
- * `canvas` is {nodes: [{id, type, x, y, ...}], edges: [{from, to}], view: {x, y, zoom}}.
+ * A Creative Lab project: a canvas of nodes, each one a step (a source, a model, an edit, a post),
+ * joined port to port. `canvas` (version 2) is {version: 2, rev, nodes: [{id, type, x, y, params,
+ * pin?, branch?, label?}], edges: [{from, out, to, in}], view: {x, y, zoom}} (App\Services\Lab\Graph).
+ * Older canvases (notes, texts, assets and generations on a board) are read as version 2.
  */
 #[Fillable(['name', 'canvas'])]
 class Project extends Model
@@ -38,5 +40,21 @@ class Project extends Model
     public function generations(): HasMany
     {
         return $this->hasMany(Generation::class);
+    }
+
+    /**
+     * @return HasMany<NodeRun, $this>
+     */
+    public function nodeRuns(): HasMany
+    {
+        return $this->hasMany(NodeRun::class);
+    }
+
+    /**
+     * @return HasMany<Post, $this>
+     */
+    public function posts(): HasMany
+    {
+        return $this->hasMany(Post::class);
     }
 }

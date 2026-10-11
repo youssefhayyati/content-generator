@@ -159,6 +159,10 @@ return [
             ],
         ],
 
+        // The GPU pod's models and the assistant's own drawing, through the assistant service's engine.
+        'pod' => ['reach' => 'Your GPU pod', 'local' => true],
+        'engine' => ['reach' => 'The assistant service', 'local' => true],
+
         'google' => [
             'reach' => 'Google Gemini API',
             'local' => false,
@@ -208,11 +212,12 @@ return [
     | A full "provider/model" id, like default_text and agents.model, and
     | resolved through the registry: if this one can't run the interview falls
     | back to another model that can, rather than to the fixed question list.
+    | Unset, it's the default text model.
     |
     */
 
     'intake' => [
-        'model' => 'gateway/glm-5.3-flash',
+        'model' => env('AI_INTAKE_MODEL', env('AI_DEFAULT_TEXT', 'gateway/glm-5.3-flash')),
         'interview_effort' => 'low',
         'kit_effort' => 'medium',
     ],
@@ -226,6 +231,41 @@ return [
     | Operations and on every run record.
     |
     */
+
+    /*
+    |--------------------------------------------------------------------------
+    | The assistant's engine
+    |--------------------------------------------------------------------------
+    |
+    | The assistant service (assistant/) runs the GPU pod's models and its own
+    | drawing for Creative Lab nodes: http://assistant:8000 in docker compose.
+    | Both read the repo's one .env, so ENGINE_KEY is the same on each side.
+    |
+    | `settings` are what the assistant reads from that file, for the Models
+    | page to say which are filled in. Whether each one works is the
+    | assistant's to say (GET /engine/catalog): it only sees a change once
+    | it's recreated (docker compose up -d assistant).
+    |
+    */
+
+    'engine' => [
+        'url' => env('ENGINE_URL'),
+        'key' => env('ENGINE_KEY'),
+        // yt-dlp for YouTube nodes, and a cookies file for when YouTube asks the server to sign in.
+        'ytdlp' => env('YTDLP_BIN', 'yt-dlp'),
+        'ytdlp_cookies' => env('YTDLP_COOKIES'),
+        'settings' => [
+            'COMFYUI_URL' => env('COMFYUI_URL'),
+            'COMFYUI_API_KEY' => env('COMFYUI_API_KEY'),
+            'MUSIC_URL' => env('MUSIC_URL'),
+            'MUSIC_API_KEY' => env('MUSIC_API_KEY'),
+            'LIPSYNC_URL' => env('LIPSYNC_URL'),
+            'LIPSYNC_API_KEY' => env('LIPSYNC_API_KEY'),
+            'FACESWAP_URL' => env('FACESWAP_URL'),
+            'FACESWAP_API_KEY' => env('FACESWAP_API_KEY'),
+            'LLM_MODEL' => env('LLM_MODEL'),
+        ],
+    ],
 
     'prices' => [
         'claude-opus-5-5' => [4, 20],

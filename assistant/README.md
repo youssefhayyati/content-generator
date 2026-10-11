@@ -100,6 +100,15 @@ GTX 16xx up to RTX 50xx cards.
 
 Audio frames from the server carry a turn id, so audio from an interrupted turn is dropped.
 
+## The engine (Creative Lab)
+
+FlowAI's Creative Lab runs the nodes that need the GPU pod or this service's drawing here, one job each, over
+HTTP (`backend/engine.py`, mounted at `/engine`, with `X-Engine-Key` = `ENGINE_KEY`): ComfyUI workflows (pictures,
+edits, videos), ACE-Step songs, dubs (the speaker's voice cloned, LatentSync lips), face swaps, words drawn on
+pictures and videos (`studio.py`'s drawing), pictures made into a video with a voice (`reel.py`), and painting
+over part of a picture (`retouch.py`). `GET /engine/catalog` says what's ready. The assistant also builds and runs
+Creative Lab graphs itself, on the canvas the user sees (`backend/lab_tools.py`, the `creative-lab` skill).
+
 ## Browser agent
 
 The voice assistant doesn't click things itself. It hands a whole task in plain language to a

@@ -356,6 +356,34 @@ def health():
             "running": running, "queued": sum(j["status"] == "queued" for j in jobs.values())}
 
 
+@app.post("/v1/faces", dependencies=[Depends(auth)])
+def find_faces(frames: list[UploadFile] = File(...)):
+    """Where the faces are in a few frames (Creative Lab reframes a clip on its speaker): per frame, the faces
+    as fractions of its size (x, y, w, h), the largest first. Waits up to 30 s if a swap is running."""
+    if state["error"]:
+        raise HTTPException(503, state["error"])
+    if not models.lock.acquire(timeout=30):
+        raise HTTPException(503, "busy with a face swap; try again in a moment")
+    try:
+        models.used = time.time()
+        if not state["loaded"]:
+            models.load()
+        out = []
+        for f in frames[:16]:
+            img = cv2.imdecode(np.frombuffer(f.file.read(), np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                out.append([])
+                continue
+            h, w = img.shape[:2]
+            out.append([{"x": round(float(b.bbox[0]) / w, 4), "y": round(float(b.bbox[1]) / h, 4),
+                         "w": round(float(b.bbox[2] - b.bbox[0]) / w, 4), "h": round(float(b.bbox[3] - b.bbox[1]) / h, 4),
+                         "score": round(float(b.det_score), 3)} for b in models.faces(img)])
+        models.used = time.time()
+        return {"frames": out}
+    finally:
+        models.lock.release()
+
+
 @app.post("/v1/faceswap", dependencies=[Depends(auth)])
 async def start_job(face: UploadFile = File(...), target: UploadFile = File(...), faces: str = Form("largest"),
                     enhance: bool = Form(True)):

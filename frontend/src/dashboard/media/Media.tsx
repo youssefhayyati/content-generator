@@ -288,11 +288,11 @@ function SoundActions({ asset, onClose }: { asset: Asset; onClose: () => void })
   }
   return (
     <div className="mt-4 flex flex-wrap gap-1.5 border-t border-line pt-3">
-      <Btn size="sm" icon={Clapperboard} onClick={() => go(`/dashboard/studio?tab=reels&${asset.sound?.type === 'music' ? 'music' : 'audio'}=${asset.id}`)}>
+      <Btn size="sm" icon={Clapperboard} onClick={() => go(`/dashboard/studio?make=reel&asset=${asset.id}`)}>
         Make a reel
       </Btn>
       {asset.sound?.type !== 'music' && (
-        <Btn size="sm" variant="subtle" icon={Ear} onClick={() => go(`/dashboard/studio?tab=sound&mode=listen&asset=${asset.id}`)}>
+        <Btn size="sm" variant="subtle" icon={Ear} onClick={() => go(`/dashboard/studio?make=transcript&asset=${asset.id}`)}>
           {asset.sound?.timed ? 'Transcript & posts' : 'Listen to it'}
         </Btn>
       )}

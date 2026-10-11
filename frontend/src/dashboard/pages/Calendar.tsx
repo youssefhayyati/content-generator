@@ -6,7 +6,7 @@ import { Serif } from '../../components/ui/Reveal'
 import { api, type Page, type Post, type PostRun } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { useRouter } from '../../lib/router'
+import { Link, useRouter } from '../../lib/router'
 import {
   addDays,
   fmtDateTime,
@@ -252,6 +252,11 @@ export default function Calendar() {
                       </p>
                     )}
                     <PublishProof post={selected} className="mt-5" />
+                    {selected.lab && (
+                      <Link to={`/dashboard/studio?project=${selected.lab.project_id}${selected.lab.node_id ? `&node=${encodeURIComponent(selected.lab.node_id)}` : ''}`} className="mt-3 inline-flex items-center gap-1.5 text-[12px] text-accent-soft hover:underline">
+                        Open its node in Creative Lab
+                      </Link>
+                    )}
                     <div className="mt-6 grid grid-cols-2 gap-2">
                       <Btn icon={PenLine} onClick={() => navigate(`/dashboard/create?post=${selected.id}`)}>
                         Edit

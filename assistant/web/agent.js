@@ -313,7 +313,7 @@ function renderJobs() {
   for (const job of Object.values(jobs)) {
     const failed = job.status === "failed";
     box.appendChild(el("span", "job" + (failed ? " failed" : ""),
-      failed ? `Couldn't make it: ${job.text}` : `${job.label} · ${minutes(job.started)}`));
+      failed ? `Couldn't make it: ${job.text}` : `${job.label} · ${job.text ? job.text + " · " : ""}${minutes(job.started)}`));
   }
 }
 setInterval(() => { if (Object.keys(jobs).length) renderJobs(); }, 1000);

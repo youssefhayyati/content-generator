@@ -48,17 +48,19 @@ class JobService:
             self.status = f"not reachable ({type(exc).__name__})"
         return self.status
 
-    def run(self, files: dict, data: dict, progress: Callable[[str], None],
+    def run(self, files: dict, data: dict, progress: Callable[[str, float | None], None],
             stopped: Callable[[], bool] = lambda: False) -> bytes:
-        """One job, from start to its made file. progress gets a few words whenever it moves on;
-        stopped() true stops it (the service's job too)."""
+        """One job, from start to its made file. progress(stage, share) gets the stage it is at in a few words
+        and how much of it is done (0..1, or None) whenever that moves on; stopped() true stops it (the
+        service's job too)."""
         t0 = time.perf_counter()
+        progress("sending it to the pod", None)
         try:
             r = self.http.post(self.path, timeout=300, files=files, data=data)
         except httpx.HTTPError as exc:
             raise JobError(f"{self.what} at {self.url} isn't reachable ({type(exc).__name__})") from None
         job = self._json(r)["id"]
-        shown = ""
+        shown = None
         try:
             while True:
                 if stopped():
@@ -74,13 +76,12 @@ class JobService:
                     break
                 if st["status"] in ("failed", "cancelled"):
                     raise JobError(f"{st['status']}: {st.get('error') or 'no reason given'}")
-                text = st.get("stage") or st["status"]
-                if st.get("progress"):
-                    text += f" {round(st['progress'] * 100)}%"
-                if text != shown:
-                    shown = text
-                    progress(text)
+                now = st.get("stage") or st["status"], round(st["progress"], 2) if st.get("progress") else None
+                if now != shown:
+                    shown = now
+                    progress(*now)
                 time.sleep(POLL)
+            progress("downloading the result", None)
             made = self.http.get(f"{self.path}/{job}/{self.result}", timeout=300)
             made.raise_for_status()
         except (Stopped, JobError):
@@ -110,7 +111,7 @@ class LipSync(JobService):
     """A video's mouth redrawn to say new speech; the video comes back as long as the speech, with it under."""
     what, path, result = "the lip sync", "/v1/lipsync", "video"
 
-    def sync(self, video: bytes, speech: bytes, progress: Callable[[str], None],
+    def sync(self, video: bytes, speech: bytes, progress: Callable[[str, float | None], None],
              stopped: Callable[[], bool] = lambda: False) -> bytes:
         return self.run({"video": ("video.mp4", video, "video/mp4"), "audio": ("speech.wav", speech, "audio/wav")},
                         {}, progress, stopped)
@@ -120,7 +121,8 @@ class FaceSwap(JobService):
     """The face from one picture put on the person in a picture (a PNG back) or a video (an MP4, its sound kept)."""
     what, path, result = "the face swap", "/v1/faceswap", "result"
 
-    def swap(self, face: tuple[str, bytes], target: tuple[str, bytes], every: bool, progress: Callable[[str], None],
+    def swap(self, face: tuple[str, bytes], target: tuple[str, bytes], every: bool,
+             progress: Callable[[str, float | None], None],
              stopped: Callable[[], bool] = lambda: False) -> bytes:
         """face and target: (file name, bytes). every: change every face, not only the largest."""
         return self.run({"face": face, "target": target}, {"faces": "all" if every else "largest", "enhance": "true"},

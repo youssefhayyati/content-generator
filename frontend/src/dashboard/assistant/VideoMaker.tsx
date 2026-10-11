@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Clapperboard, Film, LoaderCircle, Music2, Play, Search, Sparkles, Square } from 'lucide-react'
+import { Clapperboard, LoaderCircle, Music2, Play, Search, Sparkles, Square } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, inputClass, Label, Segmented, Skeleton, Toggle } from '../ui'
 import { useAssistant, useVoiceState, type Draft, type VideoRecipe, type Voice } from './store'
+import { JobProgress } from './Jobs'
 import { CloneVoice, describe, VoiceRow } from './Voices'
 
 /*
@@ -282,24 +283,13 @@ export function VideoMaker({ d }: { d: Draft }) {
       <AnimatePresence initial={false}>
         {job && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease }} className="overflow-hidden">
-            <div className="rounded-lg border border-line px-3 py-2.5">
-              <p className="flex items-center gap-2 text-[12px]">
-                {job.status === 'failed' ? <Film className="size-3.5 text-fail" /> : <LoaderCircle className="size-3.5 animate-spin text-accent-soft" />}
-                <span className={job.status === 'failed' ? 'text-fail' : ''}>{job.status === 'failed' ? `It couldn’t be made: ${job.text}` : 'Making the video'}</span>
-                {job.status !== 'failed' && <span className="ml-auto font-mono text-[10.5px] text-dim">{job.text || 'voice…'}</span>}
-              </p>
-              {job.status !== 'failed' && (
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.06]">
-                  <motion.div className="h-full rounded-full bg-accent-soft" animate={{ width: job.text || '4%' }} transition={{ duration: 0.4, ease }} />
-                </div>
-              )}
-            </div>
+            <JobProgress job={job} compact title="Making the video" />
           </motion.div>
         )}
       </AnimatePresence>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Btn size="sm" variant="primary" icon={Clapperboard} onClick={make} disabled={!written || a.conn !== 'online' || (!!job && job.status !== 'failed')}>
+        <Btn size="sm" variant="primary" icon={Clapperboard} onClick={make} disabled={!written || a.conn !== 'online' || job?.status === 'running'}>
           {d.video ? 'Make it again' : 'Make the video'}
         </Btn>
         {!d.video && (

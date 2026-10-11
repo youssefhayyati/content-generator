@@ -6,7 +6,7 @@ can run on a plain CPU server. One folder, one key file, one command to put it o
 | Service | Port | What | Folder | The assistant's settings (`assistant/.env`) |
 |---|---|---|---|---|
 | ComfyUI | 8001 | pictures and videos: its manager API in front of ComfyUI (8000; 8001 through the image's nginx) | `comfyui/` | `COMFYUI_URL`, `COMFYUI_API_KEY` = `MANAGER_API_KEY` |
-| VoiceStudio | 8002 | speech and voices (OmniVoice): the assistant's voice, videos' voices, cloned voices | `voicestudio/` | `TTS_URL`, `TTS_API_KEY` = `OMNIVOICE_API_KEY` |
+| VoiceStudio | 8002 | speech and voices (OmniVoice): the assistant's voice, videos' voices, cloned voices; speech recognition (Whisper large-v3, installed by `setup.sh`: see `voicestudio/README.md`) | `voicestudio/` | `TTS_URL`, `TTS_API_KEY` = `OMNIVOICE_API_KEY`; FlowAI's API: `VOICESTUDIO_URL`, `VOICESTUDIO_KEY` |
 | Music | 8003 | instrumental songs under videos (ACE-Step 1.5, MIT) | `music/` | `MUSIC_URL`, `MUSIC_API_KEY` = `ACESTEP_API_KEY` |
 | Lipsync | 8004 | a video's mouth redrawn to say new words (LatentSync 1.6, Apache-2.0) | `lipsync/` | `LIPSYNC_URL`, `LIPSYNC_API_KEY` |
 | Faceswap | 8005 | a face from one picture put on someone in a picture or video (inswapper_128 and GFPGAN 1.4, ONNX) | `faceswap/` | `FACESWAP_URL`, `FACESWAP_API_KEY` |
@@ -19,7 +19,7 @@ runpod/
   setup.sh         on the pod: installs (first run) and starts all the services, or the ones named
   env.example      every key, one file: on the pod it's env next to setup.sh
   comfyui/         manager.py (the API), start.sh, restore.sh, setup.sh, workflows/*.json, API.md
-  voicestudio/     setup.sh
+  voicestudio/     setup.sh, README.md (Whisper large-v3 for speech recognition)
   music/           setup.sh, Dockerfile (the same service in docker compose: --profile music)
   lipsync/         setup.sh, app.py, requirements.txt, constraints.txt, Dockerfile (--profile lipsync)
   faceswap/        setup.sh, app.py, requirements.txt, constraints.txt

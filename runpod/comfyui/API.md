@@ -83,6 +83,17 @@ Poll every 2–3 s for images and every 10 s for video.
 | `done` | Finished. `files` lists the outputs. |
 | `error` | ComfyUI failed. `messages` has the reason (e.g. out of memory). |
 
+While it is `pending`, `progress` says how far it has got (from ComfyUI's websocket, which the manager listens to):
+
+| `progress.state` | Also |
+|---|---|
+| `queued` | `ahead`: how many jobs run or wait before it. |
+| `running` | `stage` (`loading the models`, `reading the prompt`, `generating`, `decoding`, `encoding the video`, `saving`, ... or `null`), `node` (the running node's title), `step` and `steps` for nodes that count them (samplers), `pass` and `passes` when the workflow samples more than once, `nodes_done` of `nodes`, `seconds` since it started. |
+| `gone` | Neither queued nor running: removed, or ComfyUI restarted. |
+
+`progress` is `{}` if ComfyUI didn't answer the manager. Example:
+`{"status": "pending", "progress": {"state": "running", "stage": "generating", "node": "KSampler", "step": 12, "steps": 20, "nodes_done": 7, "nodes": 11, "seconds": 41}}`
+
 `/result` only knows jobs from ComfyUI's current session. If the pod restarts, older ids stay `pending`
 forever, so give your polling loop a timeout (e.g. 15 min for video).
 
@@ -209,7 +220,7 @@ curl -X PUT "$BASE/workflows/wan14_i2v/mapping" -H "X-API-Key: $KEY" -H "Content
 | `GET /health` | (no auth) | `{"comfyui_running": true, "setup_running": false}` |
 | **Generation** | | |
 | `POST /run` | see [above](#1-submit-post-run) | queued / done / pending; **202** `{"status":"setting_up","job_id"}` if the workflow is still installing |
-| `GET /result/{prompt_id}` | `?return_base64=true` | `{"status":"pending\|done\|error","files":[...],"messages"?}` |
+| `GET /result/{prompt_id}` | `?return_base64=true` | `{"status":"pending\|done\|error","files":[...],"messages"?,"progress"?}` (progress while pending) |
 | `POST /cancel/{prompt_id}` | | `{"status":"removed\|interrupted\|not_queued"}`. Removes a queued job or stops a running one (its `/result` then says `error`). A removed job's `/result` stays `pending`. |
 | `GET /view` | `filename`, `subfolder`, `type` (`output`/`input`) | the file bytes |
 | **Workflows** | | |

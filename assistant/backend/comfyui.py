@@ -56,6 +56,26 @@ def describe_error(messages) -> str:
     return "ComfyUI reported an error"
 
 
+def describe_progress(p) -> tuple[str, str, float | None] | None:
+    """How far a pending job has got, as the manager says (runpod/comfyui/API.md) -> its stage, a detail of it
+    and how much of the stage is done (0..1). None when it says nothing (an older manager, or a blip)."""
+    if not isinstance(p, dict):
+        return None
+    if p.get("state") == "queued":
+        ahead = int(p.get("ahead") or 0)
+        return "waiting its turn on the pod", f"{ahead} job{'' if ahead == 1 else 's'} before it" if ahead else "next", None
+    if p.get("state") != "running":
+        return None
+    stage = p.get("stage") or (f"running {p['node']}" if p.get("node") else "starting")
+    details, share = [], None
+    if p.get("passes"):
+        details.append(f"pass {p.get('pass')} of {p['passes']}")
+    if isinstance(p.get("steps"), (int, float)) and p["steps"] > 0 and isinstance(p.get("step"), (int, float)):
+        details.append(f"step {p['step']:g} of {p['steps']:g}")
+        share = p["step"] / p["steps"]
+    return stage, ", ".join(details), share
+
+
 @dataclass
 class Workflow:
     name: str

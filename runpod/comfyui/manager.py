@@ -626,6 +626,121 @@ def apply_inputs(wf: dict, schema: dict, body: dict) -> dict:
     return report
 
 
+# =========================================================== progress
+# ComfyUI says how a prompt is going only on its websocket: which node runs, and the steps of the nodes that
+# count them (samplers, some decoders). A thread listens as the client /run queues prompts for ("manager")
+# and keeps the latest for each prompt, which GET /result/{pid} adds while it is pending.
+STAGES = tuple((re.compile(p), s) for p, s in (  # a node's class_type -> what it is doing; first match wins
+    (r"^(VHS_)?Load(Image|Video|Audio)", "reading the input"),
+    (r"Loader|^Load|Checkpoint", "loading the models"),
+    (r"TextEncode", "reading the prompt"),
+    (r"Sampler(?!Select)", "generating"),
+    (r"VAEDecode", "decoding"),
+    (r"VAEEncode|Latent", "preparing"),
+    (r"Upscale", "upscaling"),
+    (r"CreateVideo|VideoCombine|SaveVideo|SaveAnimated", "encoding the video"),
+    (r"^Save|^Preview", "saving"),
+))
+SAMPLER = re.compile(r"Sampler(?!Select)")
+TRACKED_SECONDS = 6 * 3600
+progress_lock = threading.Lock()
+prompts: dict = {}  # prompt_id -> what the websocket said of its run
+current = {"pid": None}  # the prompt running now, for older ComfyUI whose progress events have no prompt_id
+
+
+def stage_of(class_type: str):
+    return next((s for p, s in STAGES if p.search(class_type or "")), None)
+
+
+def track(pid: str, wf: dict):
+    nodes = {str(nid): (n.get("class_type", ""), (n.get("_meta") or {}).get("title") or n.get("class_type", ""))
+             for nid, n in wf.items() if isinstance(n, dict)}
+    now = time.time()
+    with progress_lock:
+        for old in [k for k, p in prompts.items() if now - p["queued"] > TRACKED_SECONDS]:
+            del prompts[old]
+        prompts[pid] = {"queued": now, "nodes": nodes, "done": set(), "node": None, "step": None,
+                        "steps": None, "passes": [], "started": None}
+
+
+def on_comfy_event(ev: dict):
+    kind, data = ev.get("type"), ev.get("data") or {}
+    with progress_lock:
+        if kind == "execution_start":
+            current["pid"] = data.get("prompt_id")
+        p = prompts.get(data.get("prompt_id") or current["pid"])
+        if p is None:
+            return
+        if kind == "execution_start":
+            p["started"] = time.time()
+        elif kind == "execution_cached":
+            p["done"].update(str(n) for n in data.get("nodes") or [])
+        elif kind == "executing":
+            if p["node"]:
+                p["done"].add(p["node"])
+            node = data.get("node")
+            p["node"], p["step"], p["steps"] = (str(node) if node is not None else None), None, None
+            if p["node"] and SAMPLER.search(p["nodes"].get(p["node"], ("",))[0]) and p["node"] not in p["passes"]:
+                p["passes"].append(p["node"])
+        elif kind == "progress":
+            p["step"], p["steps"] = data.get("value"), data.get("max")
+        elif kind == "executed" and data.get("node") is not None:
+            p["done"].add(str(data["node"]))
+
+
+def watch_progress():
+    """Keeps `prompts` up to date from ComfyUI's websocket, reconnecting when ComfyUI (re)starts."""
+    try:
+        from websockets.sync.client import connect
+    except ImportError:
+        print("[manager] the websockets package is missing: /result won't say how far a job has got", flush=True)
+        return
+    while True:
+        try:
+            # max_size=None: previews come as binary frames, which can be large
+            with connect(f"ws://127.0.0.1:{COMFY_PORT}/ws?clientId=manager", max_size=None, open_timeout=10) as ws:
+                for msg in ws:
+                    if isinstance(msg, str):
+                        try:
+                            on_comfy_event(json.loads(msg))
+                        except (ValueError, AttributeError, TypeError):
+                            pass
+        except Exception:  # ComfyUI isn't up yet, or is restarting
+            time.sleep(3)
+
+
+def progress_of(pid: str) -> dict:
+    """How far a pending prompt has got: waiting its turn (how many before it), running (the stage, its node,
+    the step), or gone (removed, or ComfyUI restarted since). Empty if ComfyUI didn't answer."""
+    try:
+        q = requests.get(f"{COMFY}/queue", timeout=5).json()
+    except (requests.RequestException, ValueError):
+        return {}
+    running = [item[1] for item in q.get("queue_running", [])]
+    if pid not in running:
+        pending = [item[1] for item in sorted(q.get("queue_pending", []), key=lambda item: item[0])]
+        if pid in pending:
+            return {"state": "queued", "ahead": len(running) + pending.index(pid)}
+        return {"state": "gone"}
+    out = {"state": "running"}
+    with progress_lock:
+        p = prompts.get(pid)
+        if not p:
+            return out
+        out.update(nodes=len(p["nodes"]), nodes_done=len(p["done"] & p["nodes"].keys()))
+        if p["started"]:
+            out["seconds"] = round(time.time() - p["started"])
+        if p["node"]:
+            ctype, title = p["nodes"].get(p["node"], ("", p["node"]))
+            out.update(node=title, stage=stage_of(ctype))
+            if p["steps"]:
+                out.update(step=p["step"], steps=p["steps"])
+            samplers = [n for n, (t, _) in p["nodes"].items() if SAMPLER.search(t)]
+            if len(samplers) > 1 and p["node"] in p["passes"]:
+                out.update({"pass": p["passes"].index(p["node"]) + 1, "passes": len(samplers)})
+    return out
+
+
 # =========================================================== HTTP API
 def auth(x_api_key: str = Header(default=""), key: str = ""):
     if API_KEY and API_KEY not in (x_api_key, key):
@@ -838,12 +953,13 @@ def run(body: dict):
     if not r.ok:
         raise HTTPException(r.status_code, r.text)
     pid = r.json()["prompt_id"]
+    track(pid, wf)
     base = {"prompt_id": pid, **report}
     if not body.get("wait", True):
         return {**base, "status": "queued", "poll": f"/result/{pid}"}
     deadline = time.time() + float(body.get("timeout", 90))  # RunPod proxy cuts at ~100 s
     while time.time() < deadline:
-        res = result(pid, body.get("return_base64", False))
+        res = result(pid, body.get("return_base64", False), progress=False)
         if res["status"] != "pending":
             return {**base, **res}
         time.sleep(1)
@@ -851,10 +967,14 @@ def run(body: dict):
 
 
 @app.get("/result/{pid}", dependencies=[Depends(auth)])
-def result(pid: str, return_base64: bool = False):
+def result(pid: str, return_base64: bool = False, progress: bool = True):
+    """pending (with progress: how far it has got, see progress_of), done (its files) or error."""
     h = requests.get(f"{COMFY}/history/{pid}", timeout=10).json()
     if pid not in h:
-        return {"prompt_id": pid, "status": "pending"}
+        res = {"prompt_id": pid, "status": "pending"}
+        return {**res, "progress": progress_of(pid)} if progress else res
+    with progress_lock:
+        prompts.pop(pid, None)
     entry = h[pid]
     st = entry.get("status", {}) or {}
     files = []
@@ -904,4 +1024,5 @@ def view(filename: str, subfolder: str = "", type: str = "output"):
 if __name__ == "__main__":
     threading.Thread(target=Comfy.start, daemon=True).start()
     threading.Thread(target=watch_ui_workflows, daemon=True).start()
+    threading.Thread(target=watch_progress, daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=API_PORT)

@@ -1,11 +1,9 @@
 import { Fragment, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CircleAlert, CircleCheck, Cpu, FlaskConical, HardDrive, PlugZap, Wand2 } from 'lucide-react'
+import { CircleAlert, CircleCheck, Cpu, FileCog, FlaskConical, HardDrive, Link2, PlugZap } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
-import { api, ApiError, type ModelInfo, type Registry } from '../../lib/api'
-import { ease } from '../../lib/motion'
+import { api, ApiError, type EnvSetting, type ModelInfo, type Registry } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { KIND_ICON, reachLabel } from '../studio/parts'
 import { useToast } from '../toast'
@@ -24,12 +22,18 @@ const PROVIDER_NAME: Record<string, string> = {
   google: 'Google Gemini',
   voicestudio: 'VoiceStudio',
   sound: 'FlowAI Sound',
+  pod: 'RunPod pod',
+  engine: 'Assistant engine',
 }
 
-/** /dashboard/models: the registry of local and cloud models, connectors, evals and recipes. */
+/** The Creative Lab's tools from the pod and the assistant, filtered together. */
+const LAB_KINDS: ModelInfo['kind'][] = ['song', 'dub', 'swap', 'design', 'slideshow', 'retouch']
+
+/** /dashboard/models: the registry of local and cloud models, connectors and evals. */
 export default function Models() {
   const { data: registry } = useApi<Registry>('/models')
-  const [kind, setKind] = useState<'all' | ModelInfo['kind']>('all')
+  const [kind, setKind] = useState<'all' | 'lab' | ModelInfo['kind']>('all')
+  const shown = (m: ModelInfo) => kind === 'all' || m.kind === kind || (kind === 'lab' && LAB_KINDS.includes(m.kind))
 
   return (
     <div>
@@ -42,11 +46,20 @@ export default function Models() {
         sub="Local and cloud, how each is reached, what it’s for, and whether it can run. A model is used only once its connector works."
       />
 
+      <p className="mt-6 flex items-start gap-2.5 rounded-lg border border-line bg-white/[0.015] px-3.5 py-2.5 text-[12px] leading-snug text-dim">
+        <FileCog className="mt-px size-3.5 shrink-0" strokeWidth={1.75} />
+        <span>
+          Every key is in one file, <EnvName>.env</EnvName> next to docker-compose.yml (from <EnvName>.env.example</EnvName>). The API and the assistant both read it; settings
+          marked <Link2 className="inline size-3 align-[-2px]" strokeWidth={2} /> serve both. After editing it, run <EnvName>docker compose up -d</EnvName> and{' '}
+          <EnvName>docker compose restart api worker scheduler</EnvName>.
+        </span>
+      </p>
+
       {!registry ? (
         <Skeleton className="mt-10 h-[420px] rounded-xl" />
       ) : (
         <>
-          <Stagger i={0} className="mt-10 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Stagger i={0} className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             {registry.providers.map((p) => (
               <Connector key={p.id} provider={p} count={registry.models.filter((m) => m.provider === p.id && m.available).length} />
             ))}
@@ -57,7 +70,7 @@ export default function Models() {
               title="Registry"
               sub={`${registry.models.filter((m) => m.available).length} of ${registry.models.length} models can run`}
               actions={
-                // Seven kinds don't fit a phone: they scroll sideways there.
+                // Eight kinds don't fit a phone: they scroll sideways there.
                 <div className="no-scrollbar min-w-0 overflow-x-auto">
                   <Segmented
                     id="model-kind"
@@ -72,22 +85,19 @@ export default function Models() {
                       { value: 'voice', label: 'Voice' },
                       { value: 'music', label: 'Music' },
                       { value: 'listen', label: 'Listen' },
+                      { value: 'lab', label: 'Lab tools' },
                     ]}
                   />
                 </div>
               }
               bodyClassName="p-0"
             >
-              <ModelTable models={registry.models.filter((m) => kind === 'all' || m.kind === kind)} />
+              <ModelTable models={registry.models.filter(shown)} />
             </Panel>
           </Stagger>
 
           <Stagger i={2} className="mt-6">
             <EvalsPanel models={registry.models.filter((m) => m.kind === 'text')} />
-          </Stagger>
-
-          <Stagger i={3} className="mt-6">
-            <RecipesPanel registry={registry} />
           </Stagger>
         </>
       )}
@@ -114,7 +124,8 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
   const state = !p.configured ? 'off' : p.test?.ok ? 'ok' : p.test ? 'fail' : 'untested'
 
   return (
-    <div className="flex flex-col rounded-xl border border-line bg-panel p-4">
+    // The pod and the assistant list what runs behind them, so they take two columns.
+    <div className={cn('flex flex-col rounded-xl border border-line bg-panel p-4', p.services && 'md:col-span-2')}>
       <div className="flex items-start gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-line-2 text-muted">
           {p.local ? <HardDrive className="size-4" strokeWidth={1.75} /> : <PlugZap className="size-4" strokeWidth={1.75} />}
@@ -137,12 +148,54 @@ function Connector({ provider: p, count }: { provider: Registry['providers'][num
       <p className="mt-3 text-[12px] leading-snug text-dim">
         {p.configured ? (p.test ? `${p.test.message} ${p.test.at ? `· ${fmtRelative(p.test.at)}` : ''}` : 'Configured. Test it to start using its models.') : p.setup}
       </p>
+      {p.settings.length > 0 && <Settings settings={p.settings} className="mt-3" />}
+      {p.services && (
+        <ul className="mt-3 divide-y divide-line rounded-lg border border-line">
+          {p.services.map((s) => (
+            <li key={s.id} className="px-3 py-2.5">
+              <div className="flex items-center gap-2 text-[12px]">
+                <span className={cn('size-1.5 shrink-0 rounded-full', s.ok === null ? 'bg-white/20' : s.ok ? 'bg-ok' : 'bg-warn')} />
+                <span className="font-medium">{s.label}</span>
+                <span className="min-w-0 truncate text-dim">{s.for}</span>
+                <span className={cn('ml-auto shrink-0 font-mono text-[10.5px]', s.ok === null ? 'text-dim' : s.ok ? 'text-ok' : 'text-warn')}>
+                  {s.status === null ? 'unknown' : s.ok ? s.status.replace(/^ok,?\s*/, '') || 'up' : s.status === 'off' ? 'off' : 'down'}
+                </span>
+              </div>
+              {s.hint && <p className="mt-1 pl-3.5 text-[11.5px] leading-snug text-warn">{s.hint}</p>}
+              <Settings settings={s.settings} className="mt-1.5 pl-3.5" />
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mt-auto flex items-center justify-between pt-4">
         <span className="font-mono text-[10.5px] text-dim">{count} ready</span>
         <Btn size="sm" icon={PlugZap} onClick={test} loading={testing} disabled={!p.configured}>
           Test
         </Btn>
       </div>
+    </div>
+  )
+}
+
+function EnvName({ children }: { children: string }) {
+  return <code className="rounded border border-line bg-white/[0.03] px-1 py-px font-mono text-[10.5px] text-muted">{children}</code>
+}
+
+/** A connector's lines in .env: filled in or not (never the value), and whether the assistant reads them too. */
+function Settings({ settings, className }: { settings: EnvSetting[]; className?: string }) {
+  return (
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
+      {settings.map((s) => (
+        <span
+          key={s.name}
+          title={`${s.set ? 'Set' : 'Not set'} in .env${s.shared ? ' · read by the API and the assistant' : ''}`}
+          className={cn('flex items-center gap-1 rounded border px-1.5 py-px font-mono text-[10px]', s.set ? 'border-ok/25 text-muted' : 'border-line text-dim')}
+        >
+          <span className={cn('size-1.5 rounded-full', s.set ? 'bg-ok' : 'border border-white/25')} />
+          {s.name}
+          {s.shared && <Link2 className="size-2.5 text-dim" strokeWidth={2} />}
+        </span>
+      ))}
     </div>
   )
 }
@@ -162,7 +215,8 @@ function ModelTable({ models }: { models: ModelInfo[] }) {
         </thead>
         <tbody>
           {models.map((m, i) => {
-            const Icon = KIND_ICON[m.kind]
+            // A kind added on the server before it has an icon here still renders.
+            const Icon = KIND_ICON[m.kind] ?? Cpu
             return (
               <motion.tr
                 key={m.id}
@@ -292,40 +346,6 @@ function EvalsPanel({ models }: { models: ModelInfo[] }) {
             })}
           </tbody>
         </table>
-      </div>
-    </Panel>
-  )
-}
-
-function RecipesPanel({ registry }: { registry: Registry }) {
-  const { navigate } = useRouter()
-  return (
-    <Panel
-      title="Media recipes"
-      sub="Ready-made pipelines: each step’s output feeds the next."
-      actions={
-        <Btn size="sm" icon={Wand2} onClick={() => navigate('/dashboard/studio?tab=recipes')}>
-          Open in the Studio
-        </Btn>
-      }
-    >
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {Object.entries(registry.recipes).map(([id, r], i) => (
-          <motion.div key={id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease, delay: i * 0.04 }} className="rounded-lg border border-line p-3.5">
-            <p className="text-[13px] font-medium">{r.label}</p>
-            <p className="mt-1 text-[12px] leading-snug text-dim">{r.body}</p>
-            <p className="mt-3 flex items-center gap-1.5 font-mono text-[10px] text-muted">
-              {r.needs && <span>image →</span>}
-              {r.steps.map((s, j) => (
-                <span key={j} className="flex items-center gap-1.5">
-                  {j > 0 && '→'}
-                  <Cpu className="size-3" strokeWidth={1.75} />
-                  {s}
-                </span>
-              ))}
-            </p>
-          </motion.div>
-        ))}
       </div>
     </Panel>
   )

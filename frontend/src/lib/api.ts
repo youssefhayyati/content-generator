@@ -51,6 +51,11 @@ export type Post = {
   created_at: string
   updated_at: string
   campaign?: { id: number; name: string | null } | null
+  /** Made in Creative Lab: its project and Post node. */
+  lab?: { project_id: number; node_id: string | null } | null
+  /** How it's doing once live, as the phone last read it. */
+  metrics?: { likes?: number | null; comments?: number | null; shares?: number | null; saves?: number | null; views?: number | null } | null
+  metrics_at?: string | null
 }
 
 /** A post's latest publishing run, as the calendar shows it. */
@@ -476,7 +481,7 @@ export type ModelInfo = {
   provider: string
   model: string
   label: string
-  kind: 'text' | 'image' | 'video' | 'voice' | 'music' | 'listen'
+  kind: 'text' | 'image' | 'video' | 'voice' | 'music' | 'listen' | 'song' | 'dub' | 'swap' | 'design' | 'slideshow' | 'retouch'
   /** How it's reached: Claude API, Gateway, Ollama, Higgsfield API, FlowAI Sound. */
   reach: string
   local: boolean
@@ -508,11 +513,17 @@ export type AiOptions = {
   models: ModelInfo[]
 }
 
+/** One line of the repo's .env: whether it's filled in (never its value), and whether the assistant reads it too. */
+export type EnvSetting = { name: string; set: boolean; shared: boolean }
+
 export type ModelProvider = {
   id: ModelInfo['provider']
   reach: string
   local: boolean
   configured: boolean
+  settings: EnvSetting[]
+  /** The pod's services and the assistant's model and voice, as the assistant reports them (pod and engine only). */
+  services: Array<{ id: string; label: string; for: string; status: string | null; ok: boolean | null; hint: string | null; settings: EnvSetting[] }> | null
   setup: string
   test: { ok: boolean; message: string; latency_ms: number | null; at: string | null } | null
 }
@@ -579,7 +590,7 @@ export type CampaignPhoto = {
   id: number
   url: string
   mime: string
-  kind: 'person' | 'product' | 'place' | 'other' | null
+  kind: 'logo' | 'person' | 'product' | 'place' | 'other' | null
   title: string | null
   description: string | null
 }
@@ -669,6 +680,193 @@ export type CampaignItem = {
 }
 
 export type Conflict = { kind: 'phone' | 'gap' | 'approvals'; message: string; post_ids: number[] }
+
+/* ------------------------------------------------------------------ */
+/* Creative Lab: nodes on a canvas                                      */
+/* ------------------------------------------------------------------ */
+
+export type LabPortType = 'image' | 'video' | 'audio' | 'text' | 'brief' | 'moments' | 'transcript' | 'source' | 'channel' | 'post'
+
+export type LabField = {
+  key: string
+  label: string
+  kind: string
+  default?: unknown
+  options?: Record<string, string>
+  placeholder?: string
+  help?: string
+  min?: number
+  max?: number
+  step?: number
+  /** For a model field: which list of models. */
+  models?: string
+  /** Shown only when another field has one of these values. */
+  show?: Record<string, string[]>
+  /** Shown only when this input is connected. */
+  connected?: string
+  /** Shown only when this input isn't connected (what it holds comes from there otherwise). */
+  unconnected?: string
+  /** A voice the assistant's engine reads with (not FlowAI Sound's). */
+  engine?: boolean
+}
+
+export type LabInput = { name: string; label: string; accepts: LabPortType[]; multi?: boolean; required?: boolean }
+export type LabOutput = { name: string; label: string; type: LabPortType }
+
+export type LabNodeKind = {
+  group: string
+  label: string
+  detail: string
+  inputs: LabInput[]
+  outputs: LabOutput[]
+  fields: LabField[]
+  run: 'none' | 'auto' | 'manual' | 'post'
+  run_label?: string
+  seconds?: number
+  engine?: boolean
+}
+
+export type LabModel = {
+  id: string
+  label: string
+  provider: string
+  reach: string
+  local: boolean
+  available: boolean
+  reason: string | null
+  purpose: string | null
+  seconds: number | null
+  price: number | null
+  aspect_ratios: string[] | null
+  durations: number[] | null
+}
+
+export type LabNode = { id: string; type: string; x: number; y: number; params?: Record<string, unknown>; label?: string; pin?: number; soft?: boolean; branch?: string }
+export type LabEdge = { from: string; out: string; to: string; in: string }
+export type LabCanvas = { version: 2; rev: number; nodes: LabNode[]; edges: LabEdge[]; view: { x: number; y: number; zoom: number }; auto?: boolean }
+
+export type LabTemplate = { key: string; id?: number; name: string; tagline: string; category: string; nodes: number; mine: boolean; graph: { nodes: LabNode[]; edges: LabEdge[] } }
+
+export type LabCatalog = {
+  groups: Record<string, string>
+  port_types: Record<LabPortType, string>
+  nodes: Record<string, LabNodeKind>
+  models: Record<string, LabModel[]>
+  templates: LabTemplate[]
+  engine: { up: boolean; error: string | null; services: Record<string, string>; fonts: Array<{ name: string; label: string; style: string; suits: string }> }
+  sound: boolean
+  accounts: Array<{ id: number; platform: PlatformId; handle: string; automation: boolean; device_id: number | null; device: string | null }>
+  devices: Array<{ id: number; name: string; driver: 'simulator' | 'http'; ref: string | null; status: string; drives: string }>
+  campaigns: Array<{ id: number; name: string | null; stage: string }>
+}
+
+export type LabMoment = { n: number; title: string; hook: string; why: string; score: number; start: number; end: number; duration: number; quote: string }
+
+export type LabValue = {
+  type: LabPortType
+  assets?: number[]
+  text?: string
+  brief?: Record<string, unknown> & { campaign?: { id: number; name: string | null } | null; account?: { id: number; handle: string; platform: string } | null; palette?: string[] }
+  moments?: LabMoment[]
+  source_id?: number
+  asset_id?: number
+  post_id?: number
+  status?: string
+  warnings?: string[]
+  note?: string | null
+  title?: string | null
+  duration?: number | null
+  language?: string | null
+  words?: number
+  /** Where it goes */
+  account_id?: number
+  platform?: string
+  placement?: string
+  handle?: string
+  label?: string
+}
+
+export type LabRun = {
+  id: number
+  version: number
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+  stage: string | null
+  share: number | null
+  error: string | null
+  cost: number
+  by: 'you' | 'assistant' | 'auto'
+  started_at: string | null
+  finished_at: string | null
+  waiting_for: string[] | null
+}
+
+export type LabSource = {
+  id: number
+  url: string
+  site: string
+  external_id: string | null
+  title: string | null
+  channel: string | null
+  channel_url: string | null
+  duration: number | null
+  license: string | null
+  thumbnail: string | null
+  permission: 'pending' | 'allowed' | 'denied'
+  basis: 'own' | 'permission' | 'creative_commons' | null
+  permission_note: string | null
+  credit: string | null
+  status: 'new' | 'fetching' | 'ready' | 'failed'
+  error: string | null
+  transcribed: boolean
+  chapters: Array<{ title: string; start: number; end: number }>
+}
+
+export type LabPost = {
+  id: number
+  title: string | null
+  status: PostStatus
+  scheduled_at: string | null
+  published_at: string | null
+  post_url: string | null
+  error: string | null
+  account: { handle: string; platform: PlatformId } | null
+  device: string | null
+  run: { id: number; outcome: 'running' | 'confirmed' | 'failed' | 'uncertain'; steps: number; attempt: number; note: string | null; screenshot_url: string | null; ended_at: string | null } | null
+  metrics: { likes?: number | null; comments?: number | null; shares?: number | null; saves?: number | null; views?: number | null; latest_comments?: Array<{ author?: string; text?: string }> } | null
+  metrics_at: string | null
+}
+
+export type LabStatus = 'empty' | 'done' | 'ready' | 'missing' | 'stale' | 'queued' | 'running' | 'failed'
+
+export type LabNodeState = {
+  id: string
+  type: string
+  policy: 'none' | 'auto' | 'manual' | 'post'
+  run_label: string
+  status: LabStatus
+  outputs: Record<string, LabValue>
+  current?: LabRun | null
+  active?: LabRun | null
+  failed?: LabRun | null
+  versions?: number
+  missing?: string[]
+  estimate?: { seconds: number; cost: number | null; model: string | null }
+  pinned?: boolean
+  post?: LabPost
+  source?: LabSource
+}
+
+export type LabPayload = {
+  project: { id: number; name: string; updated_at: string | null }
+  rev: number
+  canvas: LabCanvas
+  nodes: Record<string, LabNodeState>
+  assets: Record<number, Asset>
+  results?: Array<Record<string, unknown>>
+  message?: string
+}
+
+export type LabPlan = { nodes: Array<{ id: string; type: string; label: string; seconds: number; cost: number | null; model: string | null }>; seconds: number; cost: number | null; blocked?: string[] }
 
 export type Page<T> = {
   data: T[]

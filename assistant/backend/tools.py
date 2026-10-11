@@ -159,7 +159,8 @@ async def generate_media(workflow: str, prompt: str, session, image: str | None 
     return await session.media.generate(workflow, prompt, image, options)
 
 
-@tool("media_status", "Check progress of picture/video generations and workflow installs.")
+@tool("media_status", "Check progress of picture/video generations, videos, dubs, face swaps and workflow installs: "
+      "the stage each is at, its steps and percent when known, and the stages it went through.")
 def media_status(session):
     return session.media.status()
 
@@ -183,7 +184,8 @@ async def list_media_workflows(session):
 
 @tool(
     "search_workflow_templates",
-    "Search ComfyUI's built-in workflow templates, to find one to add.",
+    "Search ComfyUI's built-in workflow templates, to find one to add. Not for face swaps or dubbing: those are "
+    "swap_face and dub_video.",
     {
         "type": "object",
         "properties": {"query": {"type": "string", "description": "Keywords, e.g. \"wan image to video\""}},
@@ -197,7 +199,8 @@ async def search_workflow_templates(query: str, session):
 @tool(
     "add_media_workflow",
     "Add a new workflow to the pod from a built-in template, a workflow file the user attached, or a URL "
-    "of a workflow JSON. Installing its nodes and models runs in the background and can take minutes.",
+    "of a workflow JSON. Installing its nodes and models runs in the background and can take minutes. Not for "
+    "face swaps or dubbing: those are swap_face and dub_video.",
     {
         "type": "object",
         "properties": {
@@ -798,3 +801,7 @@ async def answer_phone(session, approve: bool | None = None, text: str | None = 
 @tool("cancel_phone_task", "Stop what the phone is doing, and the posts waiting their turn.")
 async def cancel_phone_task(session):
     return await session.phone.cancel()
+
+
+# Creative Lab: building and running node graphs in FlowAI (lab_tools.py registers its tools here)
+from . import lab_tools  # noqa: E402,F401

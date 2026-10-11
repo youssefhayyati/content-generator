@@ -119,7 +119,7 @@ export default function Inspire() {
         },
       })
       toast(`${brief.model} wrote the scene. Pick a model and make it.`)
-      navigate(`/dashboard/studio?tab=video&prompt=${encodeURIComponent(brief.video_prompt)}`)
+      navigate(`/dashboard/studio?make=video&prompt=${encodeURIComponent(brief.video_prompt)}`)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not write the prompt.', 'error')
     } finally {

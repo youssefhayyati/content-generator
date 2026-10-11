@@ -100,6 +100,13 @@ function Pages() {
     if (!Page) navigate('/dashboard', { replace: true })
   }, [Page, navigate])
 
+  // Somewhere to go, asked for outside the router (the assistant opening a Creative Lab project).
+  useEffect(() => {
+    const go = (e: Event) => navigate(String((e as CustomEvent<string>).detail))
+    window.addEventListener('flowai:navigate', go)
+    return () => window.removeEventListener('flowai:navigate', go)
+  }, [navigate])
+
   if (!Page) return null
   // The composer remounts per post, and Flows per flow, so switching between them starts clean.
   const key = path === '/dashboard/create' ? path + search : path === '/dashboard/flows' ? path + (new URLSearchParams(search).get('id') ?? '') : path

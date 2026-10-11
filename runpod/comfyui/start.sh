@@ -30,7 +30,7 @@ if [ ! -d "$VENV" ]; then
 fi
 source "$VENV/bin/activate"
 
-pip install -q --upgrade comfy-cli fastapi "uvicorn[standard]" requests
+pip install -q --upgrade comfy-cli fastapi "uvicorn[standard]" requests websockets
 comfy --skip-prompt tracking disable || true
 
 # First start on this pod: install ComfyUI + ComfyUI-Manager

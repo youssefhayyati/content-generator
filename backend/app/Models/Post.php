@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['title', 'body', 'format', 'placement', 'platforms', 'status', 'account_id', 'campaign_id', 'variant_id', 'scheduled_at', 'published_at', 'approved_at', 'approved_by', 'post_url', 'error'])]
+#[Fillable(['title', 'body', 'format', 'placement', 'platforms', 'status', 'account_id', 'campaign_id', 'variant_id', 'scheduled_at', 'published_at', 'approved_at', 'approved_by', 'post_url', 'error', 'project_id', 'node_id', 'device_id', 'metrics', 'metrics_at'])]
 class Post extends Model
 {
     /** @use HasFactory<PostFactory> */
@@ -33,6 +33,8 @@ class Post extends Model
             'scheduled_at' => 'datetime',
             'published_at' => 'datetime',
             'approved_at' => 'datetime',
+            'metrics' => 'array',
+            'metrics_at' => 'datetime',
         ];
     }
 
@@ -50,6 +52,26 @@ class Post extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /**
+     * The Creative Lab project it was made in (its Post node is node_id there).
+     *
+     * @return BelongsTo<Project, $this>
+     */
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
+    }
+
+    /**
+     * The phone it goes out on when not its account's own (chosen on its Post node).
+     *
+     * @return BelongsTo<Device, $this>
+     */
+    public function device(): BelongsTo
+    {
+        return $this->belongsTo(Device::class);
     }
 
     /**

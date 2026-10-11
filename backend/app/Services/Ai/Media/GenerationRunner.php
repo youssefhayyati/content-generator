@@ -9,6 +9,7 @@ use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Ai\Models\Recipes;
 use App\Services\Ai\UsageMeter;
 use App\Services\Campaigns\Pipeline;
+use App\Services\Lab\Engine;
 use App\Services\Media\AssetStore;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -34,6 +35,9 @@ class GenerationRunner
     {
         // A reel isn't a model's work: it's rendered here, from what's already in the library.
         $model = $generation->kind === 'reel' ? ['id' => 'studio/reel', 'provider' => 'studio', 'kind' => 'reel', 'label' => 'Reel renderer', 'available' => true] : $this->models->find($generation->model);
+        if ($generation->status === 'canceled') {
+            return;
+        }
         try {
             if (! $model || $model['kind'] !== $generation->kind) {
                 throw new GenerationFailed('That model can’t make '.(['video' => 'videos', 'image' => 'images', 'voice' => 'voiceovers', 'music' => 'music'][$generation->kind] ?? 'that').'.');
@@ -145,11 +149,14 @@ class GenerationRunner
         $this->report($generation);
     }
 
-    /** A campaign's media team is waiting on this one. */
+    /** A campaign's media team, or a Creative Lab node, is waiting on this one. */
     private function report(Generation $generation): void
     {
         if ($generation->campaign_item_id) {
             app(Pipeline::class)->mediaSettled($generation->fresh());
+        }
+        if ($generation->node_run_id) {
+            app(Engine::class)->generationSettled($generation->fresh());
         }
     }
 
@@ -165,6 +172,7 @@ class GenerationRunner
             'voicestudio' => app(VoiceStudioProvider::class),
             'studio' => app(ReelProvider::class),
             'google' => app(GoogleGenAiProvider::class),
+            'pod', 'engine' => app(EngineProvider::class),
             default => throw new GenerationFailed('That provider doesn’t make media.'),
         };
     }

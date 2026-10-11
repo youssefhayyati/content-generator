@@ -5,6 +5,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { Btn, Toggle } from '../ui'
 import { ConversationBar, ConversationList } from './Conversations'
+import { JobsBar } from './Jobs'
 import { PhoneCard, PhoneLiveBar } from './PhoneProof'
 import { VoicePicker } from './Voices'
 import type { VoiceState } from './link'
@@ -55,6 +56,7 @@ export function Conversation({ className, onImport }: { className?: string; onIm
       <ConversationBar onList={() => setListing(true)} />
       <VoiceBar />
       <Log />
+      <JobsBar />
       <PhoneLiveBar />
       <Approvals />
       <Composer onVoice={() => setVoicing(true)} />

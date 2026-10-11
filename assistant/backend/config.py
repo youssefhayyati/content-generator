@@ -1,16 +1,19 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
+    # FlowAI's one settings file, the repo's .env (../.env.example); docker compose passes it in as the
+    # environment, which wins over both files. An assistant/.env, if there is one, overrides it.
+    model_config = SettingsConfigDict(env_file=(ROOT.parent / ".env", ROOT / ".env"), extra="ignore")
 
-    # LLM
-    ollama_api_key: str = ""
+    # LLM: the same Ollama Cloud key as FlowAI's (OLLAMA_CLOUD_API_KEY); OLLAMA_API_KEY still works
+    ollama_api_key: str = Field("", validation_alias=AliasChoices("OLLAMA_API_KEY", "OLLAMA_CLOUD_API_KEY"))
     ollama_host: str = "https://ollama.com"
     llm_model: str = "glm-5.3-flash"
     # GLM 5.3 Flash leaks its reasoning into the reply with think=false; "low" keeps it
@@ -47,9 +50,10 @@ class Settings(BaseSettings):
     tts_ref_audio: str = ""
     tts_ref_text: str = ""
     # Speech from a VoiceStudio server instead of this PC's GPU (backend/voicestudio.py), e.g.
-    # https://<pod-id>-8002.proxy.runpod.net. Empty = OmniVoice here, with the settings above
-    tts_url: str = ""
-    tts_api_key: str = ""
+    # https://<pod-id>-8002.proxy.runpod.net: FlowAI's VOICESTUDIO_URL and VOICESTUDIO_KEY (TTS_URL and
+    # TTS_API_KEY, when set, win). Empty = OmniVoice here, with the settings above
+    tts_url: str = Field("", validation_alias=AliasChoices("TTS_URL", "VOICESTUDIO_URL"))
+    tts_api_key: str = Field("", validation_alias=AliasChoices("TTS_API_KEY", "VOICESTUDIO_KEY"))
     # Until the user picks one: a VoiceStudio profile's name or id, or a catalog voice's id; empty = the
     # server's oldest profile. OpenAI names (alloy…) get a new random voice every sentence there
     tts_voice: str = ""
@@ -96,6 +100,8 @@ class Settings(BaseSettings):
     faceswap_timeout_minutes: int = 20
 
     # FlowAI (content-generator/): where drafts are saved as posts and scheduled (backend/flowai.py)
+    # Creative Lab (FlowAI) sends its nodes' jobs to /engine (engine.py) with this key; empty = no key
+    engine_key: str = ""
     flowai_url: str = ""  # its API, e.g. http://localhost:8002; empty = off
     # The dashboard: links to posts point here, and FlowAI only accepts cookie sign-ins from it
     flowai_dashboard_url: str = "http://localhost:5173"

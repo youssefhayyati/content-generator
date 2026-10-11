@@ -9,6 +9,7 @@ use App\Models\ModelEval;
 use App\Models\User;
 use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Media\HiggsfieldProvider;
+use App\Services\Ai\OpenAiCompatibleGenerator;
 use App\Services\Ai\TextGenerator;
 use Generator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -352,6 +353,20 @@ class StudioGenerationTest extends TestCase
         Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/chat/completions') && $r['model'] === 'llama-3.3-70b' && $r['stream'] === true);
     }
 
+    public function test_a_gateway_json_answer_takes_lists_of_words_and_pictures_in_the_prompt(): void
+    {
+        $reply = ['question' => 'Who buys them?', 'options' => ['Women in Lyon', 'Gift shoppers']];
+        Http::fake(['gw.example/v1/chat/completions' => Http::response(['choices' => [['message' => ['content' => json_encode($reply)]]]])]);
+        $ai = new OpenAiCompatibleGenerator('gateway', 'https://gw.example/v1', 'team-key');
+        $schema = ['type' => 'object', 'properties' => ['question' => ['type' => 'string'], 'options' => ['type' => 'array', 'items' => ['type' => 'string']]], 'required' => ['question', 'options']];
+
+        // A list of plain words is a fine answer the first time, and pictures go with the shape asked for.
+        $this->assertSame($reply, $ai->json('glm', 'You interview.', [['type' => 'text', 'text' => 'Photo 1:'], ['type' => 'image', 'source' => ['type' => 'base64', 'mediaType' => 'image/png', 'data' => 'iVBO']]], $schema));
+        Http::assertSentCount(1);
+        Http::assertSent(fn (Request $r) => $r['messages'][1]['content'][1]['image_url']['url'] === 'data:image/png;base64,iVBO'
+            && str_starts_with($r['messages'][1]['content'][2]['text'], 'Reply with one JSON object of exactly this shape'));
+    }
+
     public function test_evals_score_a_model_by_rules_and_by_a_judge(): void
     {
         $this->fakeClaude(['Hand-poured lavender & fig, from our Lyon studio. #candles #slowliving'], json: fn (array $schema) => isset($schema['properties']['headline'])
@@ -370,18 +385,18 @@ class StudioGenerationTest extends TestCase
         $this->assertNotNull(collect($this->spa()->getJson('/api/models')->json('models'))->firstWhere('id', 'anthropic/claude-sonnet-5-5')['score']);
     }
 
-    public function test_projects_keep_a_canvas(): void
+    public function test_projects_are_node_canvases_renamed_here_and_changed_by_operations(): void
     {
         $user = User::factory()->create();
-        $id = $this->actingAs($user)->spa()->postJson('/api/projects', ['name' => 'Autumn launch'])->assertCreated()->assertJsonPath('canvas.nodes', [])->json('id');
+        $id = $this->actingAs($user)->spa()->postJson('/api/projects', ['name' => 'Autumn launch'])->assertCreated()
+            ->assertJsonPath('canvas.version', 2)->assertJsonPath('canvas.nodes', [])->json('id');
 
-        $this->spa()->patchJson("/api/projects/{$id}", ['canvas' => [
-            'nodes' => [['id' => 'n1', 'type' => 'note', 'x' => 40, 'y' => 60, 'text' => 'Hook ideas'], ['id' => 'n2', 'type' => 'asset', 'x' => 300, 'y' => 60, 'ref' => 7]],
-            'edges' => [['from' => 'n1', 'to' => 'n2']],
-            'view' => ['x' => 0, 'y' => 0, 'zoom' => 1],
-        ]])->assertOk()->assertJsonPath('nodes', 2)->assertJsonPath('canvas.edges.0.to', 'n2');
-
-        $this->spa()->patchJson("/api/projects/{$id}", ['canvas' => ['nodes' => [['id' => 'x', 'type' => 'spaceship', 'x' => 0, 'y' => 0]]]])->assertJsonValidationErrors('canvas.nodes.0.type');
+        // A whole canvas can't be saved over the graph: only the name changes here.
+        $this->spa()->patchJson("/api/projects/{$id}", ['name' => 'Autumn', 'canvas' => ['nodes' => [['id' => 'x', 'type' => 'spaceship']]]])
+            ->assertOk()->assertJsonPath('name', 'Autumn')->assertJsonPath('canvas.nodes', []);
+        $this->spa()->postJson("/api/projects/{$id}/lab/ops", ['ops' => [['op' => 'add', 'node' => ['id' => 'n1', 'type' => 'util.note', 'params' => ['text' => 'Hook ideas']]]]])
+            ->assertOk()->assertJsonPath('canvas.nodes.0.id', 'n1');
+        $this->spa()->getJson('/api/projects')->assertJsonPath('0.nodes', 1);
         $this->actingAs(User::factory()->create())->spa()->getJson("/api/projects/{$id}")->assertForbidden();
     }
 }

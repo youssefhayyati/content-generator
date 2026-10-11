@@ -55,12 +55,8 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Create',
     items: [
-      { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
+      // Everything that makes content lives here now: nodes on a canvas, the assistant beside them.
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
-      { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
-      { path: '/dashboard/create', label: 'Composer', icon: PenLine },
-      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
-      { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
     ],
   },
   {
@@ -97,4 +93,16 @@ export const NAV_GROUPS: NavGroup[] = [
 /** Every page, Settings included. */
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
-export const pageLabel = (path: string) => NAV.find((n) => n.path === path)?.label ?? 'Overview'
+/**
+ * Pages kept off the sidebar since Creative Lab took in everything that makes content; still opened
+ * from links (a campaign's gates, a post in the composer, the showcase), so they keep their titles.
+ */
+export const OFF_NAV: NavItem[] = [
+  { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
+  { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
+  { path: '/dashboard/create', label: 'Composer', icon: PenLine },
+  { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
+  { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
+]
+
+export const pageLabel = (path: string) => [...NAV, ...OFF_NAV].find((n) => n.path === path)?.label ?? 'Overview'

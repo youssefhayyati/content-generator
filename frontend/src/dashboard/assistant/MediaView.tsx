@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AtSign, Clapperboard, FolderOpen, ImagePlus, LoaderCircle, MessageSquarePlus, Plus, ScanFace, Sparkles, Speech, Upload, Wand2 } from 'lucide-react'
+import { AtSign, Clapperboard, FolderOpen, ImagePlus, MessageSquarePlus, Plus, ScanFace, Sparkles, Speech, Upload, Wand2 } from 'lucide-react'
 import type { Asset, Page } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useApi } from '../data'
 import { fmtShape, MediaThumb } from '../media/Media'
 import { Btn, EmptyState, Label, Modal, Segmented, Skeleton, Viewer, viewerMedia } from '../ui'
+import { JobProgress } from './Jobs'
 import { useAssistant, type Picture } from './store'
 
 /** Drag types: a numbered picture from the conversation, or a file from the FlowAI gallery. */
@@ -40,7 +41,7 @@ export function MediaView() {
       {jobs.length > 0 && (
         <div className="space-y-2">
           {jobs.map((j) => (
-            <JobRow key={j.id} label={j.label} started={j.started} failed={j.status === 'failed' ? j.text : null} />
+            <JobProgress key={j.id} job={j} />
           ))}
         </div>
       )}
@@ -117,27 +118,6 @@ function Attach({ onFiles }: { onFiles: (files: File[]) => void }) {
         }}
       />
     </div>
-  )
-}
-
-function JobRow({ label, started, failed }: { label: string; started: number; failed: string | null }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 1000)
-    return () => window.clearInterval(t)
-  }, [])
-  const s = Math.round((Date.now() - started) / 1000)
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn('relative flex items-center gap-3 overflow-hidden rounded-lg border px-3.5 py-2.5 text-[12.5px]', failed ? 'border-fail/30 text-fail' : 'border-accent/30 text-fg')}
-    >
-      {!failed && <span className="skeleton pointer-events-none absolute inset-0 opacity-40" />}
-      {failed ? <Sparkles className="relative size-3.5" /> : <LoaderCircle className="relative size-3.5 animate-spin text-accent-soft" />}
-      <span className="relative">{failed ? `Couldn’t make it: ${failed}` : label}</span>
-      {!failed && <span className="relative ml-auto font-mono text-[10.5px] text-dim">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>}
-    </motion.div>
   )
 }
 
