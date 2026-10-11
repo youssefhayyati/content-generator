@@ -75,9 +75,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
       // One entry, two views: the canvas of nodes, and the one-off generators as its quick tools.
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2, also: [GENERATORS] },
-      // Highlights from a link and reposts between X and Instagram: not canvas nodes, so their own pages.
+      // Highlights from a link: not a canvas node, so its own page.
       { path: '/dashboard/clips', label: 'Highlights', icon: Clapperboard },
-      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
     ],
   },
@@ -96,6 +95,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Publish',
     items: [
       { path: '/dashboard/publishing', label: 'Publishing', icon: Send },
+      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
       { path: '/dashboard/accounts', label: 'Accounts', icon: UsersRound },
       { path: '/dashboard/phones', label: 'Phones', icon: Smartphone },
     ],
