@@ -6,7 +6,7 @@
 #
 #   service      port  what                                               the assistant's settings
 #   comfyui      8001  pictures and videos (ComfyUI and its manager API)  COMFYUI_URL, COMFYUI_API_KEY = MANAGER_API_KEY
-#   voicestudio  8002  speech and voices (VoiceStudio: OmniVoice)         TTS_URL, TTS_API_KEY = OMNIVOICE_API_KEY
+#   voicestudio  8002  speech and voices (VoiceStudio: OmniVoice)         VOICESTUDIO_URL, VOICESTUDIO_KEY = OMNIVOICE_API_KEY
 #   music        8003  songs under videos (ACE-Step 1.5)                  MUSIC_URL, MUSIC_API_KEY = ACESTEP_API_KEY
 #   lipsync      8004  lips redrawn for dubbed videos (LatentSync 1.6)    LIPSYNC_URL, LIPSYNC_API_KEY
 #   faceswap     8005  a face put on someone else (inswapper_128, ONNX)   FACESWAP_URL, FACESWAP_API_KEY

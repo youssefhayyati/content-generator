@@ -34,9 +34,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
         );
     })->create();
 
-// The repo's one settings file is its root .env (../.env.example). Docker compose mounts it here as .env;
-// run on the host, it's read where it is.
-if (! is_file($app->basePath('.env')) && is_file(dirname($app->basePath()).'/.env')) {
+// The repo's one settings file is its root .env (../.env.example). Docker compose mounts it here as .env
+// (leaving an empty file in its place on the host); run on the host, it's read where it is.
+if ((! is_file($app->basePath('.env')) || filesize($app->basePath('.env')) === 0) && is_file(dirname($app->basePath()).'/.env')) {
     $app->useEnvironmentPath(dirname($app->basePath()));
 }
 

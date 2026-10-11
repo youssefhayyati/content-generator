@@ -87,7 +87,7 @@ services:
     restart: unless-stopped
 
   # The voice assistant (assistant/) on :8003: the Assistant page talks to it at /assistant/
-  # through the dashboard's proxy. Speech recognition (and its voice, without TTS_URL) runs on an
+  # through the dashboard's proxy. Speech recognition (and its voice, without VOICESTUDIO_URL) runs on an
   # NVIDIA GPU (Docker Desktop, or the NVIDIA container toolkit on Linux).
   # The first start builds the image and downloads its speech models (about 6 GB) into
   # assistant-models. Its settings (the Ollama Cloud key, the pod's URLs and keys) are in .env.

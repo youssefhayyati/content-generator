@@ -22,7 +22,7 @@ browser speaker ◀──PCM16 24k── OmniVoice TTS (local GPU) ◀── GLM
 |---|---|---|
 | ASR | `nvidia/nemotron-3.5-asr-streaming-0.6b` (cache-aware streaming RNNT) | this PC |
 | LLM | `glm-5.3-flash` via Ollama cloud API | ollama.com |
-| TTS | `k2-fsa/OmniVoice` | this PC, or a VoiceStudio server (`TTS_URL`) |
+| TTS | `k2-fsa/OmniVoice` | this PC, or a VoiceStudio server (`VOICESTUDIO_URL`) |
 | VAD | Silero VAD | this PC (CPU) |
 | Pictures / video | ComfyUI workflows (Z-Image Turbo, FLUX.2 Klein, Wan 2.2, ...) | RunPod GPU pod (`content-generator/runpod/`) |
 
@@ -34,7 +34,7 @@ uv pip install --python .venv torch==2.8.0 torchaudio==2.8.0 --index-url https:/
 uv pip install --python .venv -r requirements.txt
 .venv/bin/playwright install chromium
 sudo .venv/bin/playwright install-deps chromium   # system libraries Chromium needs (once)
-cp .env.example .env   # then put your key from https://ollama.com/settings/keys in OLLAMA_API_KEY
+cp ../.env.example ../.env   # FlowAI's one settings file; put your key from https://ollama.com/settings/keys in OLLAMA_CLOUD_API_KEY
 ```
 
 ## Run
@@ -54,7 +54,8 @@ through your speakers and interrupt itself.
 
 ## Docker
 
-The same app as an image, to run as a service. Settings come from `.env`, as above. FlowAI runs
+The same app as an image, to run as a service. Settings come from FlowAI's `.env` (the repo root), as above;
+an `assistant/.env`, if there is one, overrides it. FlowAI runs
 the same image as its `assistant` service; see [Inside FlowAI](#inside-flowai).
 
 ```bash
@@ -70,7 +71,7 @@ and OmniVoice's designed voice in `voices`.
 - **FlowAI from the container.** Inside it, `localhost` is the container itself. For the local
   FlowAI stack, set `FLOWAI_URL=http://host.docker.internal:8002`.
 - **No GPU.** `docker compose --profile cpu up -d --build agent-cpu` builds a CPU-only image
-  and runs recognition on the CPU. Set `TTS_URL` so speech comes from VoiceStudio, because
+  and runs recognition on the CPU. Set `VOICESTUDIO_URL` so speech comes from VoiceStudio, because
   OmniVoice on a CPU takes seconds per sentence.
 - **Website tools** are off in the container: the image has no Chromium. Build with
   `--build-arg BROWSER=true` and set `BROWSER_ENABLED` to `true` in `docker-compose.yml` to
@@ -386,7 +387,7 @@ picture, the end card, music, motion, captions, format and voice, with a progres
 
 #### The video's voice
 
-With VoiceStudio (`TTS_URL`), each video is read by the voice that suits it:
+With VoiceStudio (`VOICESTUDIO_URL`), each video is read by the voice that suits it:
 
 - **Cast for the post:** the first time, if nobody named a voice, the LLM reads the post (platform,
   title, caption, words on the pictures, the lines) and describes its narrator in the catalog's
@@ -681,7 +682,7 @@ After changing the agent here, copy it over and rebuild:
 
 ```bash
 rsync -a --delete --exclude __pycache__ \
-  backend web skills fonts workflows requirements.txt Dockerfile .dockerignore .env.example .gitignore README.md \
+  backend web skills fonts workflows requirements.txt Dockerfile .dockerignore .gitignore README.md \
   content-generator/assistant/
 cd content-generator && docker compose up -d --build assistant
 ```
@@ -712,7 +713,7 @@ backend/
   asr.py       Nemotron 3.5 ASR (streaming + offline fallback)
   llm.py       Ollama cloud client
   tts.py       OmniVoice + sentence chunker
-  voicestudio.py  speech from a VoiceStudio server instead (TTS_URL), its voices and catalog
+  voicestudio.py  speech from a VoiceStudio server instead (VOICESTUDIO_URL), its voices and catalog
   tools.py     tool registry (incl. browser_task / status / cancel)
   browser.py   shared Playwright browser + text view of the page
   browser_agent.py  the browser agent's LLM loop and tools
@@ -779,8 +780,9 @@ web/           the agent page (index.html, agent.js), the test console (console.
   writes `&` as `&amp;` in tool calls, which the studio turns back into `&`. Prompt length barely matters: on
   both models, going from 2k to 15k tokens of prompt added 0 to 0.4 s before the first word.
 - `TTS_REF_AUDIO` / `TTS_REF_TEXT`: clone a specific voice instead of the designed one.
-- `TTS_URL`, `TTS_API_KEY`, `TTS_VOICE`: speech from a VoiceStudio server (the same OmniVoice model, e.g. on a RunPod
-  GPU) instead of this PC. On an L40, a 5.8-second sentence came back in about 0.4 s, against about 4 s with
+- `VOICESTUDIO_URL`, `VOICESTUDIO_KEY`, `TTS_VOICE`: speech from a VoiceStudio server (the same OmniVoice model, e.g. on a RunPod
+  GPU) instead of this PC. FlowAI's API reads the same two for its voices; `TTS_URL` and `TTS_API_KEY` still work
+  and win when set. On an L40, a 5.8-second sentence came back in about 0.4 s, against about 4 s with
   OmniVoice on a GTX 1660 Ti. The first request after VoiceStudio starts loads the model (about a minute); the agent
   makes it at startup. `TTS_VOICE` is the voice until the user picks one on the page (see [Voice](#voice)): a
   VoiceStudio profile's name or id, or a catalog voice's id such as `feat_04_the_neighbor`; empty means the

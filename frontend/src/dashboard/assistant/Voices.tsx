@@ -231,8 +231,9 @@ const MAX_TAKE = 20 // seconds: more doesn't make a closer clone
  * A voice cloned from a recording (assistant/backend/session.py, clone_voice): one made here with the
  * mic, or a file of someone speaking (audio, or a video's sound). Five to twenty seconds of one person,
  * without music, makes the closest clone. It's one of the ready voices from then on, and onCloned picks it.
+ * `clone` sends it elsewhere than the assistant's conversation (Creative Lab clones through the API).
  */
-export function CloneVoice({ onCloned, className }: { onCloned: (v: Voice) => void; className?: string }) {
+export function CloneVoice({ onCloned, className, clone: send }: { onCloned: (v: Voice) => void; className?: string; clone?: (recording: Blob, name: string) => Promise<Voice> }) {
   const a = useAssistant()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -288,7 +289,7 @@ export function CloneVoice({ onCloned, className }: { onCloned: (v: Voice) => vo
     setBusy(true)
     setError('')
     try {
-      const v = await a.cloneVoice(take.blob, name.trim())
+      const v = await (send ?? a.cloneVoice)(take.blob, name.trim())
       onCloned(v)
       setOpen(false)
       setTake(null)
@@ -306,7 +307,7 @@ export function CloneVoice({ onCloned, className }: { onCloned: (v: Voice) => vo
       <button
         type="button"
         onClick={() => setOpen(true)}
-        disabled={a.conn !== 'online'}
+        disabled={!send && a.conn !== 'online'}
         className={cn('flex w-full items-center gap-2.5 rounded-lg border border-dashed border-line-2 py-2 pl-2 pr-3 text-left transition-colors hover:border-white/30 disabled:opacity-60', className)}
       >
         <span className="grid size-8 shrink-0 place-items-center rounded-full border border-line-2 text-accent-soft">

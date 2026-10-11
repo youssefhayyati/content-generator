@@ -15,6 +15,7 @@ use App\Services\Lab\Nodes\Captions;
 use App\Services\Lab\YtDlp;
 use Generator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -401,6 +402,30 @@ class LabTest extends TestCase
         $this->assertSame('vs:abc', $recording->fresh()->meta['voice_clone']);
         $this->spa()->actingAs($this->user)->postJson("/api/projects/{$this->project->id}/lab/nodes/voice/run")->assertCreated();
         $this->assertCount(1, Http::recorded(fn ($r) => $r->url() === 'https://vs.example/profiles' && $r->method() === 'POST'));
+    }
+
+    public function test_voices_are_listed_heard_set_up_and_cloned_through_the_engine(): void
+    {
+        config(['ai.engine.url' => 'http://engine.test', 'ai.engine.key' => 'k']);
+        $librarian = ['id' => 'feat_00_the_librarian', 'name' => 'The Librarian', 'description' => 'female, british accent', 'language' => 'English'];
+        Http::fake([
+            'engine.test/engine/voices/list*' => Http::response(['ready' => [['id' => 'demo0001', 'name' => 'Demo']], 'catalog' => [$librarian], 'total' => 1, 'languages' => ['English'], 'choosable' => true, 'clonable' => true]),
+            'engine.test/engine/voices/sample*' => Http::response('RIFFwav', 200, ['Content-Type' => 'audio/wav']),
+            'engine.test/engine/voices/use' => Http::response(['id' => 'abc', 'name' => 'The Librarian', 'archetype' => 'feat_00_the_librarian']),
+            'engine.test/engine/voices/clone' => Http::response(['id' => 'mine', 'name' => 'My voice', 'cloned' => true]),
+        ]);
+        $as = $this->spa()->actingAs($this->user);
+
+        $as->getJson('/api/lab/voices/list?q=british&lang=English')->assertOk()->assertJsonPath('catalog.0.id', 'feat_00_the_librarian')->assertJsonPath('clonable', true);
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/engine/voices/list') && $r['q'] === 'british' && $r->hasHeader('X-Engine-Key', 'k'));
+        $this->assertSame('RIFFwav', $as->get('/api/lab/voices/sample?id=feat_00_the_librarian&catalog=1')->assertOk()->assertHeader('Content-Type', 'audio/wav')->getContent());
+        $as->postJson('/api/lab/voices/use', ['id' => 'feat_00_the_librarian'])->assertOk()->assertJsonPath('voice.id', 'abc');
+
+        // Cloning needs the person's agreement.
+        $recording = UploadedFile::fake()->create('me.webm', 40, 'audio/webm');
+        $as->post('/api/lab/voices/clone', ['recording' => $recording, 'name' => 'My voice'], ['Accept' => 'application/json'])->assertJsonValidationErrors(['consent' => 'Tick that it’s your voice, or that the person agreed.']);
+        $as->post('/api/lab/voices/clone', ['recording' => $recording, 'name' => 'My voice', 'consent' => '1'], ['Accept' => 'application/json'])->assertCreated()->assertJsonPath('voice.id', 'mine');
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/engine/voices/clone') && $r->isMultipart());
     }
 
     public function test_where_it_goes_fits_the_caption_and_the_post_takes_its_account_and_placement(): void

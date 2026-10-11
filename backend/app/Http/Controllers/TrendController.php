@@ -27,7 +27,7 @@ class TrendController extends Controller
             'hashtag' => ['required', 'string', 'max:60'],
         ]);
 
-        abort_unless($this->trends->enabled(), 503, 'No trend source is connected. Add APIFY_TOKEN to backend/.env.');
+        abort_unless($this->trends->enabled(), 503, 'No trend source is connected. Add APIFY_TOKEN to .env.');
 
         $feed = $this->trends->search($data['platform'], $data['hashtag']);
         $this->remember($request->user(), $feed);

@@ -9,6 +9,7 @@ use App\Models\NodeRun;
 use App\Models\Post;
 use App\Models\Project;
 use App\Models\VideoSource;
+use App\Services\Ai\GenerationFailed;
 use App\Services\Intake\Brief;
 use App\Services\Lab\Catalog;
 use App\Services\Lab\Engine;
@@ -22,6 +23,7 @@ use App\Services\Sound\SoundClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -93,6 +95,65 @@ class LabController extends Controller
     public function voices(Request $request, EngineClient $engineClient): JsonResponse
     {
         return response()->json(['voices' => $engineClient->voices((string) $request->query('q', ''))]);
+    }
+
+    /**
+     * The voices to pick from, like the assistant's own voice picker: the ready ones (made, cloned
+     * or set up from the catalog) and the catalog, searched by words and language.
+     */
+    public function voiceList(Request $request, EngineClient $engineClient): JsonResponse
+    {
+        try {
+            return response()->json($engineClient->voiceList((string) $request->query('q', ''), (string) $request->query('lang', '')));
+        } catch (GenerationFailed $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+    }
+
+    /** How a voice sounds, to hear it before picking it. */
+    public function voiceSample(Request $request, EngineClient $engineClient): Response
+    {
+        $data = $request->validate(['id' => ['required', 'string', 'max:120'], 'catalog' => ['boolean']]);
+        try {
+            $wav = $engineClient->voiceSample($data['id'], $request->boolean('catalog'));
+        } catch (GenerationFailed $e) {
+            abort(502, $e->getMessage());
+        }
+
+        return response($wav, 200, ['Content-Type' => 'audio/wav', 'Cache-Control' => 'private, max-age=86400']);
+    }
+
+    /** A catalog voice picked: set up as a ready one (about three seconds the first time). */
+    public function useVoice(Request $request, EngineClient $engineClient): JsonResponse
+    {
+        $data = $request->validate(['id' => ['required', 'string', 'max:120']]);
+        try {
+            return response()->json(['voice' => $engineClient->useVoice($data['id'])]);
+        } catch (GenerationFailed $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+    }
+
+    /**
+     * A voice cloned from a recording made on the page or a file (audio, or a video's sound), with the
+     * person's agreement. It's one of the ready voices from then on, here and in the assistant.
+     */
+    public function cloneVoice(Request $request, EngineClient $engineClient): JsonResponse
+    {
+        $data = $request->validate([
+            'recording' => ['required', 'file', 'max:51200', 'mimetypes:audio/mpeg,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/x-wav,audio/wave,audio/webm,audio/ogg,audio/flac,video/mp4,video/quicktime,video/webm,application/octet-stream'],
+            'name' => ['nullable', 'string', 'max:60'],
+            'consent' => ['accepted'],
+        ], ['consent.accepted' => 'Tick that it’s your voice, or that the person agreed.']);
+        $file = $data['recording'];
+        try {
+            $voice = $engineClient->cloneVoice($file->getRealPath(), $file->getClientOriginalName() ?: 'recording.webm', trim($data['name'] ?? '') ?: 'My voice');
+        } catch (GenerationFailed $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+        Cache::forget('voicestudio.voices');
+
+        return response()->json(['voice' => $voice], 201);
     }
 
     /* ------------------------------------------------------------------ */

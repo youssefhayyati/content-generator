@@ -29,5 +29,4 @@ Until it's installed, transcriptions answer `asr_model_missing`, and FlowAI's Tr
 
 | Setting | Where | Value |
 |---|---|---|
-| `TTS_URL`, `TTS_API_KEY` | `assistant/.env` | `https://<pod-id>-8002.proxy.runpod.net`, `OMNIVOICE_API_KEY` |
-| `VOICESTUDIO_URL`, `VOICESTUDIO_KEY` | `backend/.env` (FlowAI's API) | the same URL and key: voices (`vs:` ids) and Whisper |
+| `VOICESTUDIO_URL`, `VOICESTUDIO_KEY` | FlowAI's `.env` (the repo root) | `https://<pod-id>-8002.proxy.runpod.net`, `OMNIVOICE_API_KEY`: FlowAI's voices (`vs:` ids) and Whisper, and the assistant's voice |

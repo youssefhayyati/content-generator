@@ -27,11 +27,14 @@ FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=ig-phon
 FLOWAI_URL=http://127.0.0.1:8002 AGENT_TOKEN=demo-agent-token DEVICE_REF=x-phone  DRIVER=simulator .venv/bin/python agent.py
 ```
 
-Settings: `backend/.env` takes `OLLAMA_CLOUD_API_KEY` (with `AI_DEFAULT_TEXT` and `AI_AGENTS_MODEL` set to an
-Ollama Cloud model, e.g. `ollama_cloud/glm-5.3-flash`), `VOICESTUDIO_URL` and `VOICESTUDIO_KEY` (the pod's
-VoiceStudio: voices and, with Whisper large-v3, transcripts), and `ENGINE_URL` / `ENGINE_KEY` (the assistant's
-engine, `http://assistant:8000`, with the same key as `ENGINE_KEY` in `assistant/.env`). The assistant's settings
-(Ollama Cloud key, the pod's URLs and keys) are in `assistant/.env`, from `assistant/.env.example`.
+Settings: one file, `.env` next to `docker-compose.yml` (`cp .env.example .env`), for the API, the worker, the
+scheduler and the assistant alike. It takes `OLLAMA_CLOUD_API_KEY` (FlowAI's writer and the assistant's own model,
+with `AI_DEFAULT_TEXT` and `AI_AGENTS_MODEL` set to an Ollama Cloud model, e.g. `ollama_cloud/glm-5.3-flash`),
+`VOICESTUDIO_URL` and `VOICESTUDIO_KEY` (the pod's VoiceStudio: voices, the assistant's voice and, with Whisper
+large-v3, transcripts), the pod's other URLs and keys (`COMFYUI_*`, `MUSIC_*`, `LIPSYNC_*`, `FACESWAP_*`), and
+`ENGINE_URL` / `ENGINE_KEY` (the assistant's engine, `http://assistant:8000`; both sides read the same key).
+docker compose mounts it into the API as `backend/.env`. The Models page (`/dashboard/models`) shows each
+connector's settings, which are filled in, and whether the assistant has picked them up.
 
 The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models
 (about 6 GB), and the dashboard installs its packages. The assistant's speech recognition uses an
@@ -153,7 +156,7 @@ latest work, polled every few seconds, with a fullscreen mode for a screen in th
 
 The Sound service is off by default now: voices come from VoiceStudio on the pod, transcripts from its
 Whisper large-v3, and songs from ACE-Step. To run it here anyway: `docker compose --profile local-sound up -d sound`
-and `SOUND_URL=http://sound:8000` in `backend/.env`. It keeps one model in memory at a time and unloads when idle.
+and `SOUND_URL=http://sound:8000` in `.env`. It keeps one model in memory at a time and unloads when idle.
 
 ## The assistant
 
@@ -198,8 +201,8 @@ picked after a reload.
 It is its own service (`assistant/`, Python, needs an NVIDIA GPU) and starts with the rest:
 
 ```sh
-cp assistant/.env.example assistant/.env      # once: OLLAMA_API_KEY at least
-docker compose up -d                          # no GPU: --profile assistant-cpu --scale assistant=0, with TTS_URL set
+cp .env.example .env                          # once: OLLAMA_CLOUD_API_KEY at least
+docker compose up -d                          # no GPU: --profile assistant-cpu --scale assistant=0, with VOICESTUDIO_URL set
 ```
 
 The first start downloads its speech models (about 6 GB). The Vite proxy serves it at
@@ -222,7 +225,7 @@ FLOWAI_URL=http://<studio>:8002 AGENT_TOKEN=… DEVICE_REF=<serial> DRIVER=adb .
 
 ## Real models
 
-Keys go in `backend/.env`, then `docker compose restart api`:
+Keys go in `.env`, then `docker compose restart api worker scheduler` (and `docker compose up -d` for the assistant):
 
 | Provider | Variable | Notes |
 | --- | --- | --- |

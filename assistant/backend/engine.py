@@ -9,6 +9,10 @@ GPU pod or this service's own drawing come here, one job each, over HTTP:
     DELETE /engine/jobs/{id}         stop it
     GET    /engine/catalog           the pod's workflows, which services answer, the fonts
     GET    /engine/voices?q=         the voices it reads with (VoiceStudio or OmniVoice), searched
+    GET    /engine/voices/list       the ready voices and the catalog (q, lang), as the voice pickers show them
+    GET    /engine/voices/sample     how one sounds (id, catalog), a WAV
+    POST   /engine/voices/use        a catalog voice set up as a ready one
+    POST   /engine/voices/clone      a voice cloned from a recording (recording, name)
     POST   /engine/faces             where the faces are in a few frames (for reframing on the speaker)
 
 Tasks:
@@ -35,12 +39,14 @@ import tempfile
 import threading
 import time
 import uuid
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+import numpy as np
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageOps
 
 from . import dub, platforms, reel, retouch
@@ -210,6 +216,32 @@ class Engine:
             up = False
         self._music_up = (time.monotonic(), up)
         return "ok" if up else "not answering"
+
+    def voice_list(self, q: str = "", lang: str = "") -> dict:
+        """The voices to pick from, as the assistant's own voice picker shows them: the ready ones (made,
+        cloned or set up from the catalog), and the catalog matching q and lang (featured ones without)."""
+        tts = self.m.tts
+        if not tts:
+            return {"ready": [], "catalog": [], "total": 0, "languages": [], "choosable": False, "clonable": False}
+        ready = tts.profiles()
+        catalog, total, languages = tts.catalog(q, lang, {v["archetype"] for v in ready if v.get("archetype")}) \
+            if tts.choosable else ([], 0, [])
+        if q:  # the ready ones that fit the words too
+            words = q.lower().split()
+            ready = [v for v in ready if all(w in json.dumps(v).lower() for w in words)]
+        return {"ready": ready, "catalog": catalog, "total": total, "languages": languages,
+                "choosable": tts.choosable, "clonable": tts.clonable}
+
+    def voice_sample(self, voice: str, catalog: bool) -> bytes:
+        """How a voice sounds, as a WAV."""
+        audio = self.m.tts.sample(archetype=voice) if catalog else self.m.tts.sample(voice=voice)
+        out = io.BytesIO()
+        with wave.open(out, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(24000)
+            w.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
+        return out.getvalue()
 
     def voices(self, q: str = "") -> list[dict]:
         tts = self.m.tts
@@ -713,6 +745,50 @@ async def voices(request: Request, q: str = ""):
     except Exception as exc:
         log.warning("voices: %s", exc)
         return {"voices": []}
+
+
+@router.get("/voices/list", dependencies=[Depends(_auth)])
+async def voice_list(request: Request, q: str = "", lang: str = ""):
+    try:
+        return await asyncio.to_thread(_engine(request).voice_list, q, lang)
+    except Exception as exc:
+        log.warning("voice list: %s", exc)
+        raise HTTPException(502, "the voice server didn't answer") from None
+
+
+@router.get("/voices/sample", dependencies=[Depends(_auth)])
+async def voice_sample(request: Request, id: str, catalog: bool = False):
+    try:
+        wav = await asyncio.to_thread(_engine(request).voice_sample, id, catalog)
+    except Exception as exc:
+        log.warning("voice sample %s: %s", id, exc)
+        raise HTTPException(502, "the voice server couldn't play that voice") from None
+    return Response(wav, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.post("/voices/use", dependencies=[Depends(_auth)])
+async def voice_use(request: Request):
+    """A catalog voice set up as a ready one (rendered once, about three seconds): its profile."""
+    wanted = str((await request.json()).get("id") or "")
+    try:
+        return await _engine(request)._voice(wanted) or _missing()
+    except EngineError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@router.post("/voices/clone", dependencies=[Depends(_auth)])
+async def voice_clone(request: Request, recording: UploadFile = File(...), name: str = Form("")):
+    """A voice cloned from a recording (audio, or a video's sound): one of the ready voices from then on."""
+    engine = _engine(request)
+    if not engine.m.tts or not engine.m.tts.clonable:
+        raise HTTPException(503, "voices can't be cloned here")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"recording{Path(recording.filename or '').suffix or '.bin'}"
+        path.write_bytes(await recording.read())
+        try:
+            return await engine._clone_from(path, name.strip() or "My voice")
+        except (EngineError, dub.DubError) as exc:
+            raise HTTPException(422, str(exc).replace("in the video ", "in the recording ")) from None
 
 
 @router.post("/jobs", dependencies=[Depends(_auth)])

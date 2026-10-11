@@ -3,10 +3,10 @@
 Everything FlowAI runs on a GPU lives here, so the rest (the dashboard, the API, the assistant, FlowAI Sound)
 can run on a plain CPU server. One folder, one key file, one command to put it on a pod:
 
-| Service | Port | What | Folder | The assistant's settings (`assistant/.env`) |
+| Service | Port | What | Folder | Settings in FlowAI's `.env` (the repo root) |
 |---|---|---|---|---|
 | ComfyUI | 8001 | pictures and videos: its manager API in front of ComfyUI (8000; 8001 through the image's nginx) | `comfyui/` | `COMFYUI_URL`, `COMFYUI_API_KEY` = `MANAGER_API_KEY` |
-| VoiceStudio | 8002 | speech and voices (OmniVoice): the assistant's voice, videos' voices, cloned voices; speech recognition (Whisper large-v3, installed by `setup.sh`: see `voicestudio/README.md`) | `voicestudio/` | `TTS_URL`, `TTS_API_KEY` = `OMNIVOICE_API_KEY`; FlowAI's API: `VOICESTUDIO_URL`, `VOICESTUDIO_KEY` |
+| VoiceStudio | 8002 | speech and voices (OmniVoice): the assistant's voice, videos' voices, cloned voices; speech recognition (Whisper large-v3, installed by `setup.sh`: see `voicestudio/README.md`) | `voicestudio/` | `VOICESTUDIO_URL`, `VOICESTUDIO_KEY` = `OMNIVOICE_API_KEY` (the API and the assistant both read them) |
 | Music | 8003 | instrumental songs under videos (ACE-Step 1.5, MIT) | `music/` | `MUSIC_URL`, `MUSIC_API_KEY` = `ACESTEP_API_KEY` |
 | Lipsync | 8004 | a video's mouth redrawn to say new words (LatentSync 1.6, Apache-2.0) | `lipsync/` | `LIPSYNC_URL`, `LIPSYNC_API_KEY` |
 | Faceswap | 8005 | a face from one picture put on someone in a picture or video (inswapper_128 and GFPGAN 1.4, ONNX) | `faceswap/` | `FACESWAP_URL`, `FACESWAP_API_KEY` |
@@ -44,7 +44,7 @@ lacks are added. `runpod/deploy.sh <target> pull` copies the pod's bundles back 
 workflow through the API.
 
 **Keys.** The first deploy to a pod (a new network volume) needs `runpod/env` here: copy `env.example` and fill it
-in (git ignores it). Each key also goes into `assistant/.env` under the name in the table above. After that the
+in (git ignores it). Each key also goes into FlowAI's `.env` (the repo root) under the name in the table above. After that the
 pod's `env` is the one used; change a key there (`nano /workspace/flowai/env`) and re-run `setup.sh`.
 
 ### By hand on the pod
@@ -94,8 +94,9 @@ Console → **Pods → Deploy**:
 5. **SSH key**: your `~/.ssh/id_ed25519.pub` in RunPod → *Settings → SSH Public Keys*.
 6. Deploy (tip: **Save as template** after step 4), then run `runpod/deploy.sh` with the new pod's SSH target.
 
-**The URLs change with every new pod; the keys don't.** Put the new pod id in `assistant/.env` (`COMFYUI_URL`,
-`TTS_URL`, `MUSIC_URL`, `LIPSYNC_URL`, `FACESWAP_URL`) and restart the assistant.
+**The URLs change with every new pod; the keys don't.** Put the new pod id in `.env` (`COMFYUI_URL`,
+`VOICESTUDIO_URL`, `MUSIC_URL`, `LIPSYNC_URL`, `FACESWAP_URL`), then `docker compose up -d` and
+`docker compose restart api worker scheduler`. The Models page shows which the assistant has picked up.
 
 ## Day to day
 

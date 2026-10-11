@@ -69,7 +69,7 @@ class Trends
             ->post(config('trends.apify.url')."/acts/{$actor}/run-sync-get-dataset-items", $input);
 
         if ($response->status() === 401 || $response->status() === 403) {
-            abort(502, 'Apify rejected the token. Check APIFY_TOKEN in backend/.env.');
+            abort(502, 'Apify rejected the token. Check APIFY_TOKEN in .env.');
         }
         if ($response->status() === 402) {
             abort(502, 'The Apify account is out of monthly credit, so no new trends can be fetched.');

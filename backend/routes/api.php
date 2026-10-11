@@ -150,6 +150,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Creative Lab: nodes on a canvas. Every change is an operation; nodes run through the engine.
     Route::get('lab/catalog', [LabController::class, 'catalog']);
     Route::get('lab/voices', [LabController::class, 'voices']);
+    Route::get('lab/voices/list', [LabController::class, 'voiceList']);
+    Route::get('lab/voices/sample', [LabController::class, 'voiceSample']);
     Route::post('lab/projects', [LabController::class, 'create']);
     Route::post('campaigns/{campaign}/lab', [LabController::class, 'fromCampaign']);
     Route::get('projects/{project}/lab', [LabController::class, 'show']);
@@ -166,6 +168,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('projects/{project}/lab/nodes/{node}/run', [LabController::class, 'run']);
         Route::post('projects/{project}/lab/run-all', [LabController::class, 'runAll']);
         Route::post('lab/youtube/inspect', [LabController::class, 'inspect']);
+        Route::post('lab/voices/use', [LabController::class, 'useVoice']);
+        Route::post('lab/voices/clone', [LabController::class, 'cloneVoice']);
     });
 
     Route::get('queue-slots', [QueueSlotController::class, 'index']);

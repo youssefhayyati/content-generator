@@ -4,6 +4,7 @@ namespace App\Services\Lab;
 
 use App\Services\Ai\GenerationFailed;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
@@ -63,6 +64,69 @@ class EngineClient
                 return ['error' => 'The assistant service isn’t answering. Start it (docker compose up -d assistant).'];
             }
         });
+    }
+
+    /**
+     * The voices to pick from, as the assistant's own picker shows them: `ready` (made, cloned or set
+     * up), the `catalog` matching the words and language, its `languages`, and whether it `clonable`.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws GenerationFailed
+     */
+    public function voiceList(string $query = '', string $lang = ''): array
+    {
+        return $this->call(fn () => Http::timeout(20)->withHeaders($this->headers())->acceptJson()->get($this->url().'/engine/voices/list', ['q' => $query, 'lang' => $lang]))->json();
+    }
+
+    /** How a voice sounds, as WAV bytes. */
+    public function voiceSample(string $id, bool $catalog): string
+    {
+        return $this->call(fn () => Http::timeout(120)->withHeaders($this->headers())->get($this->url().'/engine/voices/sample', ['id' => $id, 'catalog' => $catalog ? 'true' : 'false']))->body();
+    }
+
+    /**
+     * A catalog voice set up as a ready one (or a ready one by its id): its profile.
+     *
+     * @return array<string, mixed>
+     */
+    public function useVoice(string $id): array
+    {
+        return $this->call(fn () => Http::timeout(120)->withHeaders($this->headers())->acceptJson()->post($this->url().'/engine/voices/use', ['id' => $id]))->json();
+    }
+
+    /**
+     * A voice cloned from a recording (audio, or a video's sound): its profile.
+     *
+     * @return array<string, mixed>
+     */
+    public function cloneVoice(string $path, string $filename, string $name): array
+    {
+        return $this->call(fn () => Http::timeout(300)->withHeaders($this->headers())->acceptJson()
+            ->attach('recording', fopen($path, 'r'), $filename)
+            ->post($this->url().'/engine/voices/clone', ['name' => $name]))->json();
+    }
+
+    /**
+     * @param  callable(): Response  $request
+     *
+     * @throws GenerationFailed with the engine's own words when it refused
+     */
+    private function call(callable $request): Response
+    {
+        if (! $this->configured()) {
+            throw new GenerationFailed('The assistant’s engine isn’t set up: set ENGINE_URL (and ENGINE_KEY) for the API.');
+        }
+        try {
+            $r = $request();
+        } catch (ConnectionException) {
+            throw new GenerationFailed('The assistant service isn’t answering. Start it (docker compose up -d assistant).');
+        }
+        if ($r->failed()) {
+            throw new GenerationFailed(is_string($r->json('detail')) ? ucfirst($r->json('detail')).'.' : "The assistant’s engine answered {$r->status()}.");
+        }
+
+        return $r;
     }
 
     /**

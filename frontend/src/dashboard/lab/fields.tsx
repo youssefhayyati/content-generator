@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Brush, Check, Eraser, ImagePlus, Plus, Search, Trash2, Undo2, X } from 'lucide-react'
-import { api, uploadFiles, type Asset, type LabCatalog, type LabField, type LabMoment, type LabNode, type SoundCatalog } from '../../lib/api'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Brush, Check, Eraser, ImagePlus, Plus, Trash2, Undo2, X } from 'lucide-react'
+import { uploadFiles, type Asset, type LabCatalog, type LabField, type LabMoment, type LabNode } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
-import { useApi } from '../data'
+import { LabVoicePicker } from './VoicePicker'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
 import { Btn, Label, Modal, Select, Toggle, inputClass } from '../ui'
@@ -197,7 +197,15 @@ export function FieldEditor({ field, value, onChange, ctx }: { field: LabField; 
         </Select>,
       )
     case 'voice':
-      return wrap(field.engine ? <EngineVoice id={id} value={str} onChange={(v) => onChange(v, true)} dub={ctx.node.type === 'people.dub'} /> : <SoundVoice id={id} value={str} onChange={(v) => onChange(v, true)} />)
+      return wrap(
+        <LabVoicePicker
+          id={id}
+          value={str}
+          onChange={(v) => onChange(v, true)}
+          prefix={field.engine ? '' : 'vs:'}
+          emptyLabel={ctx.node.type === 'people.dub' ? 'Their own voice, cloned from the video' : field.engine ? 'The assistant’s voice' : 'The account’s voice, or the default'}
+        />,
+      )
     case 'moment': {
       if (!ctx.moments?.length) return wrap(<input id={id} type="number" min={1} className={inputClass} value={str} onChange={(e) => onChange(Number(e.target.value) || 1, true)} />)
       return wrap(
@@ -249,72 +257,6 @@ function ModelSelect({ id, list, value, onChange }: { id: string; list: LabCatal
           {picked.available ? (picked.purpose ?? picked.reach) : picked.reason}
         </p>
       )}
-    </div>
-  )
-}
-
-function SoundVoice({ id, value, onChange }: { id: string; value: string; onChange: (v: string | null) => void }) {
-  const { data } = useApi<SoundCatalog>('/sound')
-  const groups = useMemo(() => {
-    const g = new Map<string, SoundCatalog['voices']>()
-    for (const v of data?.voices ?? []) g.set(v.language, [...(g.get(v.language) ?? []), v])
-    return [...g.entries()]
-  }, [data])
-  return (
-    <Select id={id} value={value} onChange={(e) => onChange(e.target.value || null)}>
-      <option value="">The account’s voice (or the default)</option>
-      {groups.map(([lang, voices]) => (
-        <optgroup key={lang} label={lang}>
-          {voices.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name} · {v.gender}, {v.style}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </Select>
-  )
-}
-
-type EngineVoiceInfo = { id: string; name: string; description?: string; language?: string; ready?: boolean }
-
-/** The assistant's voices (VoiceStudio or OmniVoice): the ready ones, or the catalog searched by words. */
-function EngineVoice({ id, value, onChange, dub }: { id: string; value: string; onChange: (v: string | null) => void; dub: boolean }) {
-  const [q, setQ] = useState('')
-  const [voices, setVoices] = useState<EngineVoiceInfo[] | null>(null)
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      api<{ voices: EngineVoiceInfo[] }>('/lab/voices', { query: { q } })
-        .then((r) => setVoices(r.voices))
-        .catch(() => setVoices([]))
-    }, q ? 350 : 0)
-    return () => window.clearTimeout(t)
-  }, [q])
-  const current = voices?.find((v) => v.id === value)
-  return (
-    <div className="space-y-1.5">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
-        <input id={id} className={cn(inputClass, 'pl-8')} placeholder="british, deep, narration…" value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <div data-scroll className="max-h-44 space-y-0.5 overflow-y-auto rounded-md border border-line p-1">
-        <button type="button" onClick={() => onChange(null)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px]', !value ? 'bg-white/[0.07] text-fg' : 'text-muted hover:bg-white/[0.04]')}>
-          {!value && <Check className="size-3" />}
-          {dub ? 'Their own voice, cloned from the video' : 'The assistant’s voice'}
-        </button>
-        {voices?.map((v) => (
-          <button key={v.id} type="button" onClick={() => onChange(v.id)} className={cn('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px]', value === v.id ? 'bg-white/[0.07] text-fg' : 'text-muted hover:bg-white/[0.04]')}>
-            {value === v.id && <Check className="size-3 shrink-0" />}
-            <span className="min-w-0 flex-1 truncate">
-              {v.name}
-              {v.description && <span className="text-dim"> · {v.description}</span>}
-            </span>
-            {v.ready === false && <span className="shrink-0 text-[10px] text-dim">catalog</span>}
-          </button>
-        ))}
-        {voices && !voices.length && <p className="px-2 py-1.5 text-[11.5px] text-dim">No voices found. Is the assistant running?</p>}
-      </div>
-      {value && !current && <p className="text-[11px] text-dim">Voice {value}</p>}
     </div>
   )
 }
