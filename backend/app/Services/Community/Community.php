@@ -6,7 +6,9 @@ use App\Models\Account;
 use App\Models\Comment;
 use App\Models\Repost;
 use App\Models\User;
+use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Models\ModelRegistry;
+use App\Services\Campaigns\Voice;
 
 /**
  * The community agents: adapt a post between X and Instagram (area 02), and triage
@@ -28,45 +30,111 @@ class Community
         return $this->models->text($this->models->defaultText());
     }
 
+    /** What each placement wants from the words: how long, and how they read there. */
+    private const FORMATS = [
+        'feed' => 'an Instagram feed post. The caption shows under the picture or video, cut after the first line ("… more"): '
+            .'that first line is the hook and must make sense alone. 25 to 90 words, in two to four short paragraphs.',
+        'reel' => 'an Instagram reel. The caption sits over the video and only its first line or two are seen: one or two short '
+            .'sentences, 8 to 30 words, the hook first.',
+        'story' => 'an Instagram story. Stories show no caption: write one short line (max 12 words) for the record, as a sticker would say it.',
+        'post' => 'a post on X: one sharp post, the hook first, max 230 characters (a credit line is added after it).',
+    ];
+
     /**
-     * X → Instagram or Instagram → X: the same post, native to the account. The credit line is
-     * added by the model class (Repost::body), never by the AI, so attribution can't be lost.
+     * X → Instagram or Instagram → X: the same post, native to the account and to where it goes
+     * (feed, reel, story or an X post), as three takes to choose from. The credit line is added by
+     * the model class (Repost::body), never by the AI, so attribution can't be lost.
      *
-     * @return array{caption: string, hashtags: list<string>}
+     * @return list<array{angle: string, caption: string, hashtags: list<string>}>
      */
-    public function adapt(Repost $repost): array
+    public function adapt(Repost $repost, ?string $placement = null, ?string $instruction = null): array
     {
         $account = $repost->account;
         $from = $repost->sourceLabel();
+        $x = $account->platform->value === 'x';
+        $placement = $x ? 'post' : (isset(self::FORMATS[$placement ?? '']) && $placement !== 'post' ? $placement : 'feed');
+        [$minTags, $maxTags] = match ($placement) {
+            'post' => [0, 2],
+            'story' => [0, 3],
+            default => [3, 6],
+        };
         $media = $repost->assets()->countBy('kind')->map(fn (int $n, string $kind) => "{$n} {$kind}".($n > 1 ? 's' : ''))->implode(', ');
-        [$role, $ask, $maxTags] = $account->platform->value === 'x'
-            ? ['You adapt Instagram posts for X. Same idea, native to X: one sharp post, the hook first, no caption padding or hashtag walls.',
-                'Write the post (max 200 characters — a credit line is added separately, keep room for it) and 0-2 hashtags, only if they help.', 2]
-            : ["You adapt posts from {$from} for Instagram. Same idea, native to the account and the format: a caption people read, not a tweet pasted elsewhere.",
-                'Write the caption (max 150 words, no credit line — it is added separately) and 5-12 hashtags.', 15];
-        [$ai, $model] = $this->ai();
-        $reply = $ai->json(
-            $model,
-            $this->voiceSystem($account, $role),
-            "Turn this {$from} post by @{$repost->author} into a {$account->platform->label()} post for @{$account->handle}.\n\n"
-                ."{$from} post".($media ? " (with {$media}, reposted with it)" : '').":\n".(trim($repost->source_text) ?: '(no caption)')."\n\n"
-                .$ask,
-            [
-                'type' => 'object',
-                'properties' => [
-                    'caption' => ['type' => 'string'],
-                    'hashtags' => ['type' => 'array', 'items' => ['type' => 'string']],
-                ],
-                'required' => ['caption', 'hashtags'],
-                'additionalProperties' => false,
-            ],
-        );
+        $language = $account->profile['language'] ?? null;
 
-        return [
-            'caption' => trim((string) ($reply['caption'] ?? '')),
-            'hashtags' => collect($reply['hashtags'] ?? [])->filter(fn ($t) => is_string($t) && trim($t) !== '')
-                ->map(fn (string $t) => str_replace(' ', '', ltrim(trim($t), '#')))->take($maxTags)->values()->all(),
-        ];
+        $system = "You are the social editor of @{$account->handle}. You repost other people's posts for it, from {$from} to "
+            ."{$account->platform->label()}, rewritten so they feel native there, never pasted.\n\n"
+            ."How you write a repost:\n"
+            ."- Keep what the original says: its facts, its joke, its point. Never invent facts, names, numbers, events, quotes or "
+            ."feelings that aren't in it. When it's thin, say less rather than make things up.\n"
+            ."- The original is @{$repost->author}'s, not this account's. Never tell their experience as the account's own (no \"I woke "
+            ."up early\" for something they did): name them, quote them, or react to what they posted.\n"
+            ."- Lead with the hook: the most striking thing, in the first words. No filler openers (\"Check this out\", \"Wow\").\n"
+            ."- Short sentences, one idea each. Emoji only where they carry tone, at most three. No questions to the audience unless the post invites one.\n"
+            .'- Language: '.($language ? "write in {$language}." : 'write in the original\'s language, unless told otherwise.')."\n"
+            ."- No credit line, no @{$repost->author} mention at the end and no \"via\": the credit is added after your caption.\n"
+            ."- Hashtags: {$minTags} to {$maxTags}, specific to what the post is about (the people, the team, the topic). Never generic "
+            ."ones (#viral, #fyp, #explore, #instagood, #trending). Without the #.\n\n"
+            ."The account's voice (follow it over everything above, except never inventing):\n".app(Voice::class)->context($account);
+
+        $prompt = "The {$from} post by @{$repost->author}".($media ? " (it comes with {$media}, which are reposted with it)" : '').":\n"
+            .'"""'."\n".(trim($repost->source_text) ?: '(no text)')."\n".'"""'."\n\n"
+            .'It goes to '.self::FORMATS[$placement]."\n\n"
+            ."Write three takes, each a different angle:\n"
+            ."1. faithful: the original's words and point, told clearly for this audience.\n"
+            ."2. take: the account reacts, with its own short angle on it, still true to the post.\n"
+            ."3. punchy: the shortest, boldest version.\n"
+            .(filled($instruction) ? "\nThe operator asks: {$instruction}\nDo what they ask in all three takes." : '');
+
+        [$ai, $model] = $this->ai();
+        $reply = $ai->json($model, $system, $prompt, [
+            'type' => 'object',
+            'properties' => [
+                'options' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'angle' => ['type' => 'string', 'enum' => ['faithful', 'take', 'punchy']],
+                            'caption' => ['type' => 'string'],
+                            'hashtags' => ['type' => 'array', 'items' => ['type' => 'string']],
+                        ],
+                        'required' => ['angle', 'caption', 'hashtags'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => ['options'],
+            'additionalProperties' => false,
+        ]);
+
+        $limit = $account->platform->characterLimit();
+        $options = collect($reply['options'] ?? [])->filter(fn ($o) => is_array($o) && trim((string) ($o['caption'] ?? '')) !== '')
+            ->map(fn (array $o) => [
+                'angle' => in_array($o['angle'] ?? null, ['faithful', 'take', 'punchy'], true) ? $o['angle'] : 'take',
+                'caption' => mb_substr(trim((string) $o['caption']), 0, $limit),
+                'hashtags' => self::tags($o['hashtags'] ?? [], $maxTags),
+            ])->take(3)->values()->all();
+        if ($options === []) {
+            throw new GenerationFailed('The model gave back no caption. Try again.');
+        }
+
+        return $options;
+    }
+
+    /**
+     * Hashtags as the network takes them: no #, no spaces, no generic ones, no repeats.
+     *
+     * @return list<string>
+     */
+    public static function tags(mixed $tags, int $max = 6): array
+    {
+        $generic = ['viral', 'fyp', 'foryou', 'foryoupage', 'explore', 'explorepage', 'instagood', 'trending', 'reels', 'reelsinstagram', 'instadaily'];
+
+        return collect(is_array($tags) ? $tags : [])
+            ->filter(fn ($t) => is_string($t) && trim($t) !== '')
+            ->map(fn (string $t) => preg_replace('/[^\p{L}\p{N}_]/u', '', ltrim(trim($t), '#')))
+            ->filter(fn (string $t) => $t !== '' && ! in_array(mb_strtolower($t), $generic, true))
+            ->unique(fn (string $t) => mb_strtolower($t))->take($max)->values()->all();
     }
 
     /**

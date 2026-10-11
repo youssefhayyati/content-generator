@@ -54,6 +54,7 @@ from .comfyui import ComfyError, describe_error, describe_progress
 from .config import settings
 from .media import _size, data_url, made_files
 from .music import MusicError
+from .phone import PhoneError
 from .studio import (EDIT_PROMPTS, POSITIONS, SIZES, Text, _behind, _color, _sentences, draw_text, find_font,
                      font_catalog, picture_colours, readability)
 
@@ -205,11 +206,25 @@ class Engine:
                 # Its own model, for the Models page: Ollama Cloud needs the key, a self-hosted Ollama doesn't
                 "llm": f"ok, {settings.llm_model}" if settings.ollama_api_key or "ollama.com" not in settings.ollama_host
                        else "off",
+                # The team's phone (PHONE_API_URL): whether its API answers, for the Models page
+                "phone": await self._phone_status(),
             },
             "fonts": [{"name": f.name, "label": f.label, "style": f.style, "suits": f.suits}
                       for f in fonts["fonts"].values()],
             "font_styles": fonts["styles"],
         }
+
+    async def _phone_status(self) -> str:
+        phone = self.m.phone
+        if not phone:
+            return "off"
+        try:
+            await asyncio.wait_for(phone.status(), 6)
+        except asyncio.TimeoutError:
+            return "not answering"
+        except PhoneError as exc:
+            return str(exc)
+        return f"ok, {phone.device or 'answering'}"
 
     def _music_status(self) -> str:
         songs = self.m.music

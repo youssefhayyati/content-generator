@@ -28,7 +28,7 @@ import { Examples } from '../Examples'
 import type { Case } from '../../showcase/cases'
 import { Btn, FieldError, inputClass, Modal, PageHeader, Panel, Segmented, Skeleton, StateBadge, Stagger, DateInput, TimeInput } from '../ui'
 
-type When = 'draft' | 'queue' | 'pick' | 'published'
+type When = 'draft' | 'now' | 'queue' | 'pick' | 'published'
 
 const FORMATS: Array<{ value: PostFormat; label: ReactNode }> = [
   { value: 'text', label: <><Type className="size-3.5" strokeWidth={1.75} /> Text</> },
@@ -38,6 +38,7 @@ const FORMATS: Array<{ value: PostFormat; label: ReactNode }> = [
 
 const ACTION: Record<When, { label: string; icon: typeof Send }> = {
   draft: { label: 'Save draft', icon: FileText },
+  now: { label: 'Post now', icon: Send },
   queue: { label: 'Add to queue', icon: ListPlus },
   pick: { label: 'Schedule', icon: CalendarClock },
   published: { label: 'Mark as published', icon: Check },
@@ -45,6 +46,7 @@ const ACTION: Record<When, { label: string; icon: typeof Send }> = {
 
 const WHEN: Array<{ value: When; label: string; icon: typeof Send }> = [
   { value: 'draft', label: 'Draft', icon: FileText },
+  { value: 'now', label: 'Now', icon: Send },
   { value: 'queue', label: 'Queue', icon: ListPlus },
   { value: 'pick', label: 'Schedule', icon: CalendarClock },
   { value: 'published', label: 'Posted', icon: Check },
@@ -178,6 +180,7 @@ export default function Create() {
     if (!body.trim()) local.body = 'Write something first.'
     if (!platforms.length) local.platforms = 'Pick at least one platform.'
     if (when === 'pick' && !fromInputs(date, time)) local.scheduled_at = 'Pick a date and time.'
+    if (when === 'now' && !accountId) local.now = 'Pick the account to post from: its phone posts it.'
     if (Object.keys(local).length) {
       setErrors(local)
       return
@@ -192,6 +195,7 @@ export default function Create() {
       platforms,
       status: when === 'draft' ? 'draft' : when === 'published' ? 'published' : 'scheduled',
       queue: when === 'queue',
+      now: when === 'now',
       account_id: accountId,
       asset_ids: media.map((m) => m.id),
       placement: platforms.length === 1 ? placement : null,
@@ -206,6 +210,10 @@ export default function Create() {
       toast(
         when === 'draft'
           ? 'Draft saved.'
+          : when === 'now'
+            ? post.status === 'publishing'
+              ? 'Posting now from the phone.'
+              : 'The phone is busy or paused: it goes out as soon as it’s free.'
           : when === 'published'
             ? 'Marked as published.'
             : `${when === 'queue' ? 'Queued' : 'Scheduled'} for ${fmtDateTime(post.scheduled_at!)}.`,
@@ -260,7 +268,7 @@ export default function Create() {
   }, [])
 
   const Action = ACTION[when]
-  const problem = errors.scheduled_at ?? errors.queue ?? errors.checks ?? errors.platforms ?? errors.body
+  const problem = errors.now ?? errors.scheduled_at ?? errors.queue ?? errors.checks ?? errors.platforms ?? errors.body
 
   return (
     <div>
@@ -366,11 +374,11 @@ export default function Create() {
                   value={when}
                   onChange={(w) => {
                     setWhen(w)
-                    setErrors(({ scheduled_at: _, queue: __, ...rest }) => rest)
+                    setErrors(({ scheduled_at: _, queue: __, now: ___, ...rest }) => rest)
                   }}
                   className="w-full shrink-0 md:order-1 md:w-auto [&>button]:flex-1 [&>button]:justify-center md:[&>button]:flex-none"
                 />
-                {(when === 'pick' || when === 'queue' || problem) && (
+                {(when === 'pick' || when === 'queue' || when === 'now' || problem) && (
                 <div className="min-w-0 text-[12px] leading-snug text-dim md:order-3 md:basis-full md:px-0.5 md:pb-0.5">
                   {when === 'pick' ? (
                     <div className="flex items-center gap-2">
@@ -401,6 +409,14 @@ export default function Create() {
                           Set them up
                         </a>
                       </>
+                    )
+                  ) : when === 'now' ? (
+                    account ? (
+                      <>
+                        Goes out right away from <span className="text-fg">@{account.handle}</span>’s phone.
+                      </>
+                    ) : (
+                      'Pick the account to post from: its phone posts it.'
                     )
                   ) : null}
                   {/* The field a problem belongs to may be scrolled away; say it here too. */}
@@ -478,7 +494,17 @@ export default function Create() {
                         exit={{ opacity: 0, filter: 'blur(4px)' }}
                         transition={{ duration: 0.35, ease }}
                       >
-                        <PostPreview platform={active} title={title} body={body} format={format} user={user} assets={media} />
+                        <PostPreview
+                          platform={active}
+                          title={title}
+                          body={body}
+                          format={format}
+                          user={user}
+                          assets={media}
+                          // As the platform check picks it when nobody did: an Instagram video is a reel.
+                          placement={active === 'instagram' ? (placement ?? (media.some((m) => m.kind === 'video') ? 'reel' : 'feed')) : placement}
+                          handle={account?.platform === active ? account.handle : null}
+                        />
                       </motion.div>
                     </AnimatePresence>
                   </div>

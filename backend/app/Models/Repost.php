@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
  * whether reuse is allowed and why before anything is adapted; the adapted caption always
  * credits the original author.
  */
-#[Fillable(['user_id', 'account_id', 'source_platform', 'source_url', 'author', 'source_text', 'asset_ids', 'permission', 'permission_note', 'status', 'error', 'caption', 'hashtags', 'attribution', 'post_id'])]
+#[Fillable(['user_id', 'account_id', 'placement', 'source_platform', 'source_url', 'author', 'source_text', 'asset_ids', 'permission', 'permission_note', 'status', 'error', 'caption', 'hashtags', 'options', 'story_text', 'attribution', 'post_id'])]
 class Repost extends Model
 {
     public const PERMISSIONS = ['pending', 'allowed', 'denied'];
@@ -34,6 +34,7 @@ class Repost extends Model
     {
         return [
             'hashtags' => 'array',
+            'options' => 'array',
             'asset_ids' => 'array',
             'attribution' => 'boolean',
         ];

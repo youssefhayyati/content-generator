@@ -9,7 +9,8 @@
 // messages into scrcpy's binary ones.
 //
 // Who may watch which phone is the API's call: it signs a one-minute ticket with APP_KEY
-// (DeviceController::stream), and this bridge only checks the signature.
+// (DeviceController::stream), and this bridge only checks the signature. The key comes from
+// APP_KEY in the environment, or the stack's .env mounted at /laravel/.env.
 //
 // No dependencies: node server.js.
 

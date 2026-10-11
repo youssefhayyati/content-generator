@@ -119,14 +119,19 @@ services:
   # Live phone screens for the Phones page (phone-bridge/server.js): scrcpy's H.264 video from a
   # phone plugged into this machine, and touches back, through the host's adb server. The Vite
   # proxy serves it at /phone-bridge/. It checks the API's signed tickets with APP_KEY, read
-  # from backend/.env. On :8006 (8004 is music's, 8005 lipsync's).
+  # from the stack's .env. On :8006 (8004 is music's, 8005 lipsync's).
   phone-bridge:
     image: node:22-alpine
     working_dir: /app
     command: node server.js
     volumes:
       - ./phone-bridge:/app:ro
-      - ./backend:/laravel:ro
+      - type: bind
+        source: ./.env
+        target: /laravel/.env
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       ADB_SERVER_HOST: host.docker.internal
     ports:

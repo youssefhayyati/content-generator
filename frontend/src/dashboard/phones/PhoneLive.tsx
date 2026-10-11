@@ -33,19 +33,27 @@ const KEYBOARD: Record<string, number> = {
 
 const SCREEN = 'block h-[min(68vh,640px)] w-auto touch-none select-none rounded-[14px]'
 
+/** The team phone's input board (the Phone API) has only these. */
+const REMOTE_KEYS = ['back', 'home', 'enter']
+
 /**
  * A real phone's screen, live, driven by hand. The phone bridge streams it as video (scrcpy,
  * up to 60 fps) and takes touches as they happen; without the bridge it falls back to
- * screenshots, about one a second. Hands off while a publishing run is on the phone.
+ * screenshots, about one a second. The team phone (on the hackathon Phone API) is always
+ * screenshots, driven through that API. Hands off while a publishing run is on the phone.
  */
 export function PhoneLive({ device }: { device: Device }) {
   const toast = useToast()
   const canvas = useRef<HTMLCanvasElement>(null)
-  const stream = usePhoneStream(device.id, canvas, true)
-  const snapshots = stream.status === 'failed'
-  const locked = device.booked_run_id !== null || (stream.status === 'live' && !stream.control)
-  const offline = stream.status === 'offline'
+  const remote = !!device.remote
+  const stream = usePhoneStream(device.id, canvas, !remote)
+  const snapshots = remote || stream.status === 'failed'
+  // The Phone API says when one of its tasks (the assistant posting) is driving the phone
+  const [taskOn, setTaskOn] = useState(device.remote?.busy ?? false)
+  const locked = device.booked_run_id !== null || (remote && taskOn) || (!snapshots && stream.status === 'live' && !stream.control)
+  const offline = !snapshots && stream.status === 'offline'
   const idle = locked || (!snapshots && stream.status !== 'live')
+  const keys = remote ? KEYS.filter((k) => REMOTE_KEYS.includes(k.key)) : KEYS
   const [text, setText] = useState('')
 
   const post = async (body: Control) => {
@@ -72,7 +80,11 @@ export function PhoneLive({ device }: { device: Device }) {
   return (
     <div className="flex flex-col gap-6 sm:flex-row">
       <div className="flex shrink-0 items-start justify-center">
-        {snapshots ? <SnapshotScreen device={device} locked={locked} post={post} /> : <StreamScreen canvas={canvas} stream={stream} locked={locked} />}
+        {snapshots ? (
+          <SnapshotScreen device={device} locked={locked} post={post} onBusy={setTaskOn} />
+        ) : (
+          <StreamScreen canvas={canvas} stream={stream} locked={locked} />
+        )}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-5">
@@ -80,16 +92,18 @@ export function PhoneLive({ device }: { device: Device }) {
           <span
             className={cn(
               'size-1.5 rounded-full',
-              stream.status === 'live' ? 'animate-pulse bg-ok' : stream.status === 'connecting' ? 'bg-draft' : offline ? 'bg-fail' : 'bg-warn',
+              remote ? 'animate-pulse bg-ok' : stream.status === 'live' ? 'animate-pulse bg-ok' : stream.status === 'connecting' ? 'bg-draft' : offline ? 'bg-fail' : 'bg-warn',
             )}
           />
-          {stream.status === 'live'
-            ? `Live video · ${stream.fps} fps`
-            : stream.status === 'connecting'
-              ? 'Starting the video…'
-              : offline
-                ? 'Not connected · waiting for the phone'
-                : 'Screenshots · about one a second'}
+          {remote
+            ? 'Team phone · Phone API · about one screen a second'
+            : stream.status === 'live'
+              ? `Live video · ${stream.fps} fps`
+              : stream.status === 'connecting'
+                ? 'Starting the video…'
+                : offline
+                  ? 'Not connected · waiting for the phone'
+                  : 'Screenshots · about one a second'}
         </span>
 
         {offline && (
@@ -98,7 +112,7 @@ export function PhoneLive({ device }: { device: Device }) {
           </p>
         )}
 
-        {snapshots && (
+        {snapshots && !remote && (
           <div className="rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2.5 text-[12px] leading-snug">
             <p>{stream.error}</p>
             <Btn size="sm" icon={RefreshCw} onClick={stream.retry} className="mt-2">
@@ -108,14 +122,16 @@ export function PhoneLive({ device }: { device: Device }) {
         )}
         {locked && (
           <p className="rounded-lg border border-accent/25 bg-accent/[0.06] px-3 py-2.5 text-[12px] leading-snug">
-            A publishing run is driving this phone. You can watch; the controls come back when it's done.
+            {remote && taskOn && device.booked_run_id === null
+              ? 'A task on the Phone API is driving this phone (the assistant posting, or a teammate). You can watch; the controls come back when it ends.'
+              : "A publishing run is driving this phone. You can watch; the controls come back when it's done."}
           </p>
         )}
 
         <div>
           <Label>Buttons</Label>
           <div className="mt-2 grid grid-cols-2 gap-1.5">
-            {KEYS.map((k) => (
+            {keys.map((k) => (
               <Btn key={k.key} size="sm" icon={k.icon} disabled={idle} onClick={() => press(k)} className="justify-start">
                 {k.label}
               </Btn>
@@ -137,7 +153,9 @@ export function PhoneLive({ device }: { device: Device }) {
         </form>
 
         <p className="mt-auto text-[11px] leading-snug text-dim">
-          {snapshots
+          {remote
+            ? 'Click to tap, drag to swipe (up, down, left or right), hold to long-press, scroll the wheel to scroll.'
+            : snapshots
             ? 'Click to tap, drag to swipe, hold to long-press, scroll the wheel to scroll.'
             : 'Touch it like the phone: click, drag, hold, scroll. Right-click is Back. Click the screen, then type on your keyboard.'}
         </p>
@@ -240,7 +258,17 @@ function StreamScreen({ canvas, stream, locked }: { canvas: RefObject<HTMLCanvas
 }
 
 /** The fallback: one screenshot after another, taps and swipes sent when the pointer lifts. */
-function SnapshotScreen({ device, locked, post }: { device: Device; locked: boolean; post: (c: Control) => Promise<boolean> }) {
+function SnapshotScreen({
+  device,
+  locked,
+  post,
+  onBusy,
+}: {
+  device: Device
+  locked: boolean
+  post: (c: Control) => Promise<boolean>
+  onBusy: (busy: boolean) => void
+}) {
   const [frame, setFrame] = useState<{ url: string; width: number; height: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [marks, setMarks] = useState<{ id: number; x: number; y: number }[]>([])
@@ -258,6 +286,7 @@ function SnapshotScreen({ device, locked, post }: { device: Device; locked: bool
           if (shown.current) URL.revokeObjectURL(shown.current)
           shown.current = URL.createObjectURL(blob)
           setFrame({ url: shown.current, width: Number(headers.get('X-Screen-Width')), height: Number(headers.get('X-Screen-Height')) })
+          if (headers.has('X-Phone-Busy')) onBusy(headers.get('X-Phone-Busy') === '1')
           setError(null)
           await wait(150)
         } catch (e) {

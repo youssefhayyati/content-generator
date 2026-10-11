@@ -80,7 +80,7 @@ function ClipTile({ clip: c, i }: { clip: LinkClip; i: number }) {
         <span className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-black/75 px-1.5 py-px font-mono text-[10px] text-white">
           {asset.duration ? `${Math.round(asset.duration)}s` : `${c.seconds}s`}
         </span>
-        <span className="pointer-events-none absolute left-1.5 top-1.5 grid size-5 place-items-center rounded bg-black/75 text-white" title={c.platform === 'tiktok' ? 'For TikTok' : 'For Instagram Reels'}>
+        <span className="pointer-events-none absolute left-1.5 top-1.5 grid size-5 place-items-center rounded bg-black/75 text-white" title={`For ${{ tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube' }[c.platform]} (${c.placement})`}>
           <PlatformIcon id={c.platform} className="size-3" />
         </span>
       </div>

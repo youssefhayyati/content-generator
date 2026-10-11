@@ -26,10 +26,9 @@ dialog shows anyway, tap "Cancel" to stay in the post; never "Save" (it leaves t
    keyboard, open the full gallery instead with the gallery icon. Tap the first {{count}} items in order,
    left to right, top row first, so they are numbered 1 to {{count}}, then tap "Add" or "Done". Change
    nothing in the photo editor.
-5. Tap the "What's happening?" box and type the text exactly as given, one line at a time: type line 1,
-   press enter, type line 2, and so on, doing as many lines as you can in one step. For an "(empty line)"
-   just press enter. Do not press enter after the last line. Ignore any suggestion list that pops up while
-   typing (don't tap it, don't press back to close it); do not add, fix or translate anything.
+5. Tap the "What's happening?" box and type the text exactly as given below, the way it says (a long one in
+   pieces, one type action each). Never press enter. Ignore any suggestion list that pops up while typing
+   (don't tap it, don't press back to close it); do not add, fix or translate anything.
 
 Text:
 {{caption}}
@@ -38,9 +37,12 @@ Text:
    doubled, fix it before going on.
 7. Tap "Post" (top right). If a pop-up appears (e.g. about who can reply, or a premium offer), close it in the
    way that still posts.
-8. Wait until the compose screen closes and the timeline shows "Your post was sent" or your new post, and
-   stop on that screen: your last screenshot is kept as the proof that it is up. Only if you can't tell, open
-   your profile and look at the newest post.
+8. Wait until the compose screen closes and the timeline shows "Your post was sent" or your new post.
+9. Then show it is up, on your own profile (the "sent" message goes in a few seconds): tap your profile picture
+   at the top left, then "Profile". Your new post is the first under "Posts" (below a "Pinned" one, if there is
+   one). Check it starts with the text's first words, and stop there with it on screen: your last screenshot is
+   kept as the proof that it is up. If it isn't there yet, wait a few seconds and pull down to refresh; never
+   post it a second time.
 
 Report in one or two sentences whether the post is now published, or exactly where it stopped and what the
 screen said.

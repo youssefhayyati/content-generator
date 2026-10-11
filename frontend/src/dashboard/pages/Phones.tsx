@@ -100,7 +100,7 @@ export default function Phones() {
                 run={runs?.find((r) => r.id === d.booked_run_id && r.outcome === 'running')}
                 onEdit={() => setEditing(d)}
                 onWatch={() => setWatching(d.id)}
-                connection={d.driver === 'http' && plugged ? (plugged[d.ref ?? ''] ?? 'missing') : undefined}
+                connection={d.remote ? (d.remote.online ? 'device' : 'offline') : d.driver === 'http' && plugged ? (plugged[d.ref ?? ''] ?? 'missing') : undefined}
               />
             ))}
           </div>
@@ -315,7 +315,11 @@ function PhoneCard({
             {d.name}
           </button>
           <p className="truncate text-[12px] text-dim">
-            {d.driver === 'simulator' ? `Simulator · ${d.profile}` : `Automation service · ${d.ref ?? 'no device ID'}`}
+            {d.driver === 'simulator'
+              ? `Simulator · ${d.profile}`
+              : d.remote
+                ? `Team phone · Phone API · ${d.ref}${d.remote.busy ? ' · a task is on it' : ''}`
+                : `Automation service · ${d.ref ?? 'no device ID'}`}
           </p>
         </div>
         <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">

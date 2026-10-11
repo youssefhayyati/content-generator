@@ -9,22 +9,36 @@ use App\Services\Ai\Pricing;
 use App\Services\Ai\UsageMeter;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Turns speech into text with every word's timing: voice notes, podcasts, the audio of a video.
- * FlowAI Sound's Whisper on this server, or any OpenAI-compatible Whisper (Groq's is free).
+ * FlowAI Sound's Whisper on this server, or any OpenAI-compatible Whisper (Groq's is free); the best that runs
+ * first, and the next when it plainly didn't hear (on music or noise Whisper invents subtitlers' credits).
  */
 class Listener
 {
     public function __construct(private readonly SoundClient $sound, private readonly AudioTools $tools, private readonly ModelRegistry $models, private readonly UsageMeter $usage) {}
 
-    /** The listening model to use: the one asked for if it can run, else the first that can. */
+    /**
+     * Who listens best first: Whisper large-v3 on the GPU pod (VoiceStudio), then hosted Whispers, and this
+     * server's own (FlowAI Sound's Whisper base, quick but rough: it mangles names, Arabic and Darija) last.
+     */
+    private const PREFERENCE = ['voicestudio', 'groq', 'openrouter', 'gateway', 'ollama_cloud', 'sound'];
+
+    /**
+     * The listening model to use: the one asked for if it can run, else AI_DEFAULT_LISTEN if it can, else the
+     * best that can (PREFERENCE).
+     */
     public function model(?string $id = null): ?string
     {
         $listeners = collect($this->models->all('listen'))->where('available', true);
+        $default = config('ai.default_listen');
+        $best = $listeners->sortBy(fn (array $m) => array_search($m['provider'], self::PREFERENCE, true) === false ? 99 : array_search($m['provider'], self::PREFERENCE, true))->first();
 
-        return ($id && $listeners->firstWhere('id', $id) ? $id : null) ?? $listeners->first()['id'] ?? null;
+        return collect([$id, $default])->first(fn ($want) => $want && $listeners->firstWhere('id', $want)) ?? $best['id'] ?? null;
     }
 
     public function available(): bool
@@ -37,18 +51,73 @@ class Listener
      */
     public function file(string $path, ?string $language = null, ?string $model = null, int $maxSeconds = 1800): array
     {
-        $model = $this->model($model) ?? throw new GenerationFailed('Nothing can listen yet: start FlowAI Sound (docker compose up -d sound).');
+        $first = $this->model($model) ?? throw new GenerationFailed('Nothing can listen yet: start FlowAI Sound (docker compose up -d sound).');
         $wav = $this->tools->toListenWav($path, $maxSeconds);
-        [$provider, $name] = explode('/', $model, 2);
+        // Asked for one model: that one. Else the best first, and the next when it plainly didn't hear (see heard()).
+        $tries = $model ? [$first] : collect([$first])->merge($this->fallbacks($first))->unique()->values()->all();
 
-        $started = microtime(true);
-        $result = $provider === 'sound' ? $this->sound->transcribe($wav, $language) : $this->openAi($provider, $name, $wav, $language);
-        // On the pod, what it costs is how long Whisper held the GPU.
-        $ran = microtime(true) - $started;
-        $priced = Pricing::run($provider, $model, 1, 0, $ran);
-        $this->usage->record($provider, $model, 0, 0, $priced['cost'], $priced['billing'], $priced['billing'] === Pricing::ESTIMATED ? $ran : 0);
+        $kept = null;
+        foreach ($tries as $i => $try) {
+            [$provider, $name] = explode('/', $try, 2);
+            $started = microtime(true);
+            try {
+                $result = [...($provider === 'sound' ? $this->sound->transcribe($wav, $language) : $this->openAi($provider, $name, $wav, $language)), 'model' => $try];
+            } catch (GenerationFailed $e) {
+                if ($i === count($tries) - 1 && ! $kept) {
+                    throw $e;
+                }
 
-        return [...$result, 'model' => $model];
+                continue;
+            }
+            // On the pod, what it costs is how long Whisper held the GPU.
+            $ran = microtime(true) - $started;
+            $priced = Pricing::run($provider, $try, 1, 0, $ran);
+            $this->usage->record($provider, $try, 0, 0, $priced['cost'], $priced['billing'], $priced['billing'] === Pricing::ESTIMATED ? $ran : 0);
+            if (self::heard($result)) {
+                return $result;
+            }
+            Log::info('Listening: '.$try.' gave no real words; trying the next', ['text' => Str::limit($result['text'], 80)]);
+            $kept ??= $result;
+        }
+
+        // Nobody heard words: no speech (music, recitation, noise), said honestly rather than a made-up line.
+        return [...$kept, 'text' => '', 'segments' => [], 'words' => []];
+    }
+
+    /**
+     * Whisper's well-known inventions on silence, music or noise: subtitlers' credits and channel outros it
+     * learned from video subtitles, in Arabic, French and English.
+     */
+    private const INVENTED = ['ترجمة نانسي قنقر', 'اشتركوا في القناة', 'اشترك في القناة', 'شكرا للمشاهدة', 'شكرا على المشاهدة', 'لا تنسوا الاشتراك',
+        'sous-titres réalisés par', 'sous-titrage', "merci d'avoir regardé", 'amara.org', 'subtitles by', 'thanks for watching', 'thank you for watching', 'please subscribe'];
+
+    /** Whether a transcript holds words someone said, not one of Whisper's inventions or a word on repeat. */
+    public static function heard(array $result): bool
+    {
+        $text = mb_strtolower(trim((string) ($result['text'] ?? '')));
+        if ($text === '') {
+            return false;
+        }
+        foreach (self::INVENTED as $phrase) {
+            if (str_contains($text, $phrase) && mb_strlen($text) < mb_strlen($phrase) + 40) {
+                return false;
+            }
+        }
+        $words = preg_split('/\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+        // "أشهر أشهر أشهر أشهر": the same word over and over is a loop, not speech
+        return ! (count($words) >= 3 && count(array_unique($words)) <= max(1, intdiv(count($words), 4)));
+    }
+
+    /**
+     * The other listeners that can run, best first, to try when one didn't hear.
+     *
+     * @return list<string>
+     */
+    private function fallbacks(string $first): array
+    {
+        return collect($this->models->all('listen'))->where('available', true)
+            ->sortBy(fn (array $m) => array_search($m['provider'], self::PREFERENCE, true) === false ? 99 : array_search($m['provider'], self::PREFERENCE, true))
+            ->pluck('id')->reject(fn (string $id) => $id === $first)->values()->all();
     }
 
     public function asset(Asset $asset, ?string $language = null): array

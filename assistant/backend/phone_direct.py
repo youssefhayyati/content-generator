@@ -200,9 +200,12 @@ class DirectDriver:
                 await self.input("/phone/long-press", {"x": x, "y": y, "ms": 1000})
             return name, {"x": x, "y": y, **({"element": f"'{label}'"} if label else {})}, name
         if "type" in a:
+            from .phone import pieces
             text = str(a["type"])[:1000]
-            if text:
-                await self.input("/phone/type", {"text": text})
+            # The input board types slowly: a long text in one call outlasts the server's wait and the phone is
+            # "lost". In pieces, between words, each piece but the first with the space before it.
+            for i, piece in enumerate(pieces(text)):
+                await self.input("/phone/type", {"text": piece if i == 0 else " " + piece})
             return "type", {"text": text}, "type"
         if "key" in a:
             key = str(a["key"]).lower()

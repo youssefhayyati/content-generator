@@ -20,17 +20,46 @@ class YouTubeDownloader
         return in_array($host, ['youtube.com', 'youtu.be', 'youtube-nocookie.com'], true);
     }
 
-    /** @return array{path: string, title: string, duration: float, author: string|null, cleanup: string} */
-    public function download(string $url): array
+    /**
+     * What the video is, without downloading it, and whether it can be clipped: one that's live, too long or
+     * unavailable gets a message that says so. (A --match-filter on the download skips such a video without an
+     * error, which left nothing to clip and no reason why.)
+     *
+     * @return array{title: string, duration: float}
+     */
+    public function check(string $url): array
     {
         if (! self::supports($url)) {
             throw new RuntimeException('Use a youtube.com or youtu.be video link.');
         }
+        $run = Process::timeout(60)->run(['yt-dlp', '--no-playlist', '--no-warnings', '--skip-download', '--dump-single-json', $url]);
+        if (! $run->successful()) {
+            $why = trim((string) preg_replace('/^ERROR:\s*(\[\w+\]\s*[\w-]+:\s*)?/m', '', trim($run->errorOutput())));
+            throw new RuntimeException('YouTube says: '.Str::limit($why ?: 'the video could not be read.', 200));
+        }
+        $meta = json_decode($run->output(), true) ?: [];
+        if (in_array($meta['live_status'] ?? null, ['is_live', 'is_upcoming'], true)) {
+            throw new RuntimeException('This is a live stream or a premiere that hasn’t ended. Try again once it is a regular video.');
+        }
+        $duration = (float) ($meta['duration'] ?? 0);
+        if ($duration < 3) {
+            throw new RuntimeException('This video is too short to clip (under 3 seconds).');
+        }
+        if ($duration > self::MAX_SOURCE_SECONDS) {
+            throw new RuntimeException(sprintf('This video is %d minutes long. For now, use one up to %d minutes.', (int) ceil($duration / 60), self::MAX_SOURCE_SECONDS / 60));
+        }
+
+        return ['title' => (string) ($meta['title'] ?? ''), 'duration' => $duration];
+    }
+
+    /** @return array{path: string, title: string, duration: float, author: string|null, cleanup: string} */
+    public function download(string $url): array
+    {
+        $this->check($url);
         $dir = sys_get_temp_dir().'/youtube-'.Str::random(12);
         File::ensureDirectoryExists($dir);
         $run = Process::timeout(1200)->run([
-            'yt-dlp', '--no-playlist', '--quiet', '--no-warnings', '--no-progress',
-            '--match-filter', 'duration >= 3 & duration <= 1800', '--write-info-json',
+            'yt-dlp', '--no-playlist', '--quiet', '--no-warnings', '--no-progress', '--write-info-json',
             '--concurrent-fragments', '4', '--format', 'bv*[height<=720]+ba/b[height<=720]', '--merge-output-format', 'mp4',
             '--output', "{$dir}/source.%(ext)s", $url,
         ]);

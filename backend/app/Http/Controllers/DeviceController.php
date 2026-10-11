@@ -6,6 +6,7 @@ use App\Http\Resources\DeviceResource;
 use App\Models\ActionLog;
 use App\Models\Device;
 use App\Services\Publishing\Adb;
+use App\Services\Publishing\PhoneApi;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -116,15 +117,24 @@ class DeviceController extends Controller
 
     /**
      * The phone's screen right now, for the live view. The X-Screen-* headers give the
-     * phone's own size: the frame is scaled down, taps are in the phone's pixels.
+     * phone's own size: the frame is scaled down, taps are in the phone's pixels. The team
+     * phone comes from the Phone API, with X-Phone-Busy while a task there drives it.
      */
-    public function live(Device $device, Adb $adb): Response
+    public function live(Device $device, Adb $adb, PhoneApi $phone): Response
     {
         Gate::authorize('view', $device);
         $serial = $this->serial($device);
+        $headers = ['Cache-Control' => 'no-store'];
 
         try {
-            $frame = $adb->screenshot($serial);
+            if ($phone->owns($serial)) {
+                $frame = $phone->screenshot();
+                [$image, $headers['Content-Type']] = [$frame['jpeg'], 'image/jpeg'];
+                $headers['X-Phone-Busy'] = rescue(fn () => $phone->status()['busy'] ? '1' : '0', '0', false);
+            } else {
+                $frame = $adb->screenshot($serial);
+                [$image, $headers['Content-Type']] = [$frame['png'], 'image/png'];
+            }
         } catch (RuntimeException $e) {
             abort(503, $e->getMessage());
         }
@@ -134,9 +144,7 @@ class DeviceController extends Controller
             $device->forceFill(['last_seen_at' => now()])->save();
         }
 
-        return response($frame['png'], 200, [
-            'Content-Type' => 'image/png',
-            'Cache-Control' => 'no-store',
+        return response($image, 200, $headers + [
             'X-Screen-Width' => $frame['width'],
             'X-Screen-Height' => $frame['height'],
         ]);
@@ -147,10 +155,11 @@ class DeviceController extends Controller
      * phone's video, and touches back unless a publishing run is driving it. The bridge
      * trusts the signature (APP_KEY), so this is where access is decided.
      */
-    public function stream(Request $request, Device $device): JsonResponse
+    public function stream(Request $request, Device $device, PhoneApi $phone): JsonResponse
     {
         Gate::authorize('view', $device);
         $serial = $this->serial($device);
+        abort_if($phone->owns($serial), 422, 'The team phone has no video stream: its screen comes as screenshots from the Phone API.');
         $control = $device->booked_run_id === null && $request->user()->can('update', $device);
 
         $body = rtrim(strtr(base64_encode((string) json_encode([
@@ -164,7 +173,7 @@ class DeviceController extends Controller
     }
 
     /** Drive the phone by hand: tap, swipe (or long-press), a hardware key, or typed text. */
-    public function control(Request $request, Device $device, Adb $adb): Response
+    public function control(Request $request, Device $device, Adb $adb, PhoneApi $phone): Response
     {
         Gate::authorize('update', $device);
         $serial = $this->serial($device);
@@ -182,22 +191,33 @@ class DeviceController extends Controller
         ]);
 
         try {
-            match ($input['action']) {
-                'tap' => $adb->tap($serial, $input['x'], $input['y']),
-                'swipe' => $adb->swipe($serial, $input['x'], $input['y'], $input['x2'], $input['y2'], $input['ms'] ?? 300),
-                'key' => $adb->key($serial, $input['key']),
-                'text' => $adb->type($serial, $input['text']),
-            };
+            if ($phone->owns($serial)) {
+                // A drag that ends where it began is a hold: the page sends a long-press that way.
+                $held = $input['action'] === 'swipe' && $input['x'] === $input['x2'] && $input['y'] === $input['y2'];
+                match ($input['action']) {
+                    'tap' => $phone->tap($input['x'], $input['y']),
+                    'swipe' => $held ? $phone->longPress($input['x'], $input['y'], $input['ms'] ?? 1000) : $phone->swipe($input['x'], $input['y'], $input['x2'], $input['y2']),
+                    'key' => $phone->key($input['key']),
+                    'text' => $phone->type($input['text']),
+                };
+            } else {
+                match ($input['action']) {
+                    'tap' => $adb->tap($serial, $input['x'], $input['y']),
+                    'swipe' => $adb->swipe($serial, $input['x'], $input['y'], $input['x2'], $input['y2'], $input['ms'] ?? 300),
+                    'key' => $adb->key($serial, $input['key']),
+                    'text' => $adb->type($serial, $input['text']),
+                };
+            }
         } catch (InvalidArgumentException $e) {
             throw ValidationException::withMessages([$input['action'] => $e->getMessage()]);
         } catch (RuntimeException $e) {
-            abort(503, $e->getMessage());
+            abort($e->getCode() === 409 ? 409 : 503, $e->getMessage()); // 409: a task on the Phone API has the phone
         }
 
         return response()->noContent();
     }
 
-    /** Only a real phone has a screen to watch: its device ID is its adb serial. */
+    /** Only a real phone has a screen to watch: its device ID is its adb serial, or the Phone API's name for it. */
     private function serial(Device $device): string
     {
         abort_if($device->driver !== 'http' || ! $device->ref, 422, 'Only a real phone can be watched and driven. The simulator has no screen.');

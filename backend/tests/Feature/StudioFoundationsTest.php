@@ -14,7 +14,9 @@ use App\Services\Ai\UsageMeter;
 use App\Services\Media\MediaInspector;
 use App\Services\Publishing\Adb;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -184,6 +186,47 @@ class StudioFoundationsTest extends TestCase
         $this->spa()->getJson("/api/devices/{$sim->id}/live")->assertStatus(422);
 
         $this->actingAs(User::factory()->create())->spa()->getJson("/api/devices/{$phone->id}/live")->assertForbidden();
+    }
+
+    public function test_the_team_phone_is_mirrored_and_driven_through_the_phone_api(): void
+    {
+        config(['publishing.phone_api.url' => 'https://phone.test/hack/v1', 'publishing.phone_api.key' => 'hk_team']);
+        $busy = null;
+        Http::fake(function (HttpRequest $r) use (&$busy) {
+            return match (true) {
+                str_ends_with($r->url(), '/phone/status') => Http::response(['ok' => true, 'data' => ['device_id' => 'heracles-phone', 'online' => true, 'busy' => $busy]]),
+                str_ends_with($r->url(), '/phone/geometry') => Http::response(['ok' => true, 'data' => ['w' => 1080, 'h' => 2400]]),
+                str_contains($r->url(), '/phone/screenshot') => Http::response('JPEGDATA', 200, ['Content-Type' => 'image/jpeg']),
+                default => Http::response(['ok' => true, 'data' => null]),
+            };
+        });
+        $user = User::factory()->create();
+        $phone = $user->devices()->create(['name' => 'Team phone', 'driver' => 'http', 'ref' => 'heracles-phone']);
+        $this->mock(Adb::class)->shouldNotReceive('screenshot', 'tap', 'swipe', 'key', 'type');
+
+        $this->actingAs($user)->spa()->getJson('/api/devices')->assertOk()->assertJsonPath('0.remote', ['online' => true, 'busy' => false]);
+        $this->spa()->get("/api/devices/{$phone->id}/live")->assertOk()
+            ->assertHeader('Content-Type', 'image/jpeg')->assertHeader('X-Screen-Width', 1080)->assertHeader('X-Screen-Height', 2400)->assertHeader('X-Phone-Busy', '0');
+        $this->spa()->postJson("/api/devices/{$phone->id}/stream")->assertStatus(422);
+
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'tap', 'x' => 540, 'y' => 1200])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'swipe', 'x' => 500, 'y' => 1800, 'x2' => 500, 'y2' => 600])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'swipe', 'x' => 300, 'y' => 300, 'x2' => 300, 'y2' => 300, 'ms' => 900])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'back'])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'text', 'text' => 'hello world'])->assertNoContent();
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/tap') && $r['x'] === 540 && $r['y'] === 1200 && $r->hasHeader('Authorization', 'Bearer hk_team'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/swipe') && $r['direction'] === 'up' && $r['distance'] === 'long');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/long-press') && $r['ms'] === 900);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/key') && $r['key'] === 'back');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/type') && $r['text'] === 'hello world');
+
+        // Its input board has no volume keys and types ASCII only
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'volume_up'])->assertJsonValidationErrors('key');
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'text', 'text' => 'café'])->assertJsonValidationErrors('text');
+
+        // A task on the Phone API (the assistant posting) has the phone: hands off
+        $busy = ['task_id' => 't1'];
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'home'])->assertStatus(409);
     }
 
     public function test_the_live_stream_ticket_is_signed_and_carries_who_may_touch(): void

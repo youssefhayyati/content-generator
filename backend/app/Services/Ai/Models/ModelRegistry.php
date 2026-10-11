@@ -72,6 +72,7 @@ class ModelRegistry
         'engine' => [
             'llm' => ['Its model', 'The assistant’s conversations', ['OLLAMA_CLOUD_API_KEY', 'LLM_MODEL']],
             'tts' => ['Its voice', 'VoiceStudio on the pod, or OmniVoice on this machine', ['VOICESTUDIO_URL', 'VOICESTUDIO_KEY']],
+            'phone' => ['The team’s phone', 'Posting on Instagram and X', ['PHONE_API_URL', 'PHONE_API_KEY']],
         ],
     ];
 
@@ -207,6 +208,9 @@ class ModelRegistry
                 'configured' => $this->configured($p),
                 'settings' => array_map(fn (string $name) => $this->setting($name), array_keys(self::SETTINGS[$p])),
                 'services' => isset(self::ENGINE_SERVICES[$p]) ? $this->engineServices($p, $catalog) : null,
+                // The assistant answers or it doesn't, right now: no test needed to know it's running.
+                'live' => $p === 'engine' && $this->configured($p) ? $catalog !== null && ! isset($catalog['error']) : null,
+                'live_error' => $p === 'engine' ? ($catalog['error'] ?? null) : null,
                 'setup' => [
                     'anthropic' => 'Set ANTHROPIC_API_KEY.',
                     'gateway' => 'Set AI_GATEWAY_URL (an OpenAI-compatible /v1 base) and AI_GATEWAY_KEY.',
@@ -219,7 +223,7 @@ class ModelRegistry
                     'voicestudio' => 'Set VOICESTUDIO_URL to your VoiceStudio server, and VOICESTUDIO_KEY when it’s not on loopback.',
                     'google' => 'Set GEMINI_API_KEY for Gemini image generation and Veo video generation.',
                     'pod' => 'Deploy runpod/ to a pod (runpod/deploy.sh), put its URLs and keys in .env, and run the assistant: it reaches the pod for FlowAI.',
-                    'engine' => 'Run the assistant service (docker compose up -d assistant) and set ENGINE_URL in .env, e.g. http://assistant:8000.',
+                    'engine' => 'Run the assistant service (docker compose up -d assistant, or --profile assistant-cpu without a GPU) and set ENGINE_URL in .env, e.g. http://assistant:8000.',
                 ][$p],
                 'test' => $test ? ['ok' => $test->ok, 'message' => $test->message, 'latency_ms' => $test->latency_ms, 'at' => $test->created_at?->toIso8601ZuluString()] : null,
             ];

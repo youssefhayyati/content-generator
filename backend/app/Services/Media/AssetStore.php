@@ -43,6 +43,23 @@ class AssetStore
         return $this->finish($user, $path, $mime, $name, $source, $meta);
     }
 
+    /** Store a renderer's file without loading a potentially large video into PHP memory. */
+    public function fromPath(User $user, string $sourcePath, string $mime, string $name, string $source, array $meta = []): Asset
+    {
+        $path = $this->directory($user).'/'.Str::random(32).'.'.$this->extension($mime);
+        $stream = @fopen($sourcePath, 'rb');
+        if (! $stream) {
+            throw new RuntimeException('The rendered media could not be opened.');
+        }
+        try {
+            Storage::disk('local')->put($path, $stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return $this->finish($user, $path, $mime, $name, $source, $meta);
+    }
+
     /**
      * A file made on this server (a cut, a mix, a download), moved into the library.
      *
@@ -56,23 +73,6 @@ class AssetStore
         if (! @rename($file, $disk->path($path))) {
             copy($file, $disk->path($path));
             @unlink($file);
-        }
-
-        return $this->finish($user, $path, $mime, $name, $source, $meta);
-    }
-
-    /** Store a renderer's file without loading a potentially large video into PHP memory. */
-    public function fromPath(User $user, string $sourcePath, string $mime, string $name, string $source, array $meta = []): Asset
-    {
-        $path = $this->directory($user).'/'.Str::random(32).'.'.$this->extension($mime);
-        $stream = @fopen($sourcePath, 'rb');
-        if (! $stream) {
-            throw new RuntimeException('The rendered media could not be opened.');
-        }
-        try {
-            Storage::disk('local')->put($path, $stream);
-        } finally {
-            fclose($stream);
         }
 
         return $this->finish($user, $path, $mime, $name, $source, $meta);

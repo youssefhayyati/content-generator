@@ -98,6 +98,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('clips/{clip}', [LinkClipController::class, 'show']);
     Route::post('clips/{clip}/retry', [LinkClipController::class, 'retry'])->middleware(['verified', 'throttle:ai']);
     Route::delete('clips/{clip}', [LinkClipController::class, 'destroy']);
+    // The highlight editor: subtitles, their look, and music, rendered again over a clean master.
+    Route::get('clips/fonts/{font}', [LinkClipController::class, 'font']);
+    Route::get('clips/{clip}/edit', [LinkClipController::class, 'edit']);
+    Route::get('clips/{clip}/master', [LinkClipController::class, 'master']);
+    Route::patch('clips/{clip}', [LinkClipController::class, 'update'])->middleware(['verified', 'throttle:ai']);
 
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);
@@ -238,6 +243,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('reposts/{repost}/fetch', [RepostController::class, 'fetch'])->middleware('throttle:20,1');
     Route::post('reposts/{repost}/permission', [RepostController::class, 'permission']);
     Route::post('reposts/{repost}/schedule', [RepostController::class, 'schedule']);
+    Route::patch('reposts/{repost}', [RepostController::class, 'update']);
     Route::delete('reposts/{repost}', [RepostController::class, 'destroy']);
     Route::post('reposts/{repost}/adapt', [RepostController::class, 'adapt'])->middleware(['verified', 'throttle:ai']);
 

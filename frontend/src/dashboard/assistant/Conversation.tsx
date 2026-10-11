@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type Ref } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, CheckCheck, ChevronRight, CircleAlert, FileText, Headphones, ImageOff, ListChecks, LoaderCircle, Mic, MicOff, Paperclip, Pencil, Play, Square, Volume2, VolumeX, Workflow, X } from 'lucide-react'
+import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, CheckCheck, ChevronRight, CircleAlert, FileText, Headphones, ImageOff, ListChecks, LoaderCircle, Mic, MicOff, Paperclip, Pencil, Play, Repeat2, Square, Volume2, VolumeX, Workflow, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
@@ -270,7 +270,7 @@ function Line({ item }: { item: LogItem }) {
 
 /* ------------------------------------------------------------------ */
 
-const REVIEW = new Set<Approval['kind']>(['schedule', 'time', 'version', 'lab_post'])
+const REVIEW = new Set<Approval['kind']>(['schedule', 'time', 'version', 'lab_post', 'repost'])
 const CLOSED: Record<Approval['status'], string> = {
   waiting: 'Needs your approval',
   changing: 'Being changed',
@@ -334,7 +334,7 @@ function Approvals() {
         ))}
         {current && (
           <Card key={current.id} x={current} label={`Review · ${done + 1} of ${done + open.length}`}>
-            <Preview x={current} />
+            {current.kind === 'repost' ? <RepostPreview x={current} /> : <Preview x={current} />}
             {current.detail && <p className="mt-2 text-[11.5px] text-accent-soft">{current.detail}</p>}
             <Answer x={current} yes="Approve" no="Skip" />
             {waiting.length > 1 && (
@@ -377,11 +377,31 @@ function Card({ x, label, children, ref }: { x: Approval; label: string; childre
       className={cn('rounded-lg border px-3.5 py-3', waiting ? 'border-accent/40 bg-accent/[0.07]' : x.status === 'approved' ? 'border-ok/25 bg-ok/[0.05]' : 'border-line bg-white/[0.02]')}
     >
       <p className={cn('flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]', waiting ? 'text-accent-soft' : x.status === 'approved' ? 'text-ok' : 'text-dim')}>
-        {x.kind === 'plan' ? <ListChecks className="size-3" /> : x.kind === 'run' ? <Play className="size-3" /> : x.kind === 'version' ? <BadgeCheck className="size-3" /> : <CalendarCheck className="size-3" />}
+        {x.kind === 'plan' ? <ListChecks className="size-3" /> : x.kind === 'run' ? <Play className="size-3" /> : x.kind === 'version' ? <BadgeCheck className="size-3" /> : x.kind === 'repost' ? <Repeat2 className="size-3" /> : <CalendarCheck className="size-3" />}
         {label}
       </p>
       {children}
     </motion.div>
+  )
+}
+
+/** What a repost's Approve books: its pictures as drawn, and its caption (the credit line comes on top). */
+function RepostPreview({ x }: { x: Approval }) {
+  const payload = x.payload ?? {}
+  const previews = (payload.previews as string[] | undefined) ?? []
+  return (
+    <>
+      <p className="mt-1.5 text-[12.5px] leading-snug">{x.text}</p>
+      <div className="mt-2 flex gap-2.5 rounded-md border border-line bg-white/[0.02] p-2">
+        {previews.slice(0, 3).map((src) => (
+          <img key={src} src={src} alt="" className="size-16 shrink-0 rounded object-cover" />
+        ))}
+        <div className="min-w-0">
+          <p className="line-clamp-4 whitespace-pre-wrap text-[11.5px] leading-snug text-muted">{String(payload.caption ?? '')}</p>
+          <p className="mt-1 text-[10.5px] text-dim">Credit: @{String(payload.author ?? '')} on X</p>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -474,7 +494,7 @@ function Answer({ x, yes, no }: { x: Approval; yes: string; no: string }) {
       <Btn size="sm" variant="subtle" icon={Pencil} onClick={() => setAsking(true)}>
         Change…
       </Btn>
-      <Btn size="sm" variant="primary" icon={Check} loading={a.booking.includes(x.id)} disabled={x.kind === 'schedule' && !x.payload} onClick={() => void a.approve(x)}>
+      <Btn size="sm" variant="primary" icon={Check} loading={a.booking.includes(x.id)} disabled={(x.kind === 'schedule' || x.kind === 'repost') && !x.payload} onClick={() => void a.approve(x)}>
         {yes}
       </Btn>
     </div>
