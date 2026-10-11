@@ -27,10 +27,9 @@ on. Use exactly those, nothing older.
 5. Tap "Next" (top right, or the arrow). On the filters / edit screen change nothing; if it asks to add
    music, skip it. Tap "Next" again.
 6. On the screen with "Write a caption..." / "Add a caption...", tap that box and type the caption exactly
-   as given, one line at a time: type line 1, press enter, type line 2, press enter, and so on, doing as many
-   lines as you can in one step. For an "(empty line)" just press enter. Do not press enter after the last
-   line. If a list of hashtag or name suggestions pops up while typing, ignore it and keep typing. Do not add,
-   fix or translate anything.
+   as given below, the way it says (a long one in pieces, one type action each). Never press enter. If a list
+   of hashtag or name suggestions pops up while typing, ignore it and keep typing. Do not add, fix or translate
+   anything.
 
 Caption:
 {{caption}}
@@ -41,8 +40,11 @@ Caption:
    (reels, Facebook, audience) appears, choose the option that just shares this post ("Share", "Not now").
 9. Wait until the home feed shows the post being uploaded and then finished ("Posting..." then gone,
    "Posted", or your new post at the top). If it says "Couldn't post" or "Try again", tap retry once.
-10. Stop on a screen that shows the new post (the feed with it at the top, or "Posted"): your last screenshot
-   is kept as the proof that it is up. Only if you can't tell, open your profile and look at the newest post.
+10. Then show it is up, on your own profile (the feed soon moves on to other people's posts): tap your profile
+   picture at the far right of the bottom bar and tap the newest post, top left of the grid. Check its caption
+   starts with the caption's first words, and stop there, with it open: your last screenshot is kept as the
+   proof that it is up. If it isn't there yet, wait a few seconds and look again (pull down to refresh); never
+   post it a second time.
 
 Report in one or two sentences whether the post is now published, or exactly where it stopped and what the
 screen said.

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowLeft, AudioWaveform, LayoutTemplate, LoaderCircle, Play, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, AudioWaveform, CircleAlert, CloudCheck, Hand, LayoutTemplate, LoaderCircle, Pencil, Play, Sparkles, X, Zap } from 'lucide-react'
 import { api, ApiError, type LabCatalog, type LabPayload, type LabPlan, type LabTemplate } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
@@ -9,14 +9,14 @@ import { Conversation } from '../assistant/Conversation'
 import { useAssistant } from '../assistant/store'
 import { useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
-import { Btn, Label, Modal, Skeleton, Toggle, inputClass } from '../ui'
+import { Btn, BusyBadge, Label, Modal, Skeleton, Toggle, inputClass } from '../ui'
 import { Canvas, canvasCenter } from './Canvas'
 import { TemplateBrowser } from './Gallery'
 import { useLeftLab } from './Home'
 import { Inspector } from './Inspector'
 import { Library } from './Library'
 import { costLine } from './look'
-import { newNodeId, useLab } from './useLab'
+import { newNodeId, useLab, type LabSave } from './useLab'
 
 /**
  * A Creative Lab project: the library of nodes (left), the canvas, and the selected node or the
@@ -50,6 +50,15 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
   useEffect(() => {
     if (data) setName(data.project.name)
   }, [data?.project.name])
+
+  // A canvas still without a name asks for one as it opens (once each time), so it isn't lost among the projects
+  const [askName, setAskName] = useState(false)
+  const asked = useRef<number | null>(null)
+  useEffect(() => {
+    if (!data || asked.current === id) return
+    asked.current = id
+    if (!data.project.name.trim() || data.project.name.trim() === UNTITLED) setAskName(true)
+  }, [data, id])
 
   // The assistant is there from the start, and knows which project is open, what's selected, and
   // whether it has control (it builds and runs on its own) to work on the same graph.
@@ -95,12 +104,13 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
     [data, lab, toast],
   )
 
-  const rename = async () => {
-    if (!data || name === data.project.name) return
+  const rename = async (to = name) => {
+    if (!data || to === data.project.name) return
     // An emptied name isn't saved: the one it has comes back.
-    if (!name.trim()) return setName(data.project.name)
+    if (!to.trim()) return setName(data.project.name)
+    setName(to.trim())
     try {
-      await api(`/projects/${id}`, { method: 'PATCH', body: { name: name.trim() } })
+      await api(`/projects/${id}`, { method: 'PATCH', body: { name: to.trim() } })
       invalidate()
     } catch (e) {
       // Back to the name it really has.
@@ -125,20 +135,26 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
   }
   if (!data || !catalog) return <Skeleton className="h-[calc(100dvh-140px)] rounded-xl" />
 
-  const running = Object.values(data.nodes).filter((n) => n.status === 'running' || n.status === 'queued').length
+  const active = Object.values(data.nodes).filter((n) => n.status === 'running' || n.status === 'queued')
+  // Queued behind nodes before them: they start by themselves once those finish.
+  const waiting = active.filter((n) => n.status === 'queued' && !!n.active?.waiting_for?.length).length
+  const running = active.length - waiting
+  const untitled = !name.trim() || name.trim() === UNTITLED
 
   return (
     <div className="-mx-4 -mt-2 flex h-[calc(100dvh-88px)] flex-col overflow-hidden rounded-xl border border-line bg-panel md:mx-0">
       {/* Bar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <Btn size="sm" variant="subtle" icon={ArrowLeft} onClick={() => navigate('/dashboard/studio')} aria-label="All projects" />
-        <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => void rename()} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} aria-label="Project name" className="min-w-0 max-w-[280px] flex-1 bg-transparent text-[14px] font-medium outline-none" />
-        {running > 0 && (
-          <span className="flex items-center gap-1.5 text-[11.5px] text-accent-soft">
-            <LoaderCircle className="size-3.5 animate-spin" />
-            {running} running
-          </span>
-        )}
+        {/* The name, plainly editable: a project not named yet asks for one, so it's easy to find again */}
+        <label className={cn('group flex min-w-0 max-w-[300px] flex-1 items-center gap-1.5 rounded-md border px-2 py-1 transition-colors focus-within:border-accent/60 focus-within:bg-white/[0.03]', untitled ? 'border-dashed border-accent/50' : 'border-transparent hover:border-line-2')} title="Rename the project">
+          <input value={name} onChange={(e) => setName(e.target.value)} onFocus={(e) => untitled && e.target.select()} onBlur={() => void rename()} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} placeholder="Name this canvas" aria-label="Project name" className="min-w-0 flex-1 bg-transparent text-[14px] font-medium outline-none placeholder:text-dim" />
+          <Pencil className={cn('size-3 shrink-0 transition-colors', untitled ? 'text-accent-soft' : 'text-dim group-hover:text-fg')} />
+        </label>
+        {untitled && <span className="hidden text-[11px] text-accent-soft md:inline">Name it to find it again</span>}
+        <SaveStatus save={lab.save} />
+        {running > 0 && <BusyBadge state="working" label={`${running} running`} />}
+        {waiting > 0 && <BusyBadge state="waiting" label={`${waiting} waiting`} title="Queued behind nodes that haven’t finished; they start by themselves" />}
         {!catalog.engine.up && <span className="hidden text-[11.5px] text-warn lg:inline" title={catalog.engine.error ?? ''}>The pod’s models are off: {catalog.engine.error}</span>}
         <div className="ml-auto flex items-center gap-1.5">
           <label className="mr-1 flex items-center gap-2 text-[12px] text-muted" title="Off: nothing runs until you press Run. On: nodes you’ve run once run again by themselves when what they use changes (quick, free ones only).">
@@ -194,10 +210,17 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
                 {side === 'assistant' || !selected ? (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <div className="space-y-2 border-b border-line px-4 py-3">
-                      <div className="flex items-center gap-3">
+                      {/* On or off at a glance: tinted with a badge when it has control, plain when it asks first */}
+                      <div className={cn('flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors duration-300', control ? 'border-accent/50 bg-accent/10' : 'border-line bg-white/[0.02]')}>
+                        <span className={cn('grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-300', control ? 'bg-accent/20 text-accent-soft' : 'bg-white/[0.05] text-dim')}>
+                          {control ? <Zap className="size-3.5" /> : <Hand className="size-3.5" />}
+                        </span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-[12.5px] font-medium">Let it take control</p>
-                          <p className="text-[11px] leading-snug text-dim">{control ? 'It builds and runs the nodes itself, slow and paid ones too. Scheduling stays yours.' : 'It builds what you ask, and asks before running anything slow or paid.'}</p>
+                          <p className="flex items-center gap-2 text-[12.5px] font-medium">
+                            Let it take control
+                            <span className={cn('rounded-full px-1.5 py-px font-mono text-[9.5px] uppercase tracking-wider', control ? 'bg-accent/20 text-accent-soft' : 'bg-white/[0.06] text-dim')}>{control ? 'On' : 'Off'}</span>
+                          </p>
+                          <p className="text-[11px] leading-snug text-dim">{control ? 'It builds and runs the nodes itself, slow and paid ones too. Scheduling stays yours.' : 'It builds what you ask, and asks you before running anything slow or paid.'}</p>
                         </div>
                         <Toggle on={control} onChange={setControl} label="Let the assistant take control" />
                       </div>
@@ -244,6 +267,10 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
           void a.say(`Build ${t.name.toLowerCase()} on this canvas, like the template's example: ${t.tagline}`)
         }}
       />
+      <NameOnOpen open={askName} onClose={() => setAskName(false)} onName={(n) => {
+        setAskName(false)
+        void rename(n)
+      }} />
       <SaveTemplate open={saving} onClose={() => setSaving(false)} projectId={id} defaultName={data.project.name} onSaved={() => void api<LabCatalog>('/lab/catalog').then(setCatalog).catch(() => {})} />
     </div>
   )
@@ -290,6 +317,64 @@ function RunAll({ plan, onClose, onRun }: { plan: LabPlan | null; onClose: () =>
         </div>
       )}
     </Modal>
+  )
+}
+
+/** The name FlowAI gives a project made without one (LabController). */
+export const UNTITLED = 'Untitled project'
+
+/** Asked as an untitled canvas opens: its name, or later (the name at the top of the canvas stays a click away). */
+function NameOnOpen({ open, onClose, onName }: { open: boolean; onClose: () => void; onName: (name: string) => void }) {
+  const [name, setName] = useState('')
+  useEffect(() => {
+    if (open) setName('')
+  }, [open])
+  return (
+    <Modal open={open} onClose={onClose} title="Name this canvas">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (name.trim()) onName(name)
+        }}
+        className="space-y-4"
+      >
+        <div>
+          <input autoFocus className={inputClass} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="e.g. Autumn menu launch" aria-label="Canvas name" />
+          <p className="mt-2 text-[11.5px] leading-snug text-dim">It doesn’t have a name yet. Everything on it is saved as you work; a name makes it easy to find with your projects later.</p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Btn type="button" variant="ghost" onClick={onClose}>
+            Later
+          </Btn>
+          <Btn type="submit" variant="primary" disabled={!name.trim()}>
+            Save name
+          </Btn>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** Every change is saved as it's made: this says so, and says when one wasn't. */
+function SaveStatus({ save }: { save: LabSave }) {
+  if (save.status === 'saving') {
+    return (
+      <span className="flex items-center gap-1.5 text-[11.5px] text-dim" aria-live="polite">
+        <LoaderCircle className="size-3 animate-spin" /> Saving…
+      </span>
+    )
+  }
+  if (save.status === 'failed') {
+    return (
+      <span className="flex items-center gap-1.5 text-[11.5px] text-fail" aria-live="polite" title="The canvas shows what is saved. Do that change again.">
+        <CircleAlert className="size-3" /> Last change not saved
+      </span>
+    )
+  }
+  return (
+    <span className="flex items-center gap-1.5 text-[11.5px] text-dim" aria-live="polite" title={save.at ? `Saved at ${new Date(save.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Every change is saved as you make it'}>
+      <CloudCheck className="size-3.5 text-ok" /> All changes saved
+    </span>
   )
 }
 

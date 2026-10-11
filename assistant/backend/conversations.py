@@ -203,6 +203,22 @@ class Conversation:
         live = sum(p["status"] in ("scheduled", "publishing", "submitted", "published") for p in posts)
         return {"posts": posts[:POSTS_LISTED], "scheduled": live}
 
+    def activity(self) -> dict | None:
+        """What is under way for it right now, for the list: working (making something, or posting it) or
+        waiting (for the user's OK, or for the phone to be free). Never saved: a restart ends it all."""
+        job = self.phone.job
+        if job and job.status == "awaiting approval":
+            return {"state": "waiting", "what": f"Waiting for your OK: {job.what}"}
+        making = [j for j in self.media.jobs.values() if j.kind in ("generate", "render") and j.status == "running"]
+        if making:
+            return {"state": "working", "what": making[0].label or making[0].progress or "Making it"}
+        if job and job.active:
+            return {"state": "working", "what": job.what[:1].upper() + job.what[1:]}
+        if self.phone.queue:
+            n = len(self.phone.queue)
+            return {"state": "waiting", "what": f"{n} post{'s' if n > 1 else ''} waiting for the phone"}
+        return None
+
     def dump(self) -> dict:
         from .flowai import dump_links  # flowai imports studio, which this module imports too
 
@@ -334,7 +350,7 @@ class ConversationStore:
         index = await asyncio.to_thread(_read_json, self._dir(owner) / "index.json")
         for (o, cid), conv in self.live.items():
             if o == owner and not conv.empty:
-                index[cid] = conv.summary()
+                index[cid] = {**conv.summary(), "activity": conv.activity()}
         return sorted(index.values(), key=lambda c: c.get("updated", ""), reverse=True)
 
     async def rename(self, owner: str, cid: str, title: str) -> Conversation | None:

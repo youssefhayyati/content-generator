@@ -7,6 +7,7 @@ use App\Enums\PostFormat;
 use App\Enums\PostStatus;
 use App\Http\Controllers\AssistantController;
 use App\Models\Account;
+use App\Models\Post;
 use App\Services\Publishing\PlatformSpecs;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -25,7 +26,7 @@ class SavePostRequest extends FormRequest
     public function rules(): array
     {
         // Picking a time by hand means it has to be in the future; the queue picks its own.
-        $scheduling = $this->input('status') === PostStatus::Scheduled->value && ! $this->boolean('queue');
+        $scheduling = $this->input('status') === PostStatus::Scheduled->value && ! $this->boolean('queue') && ! $this->boolean('now');
         // Any status but draft counts as the person's approval (PostController::fill), so the voice
         // assistant saves drafts only; the person schedules them on the Assistant page.
         $assistant = $this->byAssistant();
@@ -43,6 +44,8 @@ class SavePostRequest extends FormRequest
             'asset_ids' => ['nullable', 'array', 'max:35'],
             'asset_ids.*' => ['integer', 'distinct', Rule::exists('assets', 'id')->where('user_id', $this->user()->id)],
             'queue' => $assistant ? ['prohibited'] : ['sometimes', 'boolean'],
+            // Post now: the account's phone publishes it straight away (PostController::publishNow).
+            'now' => $assistant ? ['prohibited'] : ['sometimes', 'boolean'],
             'scheduled_at' => $assistant ? ['prohibited'] : ($scheduling ? ['required', 'date', 'after:now'] : ['nullable', 'date']),
         ];
     }
@@ -57,7 +60,7 @@ class SavePostRequest extends FormRequest
             'platforms.min' => 'Pick at least one platform.',
             'scheduled_at.required' => 'Pick a date and time to publish.',
             'scheduled_at.after' => 'That time has already passed. Pick one in the future.',
-            ...($this->byAssistant() ? array_fill_keys(['status.in', 'queue.prohibited', 'scheduled_at.prohibited'], self::ASSISTANT_DRAFTS) : []),
+            ...($this->byAssistant() ? array_fill_keys(['status.in', 'queue.prohibited', 'now.prohibited', 'scheduled_at.prohibited'], self::ASSISTANT_DRAFTS) : []),
         ];
     }
 
@@ -86,9 +89,18 @@ class SavePostRequest extends FormRequest
                     }
                 }
 
+                if ($this->boolean('now')) {
+                    $post = $this->route('post');
+                    if (! $account) {
+                        $validator->errors()->add('now', 'Pick the account to post from: its phone posts it.');
+                    } elseif (! $account->device_id && ! ($post instanceof Post && $post->device_id)) {
+                        $validator->errors()->add('now', "@{$account->handle} has no phone to post from. Connect one on the Phones page.");
+                    }
+                }
+
                 // Posts that a phone will publish on their own must pass the platform's spec first.
-                $scheduling = $this->input('status') === PostStatus::Scheduled->value || $this->boolean('queue');
-                if ($account?->automation && $scheduling && ! $validator->errors()->hasAny(['asset_ids', 'asset_ids.*'])) {
+                $scheduling = $this->input('status') === PostStatus::Scheduled->value || $this->boolean('queue') || $this->boolean('now');
+                if (($account?->automation || $this->boolean('now')) && $scheduling &&! $validator->errors()->hasAny(['asset_ids', 'asset_ids.*'])) {
                     $ids = (array) $this->input('asset_ids', []);
                     $assets = $this->user()->assets()->whereIn('id', $ids)->get()->sortBy(fn ($a) => array_search($a->id, $ids))->values();
                     $result = app(PlatformSpecs::class)->check($account->platform, $this->input('placement'), (string) $this->input('body'), $assets);

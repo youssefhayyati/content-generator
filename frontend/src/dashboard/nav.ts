@@ -2,6 +2,7 @@ import {
   AudioWaveform,
   CalendarClock,
   CalendarDays,
+  Clapperboard,
   Cpu,
   ChartColumn,
   Flame,
@@ -19,6 +20,7 @@ import {
   Shapes,
   Smartphone,
   UsersRound,
+  Wallet,
   Wand2,
   Workflow,
   type LucideIcon,
@@ -74,6 +76,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
       // One entry, two views: the canvas of nodes, and the one-off generators as its quick tools.
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2, also: [GENERATORS] },
+      // Highlights from a link: not a canvas node, so its own page.
+      { path: '/dashboard/clips', label: 'Highlights', icon: Clapperboard },
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
     ],
   },
@@ -106,7 +110,12 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Setup',
-    items: [{ path: '/dashboard/models', label: 'Models', icon: Cpu }, SETTINGS],
+    items: [
+      { path: '/dashboard/models', label: 'Models', icon: Cpu },
+      // What the models cost: billed by providers, and the pod's jobs at its hourly rate.
+      { path: '/dashboard/spending', label: 'Spending', icon: Wallet },
+      SETTINGS,
+    ],
   },
 ]
 

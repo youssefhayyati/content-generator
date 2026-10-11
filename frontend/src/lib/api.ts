@@ -106,6 +106,71 @@ export type AssetSound = {
 
 export type TimedWord = { text: string; start: number; end: number }
 
+export type LinkClip = {
+  id: number
+  batch_id: string | null
+  batch_index: number
+  batch_total: number
+  source_url: string
+  source_type: 'youtube' | 'article'
+  status: 'queued' | 'downloading' | 'reading' | 'analyzing' | 'writing' | 'rendering' | 'ready' | 'failed'
+  title: string | null
+  platform: 'instagram' | 'tiktok' | 'facebook' | 'youtube'
+  /** What the draft becomes: a reel or a story (Instagram, Facebook), a TikTok video, a YouTube Short. */
+  placement: 'reel' | 'story' | 'video' | 'short'
+  source_title: string | null
+  seconds: number
+  progress: number
+  start: number | null
+  end: number | null
+  reason: string | null
+  caption: string | null
+  asset: Asset | null
+  post_id: number | null
+  /** Ready with a video: its subtitles, look and music can be changed. */
+  editable: boolean
+  edited: boolean
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** How a highlight's subtitles look. `y` is where their middle sits, from the top (0) to the bottom (1), on 1080 × 1920. */
+export type ClipStyle = {
+  captions: boolean
+  font: string
+  size: number
+  color: string
+  highlight: string | null
+  outline: string
+  backdrop: 'outline' | 'box' | 'shadow' | 'none'
+  uppercase: boolean
+  words: number
+  y: number
+  title: boolean
+  title_text: string | null
+}
+
+export type ClipMusic = { asset_id: number | null; volume: number; original: number; asset?: Asset | null }
+
+/** `em`: the font's em per pixel of subtitle size (libass sizes by ascent + descent, the browser by the em). */
+export type ClipFont = { key: string; label: string; style: string; scale: number; em: number; url: string }
+
+/** GET /clips/{id}/edit */
+export type ClipEdit = {
+  clip: LinkClip
+  seconds: number
+  title: string | null
+  words: TimedWord[]
+  style: ClipStyle
+  defaults: ClipStyle
+  music: ClipMusic
+  /** The video without any text, to preview over; null for highlights made before editing existed. */
+  master_url: string | null
+  batch_ready: number
+  fonts: ClipFont[]
+}
+
 /** GET /assets/{id}/words */
 export type AssetWords = {
   words: TimedWord[]
@@ -190,6 +255,8 @@ export type Device = {
   paused: boolean
   last_seen_at: string | null
   screenshot_url: string | null
+  /** The team phone on the hackathon Phone API (watched and driven through it); absent for other phones. */
+  remote?: { online: boolean; busy: boolean }
   accounts: Array<{ id: number; platform: PlatformId; handle: string }>
   created_at: string
 }
@@ -255,6 +322,26 @@ export type PublishingUsage = {
   outcomes: Partial<Record<'confirmed' | 'failed' | 'uncertain', number>>
 }
 
+/** How a model's cost is known: a provider bills it, the pod's hourly rate estimates it, it's free, or nobody priced it. */
+export type Billing = 'billed' | 'estimated' | 'free' | 'unpriced'
+
+/** GET /spending?days=: what the AI cost over the last 7, 30 or 90 days. */
+export type Spending = {
+  days: number
+  total: number
+  billed: number
+  estimated: number
+  /** The same number of days before these. */
+  previous: number
+  calls: number
+  /** Calls on models with no price set: not in the totals. */
+  unpriced: number
+  pod: { hourly: number; seconds: number; cost: number }
+  daily: Array<{ date: string; billed: number; estimated: number }>
+  models: Array<{ id: string; label: string; where: string; billing: Billing; rate: string; calls: number; cost: number; seconds: number }>
+  uses: Array<{ label: string; cost: number; calls: number }>
+}
+
 /* ------------------------------------------------------------------ */
 /* Autonomy (mode B rules), reposts, comments                          */
 /* ------------------------------------------------------------------ */
@@ -289,21 +376,38 @@ export type AccountAutonomy = {
 
 export type PreviewItem = { kind: AutonomyAction; label: string; verdict: string }
 
-/** An X post picked for reuse on Instagram. */
+/** A post picked on X or Instagram for reuse on the other. */
 export type Repost = {
   id: number
+  source_platform: 'x' | 'instagram'
   source_url: string
   author: string
   source_text: string
+  /** The source's photos and video, saved to the library. */
+  media: Array<{ id: number; kind: 'image' | 'video' | 'audio'; url: string; poster_url: string | null; width?: number | null; height?: number | null }>
   permission: 'pending' | 'allowed' | 'denied'
   permission_note: string | null
-  status: 'captured' | 'adapted' | 'scheduled' | 'dropped'
+  /** adapting: picked with a placement, its takes are being written right after it was read. */
+  status: 'fetching' | 'failed' | 'captured' | 'adapting' | 'adapted' | 'scheduled' | 'dropped'
+  /** Where it goes (feed, reel, story, post), as picked with the link or on the preview. */
+  placement: 'feed' | 'reel' | 'story' | 'post' | null
+  /** A story's line, drawn on it when it's scheduled (stories show no caption). */
+  story_text: string | null
+  /** Why the source couldn't be read. */
+  error: string | null
   caption: string | null
   caption_with_credit: string | null
+  /** What will post: caption, credit and hashtags, within the target's limit. */
+  body: string | null
   hashtags: string[]
+  /** The adaptation's three takes: the caption is the first until the person picks another. */
+  options: Array<{ angle: 'faithful' | 'take' | 'punchy'; caption: string; hashtags: string[] }>
   attribution: boolean
   post_id: number | null
-  account: { id: number; platform: PlatformId; handle: string } | null
+  /** Its post's status, once scheduled: deleting the repost deletes the post too, unless it's out already. */
+  post_status: 'draft' | 'scheduled' | 'publishing' | 'submitted' | 'published' | 'failed' | null
+  /** posts_from_phone: a phone is linked and automation is on, so it goes out by itself at its time. */
+  account: { id: number; platform: PlatformId; handle: string; posts_from_phone: boolean; phone: 'ready' | 'automation_off' | 'none' } | null
   created_at: string
 }
 
@@ -526,6 +630,9 @@ export type ModelProvider = {
   services: Array<{ id: string; label: string; for: string; status: string | null; ok: boolean | null; hint: string | null; settings: EnvSetting[] }> | null
   setup: string
   test: { ok: boolean; message: string; latency_ms: number | null; at: string | null } | null
+  /** The assistant (engine only): whether it answers right now, and why not. */
+  live?: boolean | null
+  live_error?: string | null
 }
 
 export type Recipe = { label: string; body: string; needs: 'image' | null; steps: Array<'image' | 'video'> }
@@ -558,7 +665,17 @@ export type Generation = {
 
 export type CanvasNode = { id: string; type: 'note' | 'text' | 'asset' | 'generation'; x: number; y: number; text?: string | null; ref?: number | null }
 export type Canvas = { nodes: CanvasNode[]; edges: Array<{ from: string; to: string }>; view: { x: number; y: number; zoom: number } }
-export type Project = { id: number; name: string; nodes: number; generations: number; updated_at: string; canvas?: Canvas }
+export type Project = {
+  id: number
+  name: string
+  nodes: number
+  generations: number
+  updated_at: string
+  /** Nodes running now, and nodes queued behind ones before them that haven't finished. */
+  working: number
+  waiting: number
+  canvas?: Canvas
+}
 
 export type CampaignStage = 'brief' | 'planning' | 'plan_review' | 'producing' | 'adapting' | 'content_review' | 'scheduled'
 
@@ -873,7 +990,7 @@ export type LabNodeState = {
   versions?: number
   missing?: string[]
   /** unavailable: why its model can't run now (no key, not tested…), before anyone presses Run. */
-  estimate?: { seconds: number; cost: number | null; model: string | null; unavailable?: string | null }
+  estimate?: { seconds: number; cost: number | null; pod?: number; model: string | null; unavailable?: string | null }
   pinned?: boolean
   post?: LabPost
   source?: LabSource
@@ -889,7 +1006,7 @@ export type LabPayload = {
   message?: string
 }
 
-export type LabPlan = { nodes: Array<{ id: string; type: string; label: string; seconds: number; cost: number | null; model: string | null }>; seconds: number; cost: number | null; blocked?: string[] }
+export type LabPlan = { nodes: Array<{ id: string; type: string; label: string; seconds: number; cost: number | null; pod?: number; model: string | null }>; seconds: number; cost: number | null; pod?: number; blocked?: string[] }
 
 export type Page<T> = {
   data: T[]
@@ -996,6 +1113,12 @@ export async function api<T = unknown>(path: string, options: Options = {}): Pro
   const res = await send(path, options)
   if (res.status === 204) return undefined as T
   return (await res.json().catch(() => null)) as T
+}
+
+/** GET a binary reply (an image, a file) with its headers; failures throw like `api()`. */
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<{ blob: Blob; headers: Headers }> {
+  const res = await send(path, { signal })
+  return { blob: await res.blob(), headers: res.headers }
 }
 
 /**

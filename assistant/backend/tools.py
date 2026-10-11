@@ -57,6 +57,11 @@ async def run(name: str, arguments: dict, **context) -> str:
     missing = [k for k in schema["function"]["parameters"].get("required", []) if arguments.get(k) in (None, "")]
     if missing:
         return json.dumps({"error": f"{name} needs {' and '.join(missing)}; nothing was done"})
+    if not any(p.kind is p.VAR_KEYWORD for p in params.values()):
+        known = [k for k in schema["function"]["parameters"].get("properties", {})]
+        if unknown := [k for k in arguments if k not in params]:
+            return json.dumps({"error": f"{name} has no {', '.join(unknown)}; its inputs are "
+                                        f"{', '.join(known) or 'none'}. Nothing was done"})
     try:
         result = fn(**arguments, **{k: v for k, v in context.items() if k in params})
         if inspect.isawaitable(result):
@@ -261,8 +266,9 @@ async def transcribe_media(session, media: int | None = None):
 @tool(
     "dub_video",
     "Make the person in a video say other words: the words are read in their own voice, cloned from the video "
-    "(or in another voice), and a lip-sync model redraws their mouth to match. The result is a new video. It "
-    "runs in the background for a few minutes; you are told when it is ready.",
+    "(or in another voice), and a lip-sync model redraws their mouth to match. The result is a new video; on a "
+    "draft it takes the place of that slide's video. It runs in the background for a few minutes; you are told "
+    "when it is ready.",
     {
         "type": "object",
         "properties": {
@@ -273,12 +279,18 @@ async def transcribe_media(session, media: int | None = None):
             "voice": {"type": "string", "description": "Leave out for the speaker's own voice. Else a voice id "
                                                        "(find_voices, clone_voice), a description of a voice, or "
                                                        "'mine' for the one you speak in"},
+            "draft": {"type": "integer", "description": "Dub the video on this draft's slide instead: the result "
+                                                        "takes its place. A video on the draft on screen is "
+                                                        "replaced there anyway"},
+            "slide": {"type": "integer", "description": "Which slide of the draft (default 1)"},
         },
         "required": ["script"],
     },
 )
-async def dub_video(session, script: str, video: int | None = None, voice: str | None = None):
-    return await session.dub_video(video, script, voice)
+async def dub_video(session, script: str, video: int | None = None, voice: str | None = None,
+                    draft: int | None = None, slide: int | None = None, media: int | None = None):
+    # Models sometimes call the video "media", as in transcribe_media
+    return await session.dub_video(video if video is not None else media, script, voice, draft, slide)
 
 
 @tool(
@@ -291,7 +303,8 @@ async def dub_video(session, script: str, video: int | None = None, voice: str |
         "type": "object",
         "properties": {
             "face": {"type": "integer", "description": "Number of the picture with the face to use"},
-            "target": {"type": "integer", "description": "Number of the picture or video to put it on (or give draft)"},
+            "target": {"type": "integer", "description": "Number of the picture or video to put it on (or give draft). "
+                                                         "One on the draft on screen is replaced there"},
             "draft": {"type": "integer", "description": "Put it on this draft's slide instead: its picture or video is "
                                                         "changed and replaced"},
             "slide": {"type": "integer", "description": "Which slide of the draft (default 1)"},
@@ -606,7 +619,7 @@ async def show_draft(session, draft: int | None = None):
 # --- FlowAI: saving, finding and scheduling posts (backend/flowai.py) --------------
 
 FLOWAI_TOOLS = {"save_draft", "find_posts", "open_post", "find_assets", "use_assets", "schedule_post",
-                "find_campaigns", "open_campaign"}
+                "find_campaigns", "open_campaign", "fetch_x_post", "redesign_picture", "repost_to_instagram"}
 
 
 @tool(
@@ -726,6 +739,68 @@ async def use_assets(assets: list, session):
 )
 async def schedule_post(when: str, session, draft: int | None = None):
     return await session.flowai.schedule(draft, when)
+
+
+# Reposts from X to Instagram (backend/reposts.py)
+
+@tool(
+    "fetch_x_post",
+    "Bring a post from X here to repost it on Instagram: FlowAI reads its author, text and pictures from its link, "
+    "and the pictures get numbers here. Then redesign it before it goes anywhere.",
+    {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "The post's link, e.g. https://x.com/someone/status/123…"},
+            "account": {"type": "integer", "description": "The Instagram account it goes to (default: the only one)"},
+        },
+        "required": ["url"],
+    },
+)
+async def fetch_x_post(url: str, session, account: int | None = None):
+    from . import reposts
+    return await reposts.fetch(session.flowai, url, account)
+
+
+@tool(
+    "redesign_picture",
+    "Make a new picture for a repost with an image model in FlowAI, from a picture here as its reference (or from "
+    "the instruction alone). It runs in the background, usually under a minute; you are told its number when ready.",
+    {
+        "type": "object",
+        "properties": {
+            "instruction": {"type": "string", "description": "What the new picture looks like: subject, style, "
+                                                             "colours, mood; say to keep what matters from the original"},
+            "media": {"type": "integer", "description": "The picture's number here to start from (none: from words)"},
+            "model": {"type": "string", "enum": ["higgsfield/grok-image-2", "higgsfield/ideogram-4", "higgsfield/soul"],
+                      "description": "Default grok-image-2; ideogram-4 is good with words on the picture"},
+        },
+        "required": ["instruction"],
+    },
+)
+async def redesign_picture(instruction: str, session, media: int | None = None, model: str | None = None):
+    from . import reposts
+    return await reposts.redesign(session.flowai, instruction, media, model)
+
+
+@tool(
+    "repost_to_instagram",
+    "Ask the user to approve a redesigned repost: an Approve card on screen for the Instagram draft, which also "
+    "records that reusing the X post is allowed. Nothing is booked before they press it; you are told. Once "
+    "approved, the team's phone posts it on Instagram at that time by itself.",
+    {
+        "type": "object",
+        "properties": {
+            "repost": {"type": "integer", "description": "The repost number from fetch_x_post"},
+            "draft": _DRAFT,
+            "when": {"type": "string", "description": "\"now\" (default: within a few minutes) or a date and time in "
+                                                      "the user's time zone, e.g. 2026-10-16T09:00"},
+        },
+        "required": ["repost"],
+    },
+)
+async def repost_to_instagram(repost: int, session, draft: int | None = None, when: str | None = None):
+    from . import reposts
+    return await reposts.ask(session.flowai, repost, draft, when)
 
 
 # --- The team's phone: posting from its Instagram and X apps (backend/phone.py) ----

@@ -6,6 +6,7 @@ use App\Models\Asset;
 use App\Models\ConnectorTest;
 use App\Models\Generation;
 use App\Models\ModelEval;
+use App\Models\NodeRun;
 use App\Models\User;
 use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Media\HiggsfieldProvider;
@@ -396,7 +397,17 @@ class StudioGenerationTest extends TestCase
             ->assertOk()->assertJsonPath('name', 'Autumn')->assertJsonPath('canvas.nodes', []);
         $this->spa()->postJson("/api/projects/{$id}/lab/ops", ['ops' => [['op' => 'add', 'node' => ['id' => 'n1', 'type' => 'util.note', 'params' => ['text' => 'Hook ideas']]]]])
             ->assertOk()->assertJsonPath('canvas.nodes.0.id', 'n1');
-        $this->spa()->getJson('/api/projects')->assertJsonPath('0.nodes', 1);
+        $this->spa()->getJson('/api/projects')->assertJsonPath('0.nodes', 1)->assertJsonPath('0.working', 0)->assertJsonPath('0.waiting', 0);
+
+        // The list says when a canvas is busy: nodes running, and nodes queued behind ones before them.
+        $run = ['user_id' => $user->id, 'project_id' => $id, 'type' => 'util.note', 'version' => 1, 'inputs_hash' => 'h'];
+        NodeRun::create($run + ['node_id' => 'n1', 'status' => 'running']);
+        NodeRun::create($run + ['node_id' => 'n2', 'status' => 'queued', 'state' => ['after' => ['n1']]]);
+        NodeRun::create($run + ['node_id' => 'n3', 'status' => 'queued', 'state' => ['after' => ['n1']]]);
+        NodeRun::create($run + ['node_id' => 'n4', 'status' => 'succeeded']);
+        $this->spa()->getJson('/api/projects')->assertJsonPath('0.working', 1)->assertJsonPath('0.waiting', 2);
+        $this->spa()->getJson("/api/projects/{$id}")->assertJsonPath('working', 1)->assertJsonPath('waiting', 2);
+
         $this->actingAs(User::factory()->create())->spa()->getJson("/api/projects/{$id}")->assertForbidden();
     }
 }

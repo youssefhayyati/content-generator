@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Campaigns\Voice;
 use App\Services\Flows\Flows;
 use App\Services\PostQueue;
+use App\Services\Publishing\Publisher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -66,6 +67,7 @@ class PostController extends Controller
         $this->fill($post, $request);
         $post->save();
         $this->afterSave($post, $request);
+        $this->publishNow($post, $request);
 
         return PostResource::make($post)->response()->setStatusCode(201);
     }
@@ -84,6 +86,7 @@ class PostController extends Controller
         $this->fill($post, $request);
         $post->save();
         $this->afterSave($post, $request);
+        $this->publishNow($post, $request);
 
         return PostResource::make($post);
     }
@@ -140,6 +143,12 @@ class PostController extends Controller
             $post->scheduled_at = $slot;
         }
 
+        // Post now: due this minute, so if the phone is busy the scheduler sends it once it's free.
+        if ($request->boolean('now')) {
+            $post->status = PostStatus::Scheduled;
+            $post->scheduled_at = now();
+        }
+
         $post->published_at = $post->status === PostStatus::Published
             ? ($post->published_at ?? now())
             : null;
@@ -151,6 +160,23 @@ class PostController extends Controller
             $post->approved_at = now();
             $post->approved_by = $request->user()->id;
         }
+    }
+
+    /**
+     * Post now: a person pressing it is the go-ahead, so the phone starts right away even when the
+     * account's automated publishing is off. A busy or paused phone leaves it due; the scheduler
+     * starts it as soon as it can (only with automation on, so the Retry button covers the rest).
+     */
+    private function publishNow(Post $post, SavePostRequest $request): void
+    {
+        if (! $request->boolean('now')) {
+            return;
+        }
+        $latest = $post->runs()->latest('id')->first();
+        if (! $latest?->isRunning()) {
+            rescue(fn () => app(Publisher::class)->open($post->fresh(), byHand: true), null, report: false);
+        }
+        $post->refresh()->load(['account', 'assets', 'latestRun']);
     }
 
     private function afterSave(Post $post, SavePostRequest $request): void

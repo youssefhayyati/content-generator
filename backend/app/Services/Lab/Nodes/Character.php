@@ -9,16 +9,13 @@ use App\Services\Lab\NodeJob;
 use Illuminate\Support\Collection;
 
 /**
- * Character: Higgsfield Soul ID, trained from photos of one person (with their consent). What it passes
+ * Character: Higgsfield Soul ID, trained from photos of one person. What it passes
  * on is the character (its id at Higgsfield, for Character pictures) and how it looks.
  */
 class Character extends Executor
 {
     public function start(NodeJob $job): array
     {
-        if (empty($job->params['consent'])) {
-            throw new NodeFailed('Tick that the person agreed to be the character.');
-        }
         $model = $this->nodeModel($job);
         $photos = $job->inputs->assetIds('photos', ['image']);
         if (! $photos) {

@@ -333,8 +333,11 @@ class VoiceSession:
                 "\n\nYou can make pictures and videos with ComfyUI workflows by calling generate_media. It runs "
                 "in the background, and the user watches its progress live on screen (each stage the model goes "
                 "through, its steps and the time): say one short sentence such as 'Making it now, you can follow "
-                "it on screen', and never say it is ready until you are told. When it is, it is already on the "
-                "user's screen, so just say so briefly. Pictures take seconds; videos take several minutes, so "
+                "it on screen', and never say it is ready until you are told. When it is, the page already shows it, "
+                "and you are told where: on a draft's slide, or in the Media tab when it went into no draft; say "
+                "so briefly, and never that it is on a draft unless you were told it is. For a picture or video "
+                "meant for a post, pass the draft (and slide) so it goes there. Pictures take seconds; videos "
+                "take several minutes, so "
                 "tell the user. If they ask how far it has got, media_status has its stage, steps and percent. "
                 "Write the prompt "
                 "in English as a rich visual description (subject, setting, style, lighting, camera, and motion "
@@ -353,8 +356,10 @@ class VoiceSession:
                 "\n\nTo make the person in a video say other words, call dub_video with the new words: they are "
                 "read in the person's own voice, cloned from the video, and their lips are redrawn to match. Keep "
                 "the words about as long as what they say now (transcribe_media says what that is and how many "
-                "words fit); translating is fine. It takes a few minutes in the background, its progress live on "
-                "screen: say one short sentence, and you are told when it is ready.")
+                "words fit); translating is fine. A video on the draft on screen is replaced there by its dub (undo_draft "
+                "goes back); for another draft's video pass draft (and slide). It takes a few minutes in the "
+                "background, its progress live on screen: say one short sentence, and you are told when it is "
+                "ready and where it is.")
         if self.m.faceswap:
             prompt += (
                 "\n\nTo put the face from one picture onto the person in another picture or in a video, call "
@@ -509,6 +514,11 @@ class VoiceSession:
         else:
             text = (f"\n\nThis conversation is in drafts mode: posts are made as drafts here, in the chat. The user "
                     f"is {where} now. The other way is canvas mode (a Creative Lab project, built from nodes).")
+            if self.lab is not None:  # the drafts page isn't open: what's made there isn't in front of them
+                text += (" Drafts, pictures and videos made in this mode are on the drafts page, which the user "
+                         "isn't looking at: when one is made or ready, never say it is on their screen; say it is on "
+                         "the drafts page (the Open the drafts link above the chat). If they wanted it on the "
+                         "canvas, offer to switch to canvas mode.")
         return text + (
             " The user picks with the Drafts | Canvas switch above the chat, or by asking (\"do it on the canvas\", "
             "\"as a flow\", \"old school\", \"as drafts\"): then call set_mode first. When you start a new piece of "
@@ -1206,12 +1216,21 @@ class VoiceSession:
         item.meta = {**(item.meta or {}), "speaker": voice}
         return voice
 
-    async def dub_video(self, video=None, script: str = "", voice: str | None = None) -> dict:
-        tts, script = self.m.tts, " ".join(str(script or "").split())
+    async def dub_video(self, video=None, script: str = "", voice: str | None = None, draft=None, slide=None) -> dict:
+        """draft (and slide): dub that slide's video, the result in its place. Without one, a video shown on
+        the draft on screen is replaced there too; any other video's dub is a new number in the Media tab."""
+        tts, script, then = self.m.tts, " ".join(str(script or "").split()), None
         try:
             if not script:
                 raise dub.DubError("dub_video needs the words to say (script)")
-            item = self.media.item(video, "video")
+            if draft not in (None, ""):
+                d, n, current = self.studio.slide_media(draft, slide)
+                item = self.media.item(current, "video")
+            else:
+                item = self.media.item(video, "video")
+                d, n = self.studio.showing(item.id) or (None, None)
+            if d is not None:
+                then = self.studio.into_slide(d, n)
             if not self.m.lipsync:
                 raise dub.DubError("lip sync is off (LIPSYNC_URL is not set)")
             info = await asyncio.to_thread(dub.check, item.path)
@@ -1245,9 +1264,12 @@ class VoiceSession:
             job.detail = f"read by {speaker['name']} (voice {speaker['id']}), {seconds:.1f} seconds of speech"
             return [(data, f"dub-{item.id}.mp4", await asyncio.to_thread(dub.meta, data))]
 
-        started = self.media.pipeline(f"Dubbing video {item.id}", "lip sync", script, "video", work)
-        return {**started, "video": item.id, "voice": chosen["name"] if chosen else "the speaker's own, cloned "
-                "from the video", "video_seconds": info["duration"]}
+        started = self.media.pipeline(f"Dubbing video {item.id}", "lip sync", script, "video", work, then=then)
+        reply = {**started, "video": item.id, "voice": chosen["name"] if chosen else "the speaker's own, cloned "
+                 "from the video", "video_seconds": info["duration"]}
+        if then and "error" not in started:
+            reply.update(draft=d, slide=n, note="the result takes the slide's place by itself when it is ready")
+        return reply
 
     async def swap_face(self, face=None, target=None, draft=None, slide=None, every: bool = False) -> dict:
         """The face from one picture put on the person in another picture or a video: a number, or a draft's
@@ -1263,6 +1285,9 @@ class VoiceSession:
                 then = self.studio.into_slide(d, n)
             elif target not in (None, ""):
                 into = self.media.item(target, "image", "video")
+                if shown := self.studio.showing(into.id):
+                    d, n = shown
+                    then = self.studio.into_slide(d, n)
             else:
                 raise dub.DubError("swap_face needs what to put the face on: a picture or video number (target), "
                                    "or a draft (and its slide)")

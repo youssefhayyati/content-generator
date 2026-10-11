@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AudioLines, Bot, Hand, Plus, ShieldCheck, Smartphone, Trash2, UsersRound } from 'lucide-react'
+import { AudioLines, Bot, Hand, Pencil, Plus, ShieldCheck, Smartphone, Trash2, UsersRound } from 'lucide-react'
 import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Account, type Device } from '../../lib/api'
@@ -72,8 +72,29 @@ export default function Accounts() {
   )
 }
 
+/** Asks first, then deletes the account; true when it's gone. */
+function useRemoveAccount() {
+  const toast = useToast()
+  const invalidate = useInvalidate()
+  return async (account: Account) => {
+    if (!window.confirm(`Delete @${account.handle}? Its posts stay in the library.`)) return false
+    try {
+      await api(`/accounts/${account.id}`, { method: 'DELETE' })
+      invalidate()
+      toast(`@${account.handle} removed. Its posts stay in the library.`)
+      return true
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t remove it.', 'error')
+      return false
+    }
+  }
+}
+
+const iconBtn = 'grid size-8 shrink-0 place-items-center rounded-md border border-line-2 text-muted transition-colors hover:border-accent-soft/60 hover:text-fg'
+
 function AccountCard({ account: a, i, onOpen, onVoice, onAutonomy }: { account: Account; i: number; onOpen: () => void; onVoice: () => void; onAutonomy: () => void }) {
   const { navigate } = useRouter()
+  const removeAccount = useRemoveAccount()
   return (
     <motion.article
       initial={{ opacity: 0, y: 10 }}
@@ -112,6 +133,18 @@ function AccountCard({ account: a, i, onOpen, onVoice, onAutonomy }: { account: 
           className="grid size-8 shrink-0 place-items-center rounded-md border border-line-2 text-muted transition-colors hover:border-accent-soft/60 hover:text-fg"
         >
           <ShieldCheck className="size-3.5" strokeWidth={1.75} />
+        </button>
+        <button type="button" onClick={onOpen} title="Edit account" aria-label={`Edit @${a.handle}`} className={iconBtn}>
+          <Pencil className="size-3.5" strokeWidth={1.75} />
+        </button>
+        <button
+          type="button"
+          onClick={() => void removeAccount(a)}
+          title="Delete account"
+          aria-label={`Delete @${a.handle}`}
+          className={cn(iconBtn, 'hover:border-fail/60 hover:text-fail')}
+        >
+          <Trash2 className="size-3.5" strokeWidth={1.75} />
         </button>
       </div>
       <dl className="mt-auto grid grid-cols-3 border-t border-line text-[11.5px]">
@@ -207,16 +240,9 @@ function AccountFields({ account, devices, onDone }: { account: Account | null; 
     }
   }
 
+  const removeAccount = useRemoveAccount()
   const remove = async () => {
-    if (!account) return
-    try {
-      await api(`/accounts/${account.id}`, { method: 'DELETE' })
-      invalidate()
-      toast(`@${account.handle} removed. Its posts stay in the library.`)
-      onDone()
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Couldn’t remove it.', 'error')
-    }
+    if (account && (await removeAccount(account))) onDone()
   }
 
   return (

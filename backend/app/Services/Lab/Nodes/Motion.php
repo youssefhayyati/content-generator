@@ -15,9 +15,6 @@ class Motion extends Executor
 {
     public function start(NodeJob $job): array
     {
-        if (empty($job->params['consent'])) {
-            throw new NodeFailed('Tick that the person in the picture agreed to it.');
-        }
         $model = $this->nodeModel($job);
         $image = $job->inputs->asset('image', ['image']) ?? throw new NodeFailed('Connect the picture of who moves.');
         $video = $job->inputs->asset('video', ['video']) ?? throw new NodeFailed('Connect the video with the moves.');

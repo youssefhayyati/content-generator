@@ -26,6 +26,9 @@ A draft posted from the team's phone (backend/phone.py) goes on FlowAI's record 
 does: it's saved as a post while the phone posts it, then the run is added with the screenshot the
 phone ended on (POST /api/posts/{post}/phone-run), which publishes the post at the time it went up,
 so the calendar and the Publishing page show it with its proof.
+
+A post from X comes in through FlowAI's Reposts (backend/reposts.py): read by its link, redesigned here, and
+booked for Instagram on the person's Approve, which also records that reuse is allowed.
 """
 
 import asyncio
@@ -58,6 +61,7 @@ STAGES = {"brief": "brief being written", "planning": "being planned", "plan_rev
           "producing": "in production", "adapting": "being adapted to each account",
           "content_review": "posts waiting for approval (gate 6B)", "scheduled": "scheduled"}
 BRIEF_CHARS = 2500  # of the campaign's brief, in the prompt
+LAB_WATCH_S = 30 * 60  # how long a Creative Lab run is watched for its end
 QUEUE_WORDS = ("queue", "slot")  # "when" meaning the account's next free posting time
 OUTCOMES = {"posted": "confirmed", "unsure": "uncertain", "failed": "failed"}  # a phone post's, as FlowAI's run
 
@@ -178,8 +182,9 @@ class Linked:
 class Approval:
     """Something the user has to approve on screen before it happens: a time for a post (schedule),
     a campaign version (version, FlowAI's gate 6B) or a time for one (time); a plan of what is about to be
-    made (plan), running Creative Lab nodes (run) or a time for a Post node (lab_post). The last three
-    aren't about a draft (draft 0)."""
+    made (plan), running Creative Lab nodes (run) or a time for a Post node (lab_post); or a redesigned post
+    from another network (repost: allowing its reuse and booking it, backend/reposts.py). Plan, run and
+    lab_post aren't about a draft (draft 0)."""
     id: int
     draft: int
     version: int  # the draft as the user saw it when asked
@@ -191,6 +196,8 @@ class Approval:
     kind: str = "schedule"
     campaign: int | None = None
     variant: int | None = None
+    repost: int | None = None
+    payload: dict = field(default_factory=dict)  # a repost's caption, pictures and time, as asked
     project: int | None = None  # run, lab_post: the Creative Lab project
     node: str | None = None  # run, lab_post: the node
     items: list = field(default_factory=list)  # plan, run: what it makes or runs, a line each
@@ -281,6 +288,8 @@ class FlowAISession:
         self.error = ""  # why FlowAI could not be read
         self.tz = timezone.utc  # the user's, from the page
         self.lock = asyncio.Lock()  # one save at a time: the Save button and the assistant may race
+        self.watching: set[asyncio.Task] = set()  # Creative Lab runs, until they end (_watch_run)
+        self.reposts: dict[int, dict] = {}  # posts picked from X (reposts.py): repost id -> author, status
         self.attach(conv)
 
     def attach(self, conv: "Conversation"):
@@ -375,7 +384,7 @@ class FlowAISession:
             "the account's voice. Accounts (a draft "
             "goes to the one on its platform):\n")
             + ("\n".join(accounts) or "- none: the user has to add an Instagram or X account in FlowAI first")
-            + ("" if canvas else self._campaign_prompt())
+            + ("" if canvas else self._campaign_prompt()) + reposts.prompt(self)
         )
 
     def _campaign_prompt(self) -> str:
@@ -642,7 +651,7 @@ class FlowAISession:
             raise StudioError(f"draft {d.id} has changes that aren't saved to the campaign: save it, and once the "
                               "user approves the new version, book the time")
         if link.status != "approved":
-            raise StudioError(f"its version isn't approved yet (gate 6B): the user approves it on screen first")
+            raise StudioError("its version isn't approved yet (gate 6B): the user approves it on screen first")
         text = f"Book {self._what(link)} on {self._local(at)}"
         a = await self._approval(d, text, when=at, kind="time", campaign=link.campaign, variant=link.variant)
         return {"approval": a.id, "status": "waiting for the user to approve it on screen", "asks": text,
@@ -766,6 +775,9 @@ class FlowAISession:
             await self._send_approval(a)
             self.remember(f"The user declined on screen: {a.text}. Nothing was " +
                           ("approved." if a.kind == "version" else "scheduled."))
+            return
+        if a.kind == "repost":
+            await reposts.decide(self, a, done)
             return
         if a.kind != "schedule":
             await self._decide_campaign(a, d, done)
@@ -1002,8 +1014,8 @@ class FlowAISession:
                 return
             a.status, a.detail = "approved", "Running"
             await self._send_approval(a)
-            self.notify(f"The user approved it on screen and it's running: {a.text}. Look with lab_graph when "
-                        "it's done; say in a few words that it started.")
+            self.notify(f"The user approved it on screen and it's running: {a.text}. You are told when it "
+                        "ends; say in a few words that it started.")
             return
         # lab_post: only the person can schedule a Post node, so the page does it with their own session
         if not done:
@@ -1024,7 +1036,37 @@ class FlowAISession:
         if n and n["type"] == "finish.post" and (n.get("params") or {}).get("when", "draft") != "draft":
             await self.client.request("POST", f"/api/projects/{project}/lab/ops",
                                       json={"ops": [{"op": "set", "id": node, "params": {"when": "draft"}}]})
+        plan = await self.client.get(f"/api/projects/{project}/lab/nodes/{node}/plan")
         await self.client.request("POST", f"/api/projects/{project}/lab/nodes/{node}/run", json={"upstream": True})
+        ids = [n["id"] for n in plan.get("nodes") or [] if n.get("id")] or [node]
+        task = asyncio.create_task(self._watch_run(project, node, ids))
+        self.watching.add(task)
+        task.add_done_callback(self.watching.discard)
+
+    async def _watch_run(self, project: int, node: str, ids: list[str]):
+        """Tells the assistant when a node it ran (and the ones it waited on) has finished, and how it went:
+        else it is never told, and can't say what was made."""
+        conv, began, seen = self.conv, asyncio.get_running_loop().time(), False
+        while (waited := asyncio.get_running_loop().time() - began) < LAB_WATCH_S:
+            await asyncio.sleep(3)
+            try:
+                nodes = (await self.client.get(f"/api/projects/{project}/lab/state", rev=-1)).get("nodes") or {}
+            except Exception:
+                continue
+            states = {i: nodes.get(i) or {} for i in ids}
+            if any(s.get("status") in ("queued", "running") for s in states.values()):
+                seen = True
+                continue
+            if not seen and waited < 15:  # not queued yet
+                continue
+            failed = [f"{i}: {(s.get('failed') or {}).get('error') or 'failed'}" for i, s in states.items()
+                      if s.get("status") == "failed"]
+            conv.notify(f"Creative Lab: running {node} finished" + (f", but these failed: {'; '.join(failed)}"
+                        if failed else "") + ". The canvas shows it. Look with lab_graph at what it made, then tell "
+                        "the user in one or two short sentences.")
+            return
+        conv.notify(f"Creative Lab: {node} is still running after {LAB_WATCH_S // 60} minutes. Tell the user "
+                    "briefly; lab_graph shows where it is.")
 
     async def _approval(self, d: Draft, text: str, **fields) -> Approval:
         changed = False
@@ -1100,11 +1142,12 @@ class FlowAISession:
         """when (UTC, or None for the queue) and payload let a page book the post itself; with campaign and
         variant, approve a campaign version (kind version) or book a time for it (kind time)."""
         saved = self.saved.get(a.draft) if a.kind == "schedule" else None
+        payload = saved.payload if saved else a.payload if a.kind == "repost" else None
         return dict(type="approval", id=a.id, draft=a.draft, post=a.post, text=a.text, status=a.status,
                     detail=a.detail, when=a.when.isoformat() if a.when else None, kind=a.kind,
-                    campaign=a.campaign, variant=a.variant, project=a.project, node=a.node, items=a.items,
-                    takes=a.takes, cost=a.cost, preview=a.preview,
-                    payload=saved.payload if saved and a.status == "waiting" else None)
+                    campaign=a.campaign, variant=a.variant, repost=a.repost, project=a.project, node=a.node,
+                    items=a.items, takes=a.takes, cost=a.cost, preview=a.preview,
+                    payload=payload if payload and a.status == "waiting" else None)
 
     def _linked_event(self, d: Draft) -> dict:
         link = self.linked[d.id]
@@ -1128,3 +1171,7 @@ class FlowAISession:
         return {"saved": [self._saved_event(drafts[i]) for i in self.saved if i in drafts],
                 "linked": [self._linked_event(drafts[i]) for i in self.linked if i in drafts],
                 "approvals": [self._approval_event(a) for a in self.approvals.values()]}
+
+
+# Reposts from X: picked, redesigned and booked after the person's OK (reposts.py imports this module)
+from . import reposts  # noqa: E402

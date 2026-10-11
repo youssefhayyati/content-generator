@@ -58,6 +58,12 @@ class LimitAssistantToken
         'POST api/projects/{project}/lab/run-all',
         'POST api/lab/youtube/inspect',
         'GET api/lab/youtube/{source}',
+        // Reposts: it picks a post by its link and redesigns its pictures. Allowing reuse and
+        // scheduling it stay the person's, on the Approve card.
+        'GET api/reposts',
+        'POST api/reposts',
+        'POST api/generations',
+        'GET api/generations/{generation}',
     ];
 
     public function handle(Request $request, Closure $next): Response

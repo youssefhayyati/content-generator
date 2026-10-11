@@ -13,7 +13,7 @@ import { useAssistant } from '../assistant/store'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
-import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger } from '../ui'
+import { Btn, BusyBadge, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger, inputClass } from '../ui'
 import { TemplateBrowser, TemplateSheet, TemplateStrip } from './Gallery'
 import { confirm } from '../confirm'
 
@@ -33,6 +33,7 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
   const panel = useRef<HTMLElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
+  const [naming, setNaming] = useState(false)
 
   // A fresh conversation where the assistant asks what to make; below the projects on narrower screens, so it comes up.
   const newPost = () => {
@@ -52,10 +53,11 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
       setBusy(null)
     }
   }
-  const blank = async () => {
+  const blank = async (name: string) => {
+    setNaming(false)
     setBusy('blank')
     try {
-      const p = await api<LabPayload>('/lab/projects', { method: 'POST', body: {} })
+      const p = await api<LabPayload>('/lab/projects', { method: 'POST', body: { name: name.trim() || null } })
       navigate(studio(p.project.id))
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'The project couldn’t be made.')
@@ -90,7 +92,7 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
               <Label className="mb-3">Make a post</Label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <StartCard icon={Plus} title="New post" meta="no questions" body="Tell the assistant what you want, a post, a reel or a story, and it makes it. No campaign to set up." onClick={newPost} busy={a.switching} primary />
-                <StartCard icon={SquareDashed} title="Blank canvas" meta="no brief for now" body="Put the nodes yourself. A brief can be added later, as a node." onClick={() => void blank()} busy={busy === 'blank'} />
+                <StartCard icon={SquareDashed} title="Blank canvas" meta="no brief for now" body="Put the nodes yourself. A brief can be added later, as a node." onClick={() => setNaming(true)} busy={busy === 'blank'} />
               </div>
             </div>
             <div>
@@ -114,7 +116,40 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
       </div>
 
       <PickCampaign open={picking} onClose={() => setPicking(false)} />
+      <NameCanvas open={naming} onClose={() => setNaming(false)} onCreate={(name) => void blank(name)} />
     </div>
+  )
+}
+
+/** A blank canvas gets its name first (it can't be made without one), so it's easy to find again with the projects. */
+function NameCanvas({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: (name: string) => void }) {
+  const [name, setName] = useState('')
+  useEffect(() => {
+    if (open) setName('')
+  }, [open])
+  return (
+    <Modal open={open} onClose={onClose} title="Name your canvas">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (name.trim()) onCreate(name)
+        }}
+        className="space-y-4"
+      >
+        <div>
+          <input autoFocus className={inputClass} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="e.g. Autumn menu launch" aria-label="Canvas name" />
+          <p className="mt-2 text-[11.5px] leading-snug text-dim">It’s saved as you work, under this name with your projects, so you can come back to it any time. You can rename it from the top of the canvas.</p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Btn type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn type="submit" variant="primary" disabled={!name.trim()}>
+            Create canvas
+          </Btn>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -230,10 +265,16 @@ export function useLeftLab() {
 function MadeAsDrafts() {
   const a = useAssistant()
   const { navigate } = useRouter()
-  useEffect(() => {
-    if (a.conn === 'online') a.refreshConversations()
-  }, [a.conn])
   const list = a.conversations.filter((c) => c.drafts > 0 && c.mode !== 'canvas')
+  const busy = list.some((c) => c.activity)
+  useEffect(() => {
+    if (a.conn !== 'online') return
+    a.refreshConversations()
+    // While something is being made or posted for one of them, check back so the badge goes when it's done.
+    if (!busy) return
+    const t = window.setInterval(() => a.refreshConversations(), 4000)
+    return () => window.clearInterval(t)
+  }, [a.conn, busy])
   if (!list.length) return null
   const open = (id: string, draft?: number) => {
     a.openConversation(id, draft)
@@ -247,6 +288,7 @@ function MadeAsDrafts() {
           <div key={c.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-panel p-4 transition-colors hover:border-line-2">
             <button type="button" onClick={() => open(c.id)} className="group flex items-start justify-between gap-3 text-left">
               <span className="truncate text-[14px] font-medium">{c.title}</span>
+              {c.activity && <BusyBadge state={c.activity.state} title={c.activity.what} className="ml-auto" />}
               <ArrowUpRight className="size-4 shrink-0 text-dim transition-transform duration-300 group-hover:rotate-45 group-hover:text-fg" strokeWidth={1.75} />
             </button>
             {!!c.posts?.length && (
@@ -371,10 +413,18 @@ function StartFrom() {
 }
 
 export function LabProjects() {
-  const { data: projects, error } = useApi<Project[]>('/projects')
+  const { data: projects, error, setData } = useApi<Project[]>('/projects')
   const { navigate } = useRouter()
   const invalidate = useInvalidate()
   const toast = useToast()
+  const busy = !!projects?.some((p) => p.working || p.waiting)
+
+  // While a canvas has nodes running or waiting, check back every few seconds so the badges stay true.
+  useEffect(() => {
+    if (!busy) return
+    const t = window.setInterval(() => api<Project[]>('/projects').then(setData).catch(() => {}), 4000)
+    return () => window.clearInterval(t)
+  }, [busy, setData])
 
   if (!projects && error) return <EmptyState icon={FolderKanban} title="The projects couldn’t be loaded" body={error.message || 'Reload the page to try again.'} />
   if (!projects) return <Skeleton className="h-[160px] rounded-xl" />
@@ -394,6 +444,11 @@ export function LabProjects() {
           <button type="button" onClick={() => navigate(studio(p.id))} className="absolute inset-0 rounded-xl" aria-label={`Open ${p.name}`} />
           <span className="flex items-start justify-between gap-3">
             <span className="truncate text-[14px] font-medium">{p.name}</span>
+            {p.working > 0 ? (
+              <BusyBadge state="working" title={`${p.working} node${p.working === 1 ? '' : 's'} running${p.waiting ? `, ${p.waiting} waiting for them` : ''}`} className="ml-auto" />
+            ) : p.waiting > 0 ? (
+              <BusyBadge state="waiting" title={`${p.waiting} node${p.waiting === 1 ? '' : 's'} waiting for nodes before them`} className="ml-auto" />
+            ) : null}
             <ArrowUpRight className="size-4 shrink-0 text-dim transition-transform duration-300 group-hover:rotate-45 group-hover:text-fg" strokeWidth={1.75} />
           </span>
           <span className="mt-6 flex items-center gap-2 font-mono text-[10.5px] text-dim">

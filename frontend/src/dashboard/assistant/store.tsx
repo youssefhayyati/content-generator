@@ -119,11 +119,13 @@ export type Approval = {
   /** 0 for a plan, a run or a Post node's time. */
   draft: number
   /** schedule: a time for a post. version: a changed campaign version (gate 6B). time: a time for one.
-   * plan: what is about to be made. run: Creative Lab nodes to run. lab_post: a time for a Post node's post. */
-  kind: 'schedule' | 'version' | 'time' | 'plan' | 'run' | 'lab_post'
+   * plan: what is about to be made. run: Creative Lab nodes to run. lab_post: a time for a Post node's post.
+   * repost: a redesigned X post for Instagram (reuse allowed and booked in one click). */
+  kind: 'schedule' | 'version' | 'time' | 'plan' | 'run' | 'lab_post' | 'repost'
   post: number | null
   campaign: number | null
   variant: number | null
+  repost?: number | null
   text: string
   /** changing: the person asked for a change (detail says what); it comes back as a new one. */
   status: 'waiting' | 'changing' | 'approved' | 'declined' | 'failed' | 'outdated'
@@ -159,6 +161,8 @@ export type ConversationSummary = {
   posts?: Array<{ draft: number; title: string; what: string; thumb: { url: string; kind: 'image' | 'video' } | null; status: string; when: string | null }>
   /** How many are scheduled or out. */
   scheduled?: number
+  /** What's under way for it right now (only while the assistant has it open). */
+  activity?: { state: 'working' | 'waiting'; what: string } | null
 }
 /** A voice the assistant can speak in (assistant/backend/voicestudio.py): a ready one, or one from the voice server's catalog. */
 export type Voice = {
@@ -222,7 +226,8 @@ export type CurrentConversation = {
   project: number | null
 }
 /** A numbered picture or video in the conversation. */
-export type Picture = { id: number; kind: 'image' | 'video'; name: string; source: string; url: string; workflow: string; prompt: string }
+/** job: the generation, dub or face swap that made it, if any. */
+export type Picture = { id: number; kind: 'image' | 'video'; name: string; source: string; url: string; workflow: string; prompt: string; job: number | null }
 /** A picture, video, dub or face swap being made: where it is now (stage, its detail in text, share done 0..1 when
  * known) and the stages it went through, each with when it began (ms). status: running, failed, or done for a moment. */
 export type Job = { id: number; label: string; started: number; status: string; text: string; stage: string; share: number | null; log: JobStage[] }
@@ -421,6 +426,12 @@ export function describe(name: string, a: Record<string, unknown>): string {
       return 'Saving to FlowAI'
     case 'schedule_post':
       return 'Asking you to approve the time'
+    case 'fetch_x_post':
+      return 'Bringing the post from X'
+    case 'redesign_picture':
+      return a.media != null ? `Redesigning picture ${a.media}` : 'Making a new picture'
+    case 'repost_to_instagram':
+      return 'Asking you to approve the repost'
     case 'find_posts':
       return 'Looking through your posts'
     case 'open_post':
@@ -446,6 +457,16 @@ export function describe(name: string, a: Record<string, unknown>): string {
     default:
       return name.replaceAll('_', ' ')
   }
+}
+
+/** Where what a job made is seen once it is ready: the draft on screen if it went in there (its media are in place
+ * by now: the draft is sent before the job is done), else the Media tab when it went into no draft. One that went
+ * into another draft isn't brought up: the assistant says where it is (studio.py: _made). */
+function showMade(s: State, job: number): Partial<State> {
+  const made = new Set(s.pictures.filter((p) => p.job === job).map((p) => p.id))
+  if (!made.size) return {}
+  const draft = Object.values(s.drafts).find((d) => d.slides.some((sl) => sl.media != null && made.has(sl.media)))
+  return !draft ? { tab: 'media' } : draft.id === s.current ? { tab: 'draft' } : {}
 }
 
 function reduce(s: State, a: Action): State {
@@ -583,6 +604,7 @@ function onEvent(s: State, m: AssistantEvent): State {
         url: assistantUrl(String(m.url)),
         workflow: String(m.workflow ?? ''),
         prompt: String(m.prompt ?? ''),
+        job: m.job == null ? null : Number(m.job),
       }
       const next = { ...s, pictures: [...s.pictures.filter((p) => p.id !== pic.id), pic] }
       return pic.source === 'upload' && !m.replay ? push(next, { kind: 'note', text: `You attached picture ${pic.id}.`, tone: 'info' }) : next
@@ -601,7 +623,10 @@ function onEvent(s: State, m: AssistantEvent): State {
       if (!before) return s
       const jobs = { ...s.jobs }
       if (m.status === 'cancelled') delete jobs[id]
-      else if (m.status === 'done') jobs[id] = { ...before, status: 'done', share: 1, text: String(m.text ?? '') } // shown done for a moment
+      else if (m.status === 'done') {
+        jobs[id] = { ...before, status: 'done', share: 1, text: String(m.text ?? '') } // shown done for a moment
+        if (!m.replay) return { ...s, jobs, ...showMade(s, id) }
+      }
       else if (m.status === 'failed') jobs[id] = { ...before, status: 'failed', text: String(m.text ?? '') }
       else {
         // A new stage starts a new line of its log
@@ -623,7 +648,8 @@ function onEvent(s: State, m: AssistantEvent): State {
       const isNew = !s.drafts[d.id]
       // Quiet: news about a draft in the background (its video list), not one to show
       if (m.quiet && !isNew) return { ...s, drafts: { ...s.drafts, [d.id]: d } }
-      return { ...s, drafts: { ...s.drafts, [d.id]: d }, current: d.id, tab: isNew ? 'draft' : s.tab }
+      // Not quiet: the assistant is showing it (a change, a new draft), so it's brought up even from another tab
+      return { ...s, drafts: { ...s.drafts, [d.id]: d }, current: d.id, tab: m.replay && !isNew ? s.tab : 'draft' }
     }
     case 'saved':
       return { ...s, saved: { ...s.saved, [Number(m.draft)]: m as unknown as Saved } }
@@ -934,13 +960,19 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   const approve = useCallback(
     async (a: Approval) => {
-      if (a.kind === 'schedule' && !a.payload) return
+      if ((a.kind === 'schedule' || a.kind === 'repost') && !a.payload) return
       // A plan or a run is the assistant's to start, once the person said yes.
       if (a.kind === 'plan' || a.kind === 'run') return link.send({ type: 'approve', id: a.id, conversation: conversation.current })
       setBooking((b) => [...b, a.id])
       try {
         // Done with the person's own session: they are the one approving it.
-        if (a.kind === 'lab_post') await scheduleNode(a, timezone.current)
+        if (a.kind === 'repost') {
+          const p = a.payload as { caption: string; asset_ids: number[]; note: string; placement?: string }
+          // A time that passed while the card waited: the next round instead.
+          const at = a.when && Date.parse(a.when) > Date.now() + 60_000 ? a.when : new Date(Date.now() + 90_000).toISOString()
+          await api(`/reposts/${a.repost}/permission`, { method: 'POST', body: { decision: 'allowed', note: p.note, attribution: true } })
+          await api(`/reposts/${a.repost}/schedule`, { method: 'POST', body: { caption: p.caption, asset_ids: p.asset_ids, scheduled_at: at, placement: p.placement } })
+        } else if (a.kind === 'lab_post') await scheduleNode(a, timezone.current)
         else if (a.kind === 'version') await api(`/campaigns/${a.campaign}/variants/${a.variant}/approve`, { method: 'POST' })
         else if (a.kind === 'time') await api(`/campaigns/${a.campaign}/variants/${a.variant}/times`, { method: 'POST', body: { at: a.when } })
         else await api(`/posts/${a.post}`, { method: 'PUT', body: { ...a.payload, status: 'scheduled', ...(a.when ? { scheduled_at: a.when } : { queue: true }) } })
@@ -983,6 +1015,10 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           if (to) window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: to }))
           break
         }
+        case 'lab_changed':
+          // The assistant changed or ran a Creative Lab project: its canvas looks again now (useLab).
+          window.dispatchEvent(new CustomEvent('flowai:lab-changed', { detail: Number(m.project) }))
+          break
         case 'lab_open':
           // The assistant made a Creative Lab project: show it (Dashboard listens and navigates).
           window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: `/dashboard/studio?project=${Number(m.project)}` }))

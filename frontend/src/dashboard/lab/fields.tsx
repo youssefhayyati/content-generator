@@ -3,9 +3,9 @@ import { Brush, Check, Eraser, ImagePlus, Plus, Undo2, X } from 'lucide-react'
 import { api, ApiError, uploadFiles, type Asset, type LabCatalog, type LabField, type LabMoment, type LabNode } from '../../lib/api'
 import { Link } from '../../lib/router'
 import { cn } from '../../lib/cn'
-import { PlatformIcon } from '../../components/ui/PlatformIcon'
 import { TextOverlay, type TextItem } from './TextOverlay'
 import { LabVoicePicker } from './VoicePicker'
+import { fmtMoney } from './look'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
 import { Btn, Label, Modal, Select, Toggle, inputClass, DateTimeInput, ColorInput } from '../ui'
@@ -257,7 +257,7 @@ function ModelSelect({ id, list, value, onChange }: { id: string; list: LabCatal
         <option value="">Best available{picked ? ` (${picked.label})` : ''}</option>
         {list.map((m) => (
           <option key={m.id} value={m.id} disabled={!m.available}>
-            {m.label} · {m.price === 0 ? (m.provider === 'pod' ? 'free on your pod' : 'free') : m.price ? `$${m.price.toFixed(2)}` : m.reach}
+            {m.label} · {m.price === 0 ? (m.provider === 'pod' ? 'free on your pod' : 'free') : m.price ? fmtMoney(m.price) : m.reach}
             {!m.available ? ' (unavailable)' : ''}
           </option>
         ))}
@@ -516,13 +516,5 @@ function PaintModal({ image, onClose, onSave }: { image: Asset; onClose: () => v
         </div>
       </div>
     </Modal>
-  )
-}
-
-export function AccountChip({ platform, handle }: { platform: string; handle: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[12px]">
-      <PlatformIcon id={platform as never} className="size-3.5" />@{handle}
-    </span>
   )
 }

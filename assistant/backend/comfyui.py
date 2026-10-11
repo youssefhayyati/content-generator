@@ -197,9 +197,6 @@ class ComfyClient:
         except ValueError:
             raise ComfyError(f"unexpected answer from the ComfyUI pod for {path}") from None
 
-    async def health(self) -> dict:
-        return await self._json("GET", "/health")
-
     async def run(self, name: str, inputs: dict) -> dict:
         """Queues a job. Returns {"prompt_id", "seed", "ignored_keys", ...} or {"status": "setting_up"}."""
         return await self._json("POST", "/run", json={**inputs, "name": name, "wait": False})

@@ -29,6 +29,7 @@ use App\Http\Controllers\InboxNoteController;
 use App\Http\Controllers\InspirationController;
 use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LabController;
+use App\Http\Controllers\LinkClipController;
 use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
 use App\Http\Controllers\OnboardingController;
@@ -44,6 +45,7 @@ use App\Http\Controllers\RepostController;
 use App\Http\Controllers\SocialAccountController;
 use App\Http\Controllers\SoundController;
 use App\Http\Controllers\SpecController;
+use App\Http\Controllers\SpendingController;
 use App\Http\Controllers\StormGuardController;
 use App\Http\Controllers\TrendController;
 use App\Http\Controllers\WritingController;
@@ -90,6 +92,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // The voice assistant's session: a token it works with as this user (drafts only).
     Route::post('assistant/session', [AssistantController::class, 'session']);
 
+    // Turn a YouTube video or article link into a captioned vertical draft.
+    Route::get('clips', [LinkClipController::class, 'index']);
+    Route::post('clips', [LinkClipController::class, 'store'])->middleware(['verified', 'throttle:ai']);
+    Route::get('clips/{clip}', [LinkClipController::class, 'show']);
+    Route::post('clips/{clip}/retry', [LinkClipController::class, 'retry'])->middleware(['verified', 'throttle:ai']);
+    Route::delete('clips/{clip}', [LinkClipController::class, 'destroy']);
+    // The highlight editor: subtitles, their look, and music, rendered again over a clean master.
+    Route::get('clips/fonts/{font}', [LinkClipController::class, 'font']);
+    Route::get('clips/{clip}/edit', [LinkClipController::class, 'edit']);
+    Route::get('clips/{clip}/master', [LinkClipController::class, 'master']);
+    Route::patch('clips/{clip}', [LinkClipController::class, 'update'])->middleware(['verified', 'throttle:ai']);
+
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);
     Route::get('analytics', AnalyticsController::class);
@@ -108,10 +122,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Where posts go: accounts, and the phones that publish to them.
     Route::apiResource('accounts', AccountController::class);
+    Route::get('devices/scan', [DeviceController::class, 'scan']);
     Route::apiResource('devices', DeviceController::class)->except('show');
     Route::post('devices/{device}/pause', [DeviceController::class, 'pause']);
     Route::post('devices/{device}/resume', [DeviceController::class, 'resume']);
     Route::get('devices/{device}/screenshot', [DeviceController::class, 'screenshot']);
+    Route::get('devices/{device}/live', [DeviceController::class, 'live']);
+    Route::post('devices/{device}/control', [DeviceController::class, 'control']);
+    Route::post('devices/{device}/stream', [DeviceController::class, 'stream']);
 
     // The publishing engine: the records, the stop button, the operator's recovery moves,
     // and the token the automation service signs its calls with.
@@ -134,6 +152,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // The studio: models, generators, projects and recipes.
     Route::get('models', [ModelController::class, 'index']);
     Route::get('models/evals', [ModelController::class, 'evals']);
+    // What the AI cost: billed by providers, and the pod's jobs at its hourly rate.
+    Route::get('spending', SpendingController::class);
     Route::post('models/evals', [ModelController::class, 'runEvals'])->middleware(['verified', 'throttle:ai']);
     Route::post('models/test/{provider}', [ModelController::class, 'test'])->middleware('throttle:10,1');
     Route::get('generations', [GenerationController::class, 'index']);
@@ -220,8 +240,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Repost from X to Instagram: pick, record permission, adapt, credit, schedule.
     Route::get('reposts', [RepostController::class, 'index']);
     Route::post('reposts', [RepostController::class, 'store']);
+    Route::post('reposts/{repost}/fetch', [RepostController::class, 'fetch'])->middleware('throttle:20,1');
     Route::post('reposts/{repost}/permission', [RepostController::class, 'permission']);
     Route::post('reposts/{repost}/schedule', [RepostController::class, 'schedule']);
+    Route::patch('reposts/{repost}', [RepostController::class, 'update']);
     Route::delete('reposts/{repost}', [RepostController::class, 'destroy']);
     Route::post('reposts/{repost}/adapt', [RepostController::class, 'adapt'])->middleware(['verified', 'throttle:ai']);
 

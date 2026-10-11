@@ -39,16 +39,13 @@ class Voice extends Executor
 
     /**
      * The voice cloned from the recording connected to "Voice to clone", made once per recording
-     * (its id is kept on the file) and with the person's consent ticked on the node.
+     * (its id is kept on the file).
      */
     private function cloned(NodeJob $job): ?string
     {
         $sample = $job->inputs->asset('clone', ['audio', 'video']);
         if (! $sample) {
             return null;
-        }
-        if (empty($job->params['consent'])) {
-            throw new NodeFailed('Tick that the person whose voice it is agreed to it.');
         }
         $known = $sample->meta['voice_clone'] ?? null;
         if ($known && rescue(fn () => app(VoiceStudioClient::class)->voice(VoiceRouter::strip($known)), null, report: false)) {

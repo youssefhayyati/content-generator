@@ -89,7 +89,7 @@ class SoundController extends Controller
         ]);
         $file = $request->file('audio');
         try {
-            $heard = $listener->file($file->getRealPath(), $request->input('language'), maxSeconds: 150);
+            $heard = app(UsageMeter::class)->within($request->user(), null, 'listen', fn () => $listener->file($file->getRealPath(), $request->input('language'), maxSeconds: 150));
         } catch (GenerationFailed $e) {
             abort(503, $e->getMessage());
         } catch (\RuntimeException) {

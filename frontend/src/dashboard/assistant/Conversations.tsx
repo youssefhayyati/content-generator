@@ -7,7 +7,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { STAGE_LABEL } from '../campaign/shared'
 import { fmtDay, fmtRelative, useApi } from '../data'
-import { Btn, inputClass, Modal, Segmented, Skeleton } from '../ui'
+import { Btn, BusyBadge, inputClass, Modal, Segmented, Skeleton } from '../ui'
 import { useAssistant, type ConversationSummary } from './store'
 
 /** The top of the conversation panel: which conversation this is, and the way to the others. */
@@ -225,6 +225,7 @@ function Row({ c, i, current, onOpen }: { c: ConversationSummary; i: number; cur
             <span className="block truncate text-[12.5px] font-medium">{c.title}</span>
             {c.preview && <span className="mt-0.5 line-clamp-1 text-[11.5px] leading-snug text-muted">{c.preview}</span>}
             <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] text-dim">
+              {c.activity && <BusyBadge state={c.activity.state} title={c.activity.what} className="font-sans" />}
               <span>{fmtRelative(c.updated)}</span>
               {c.drafts > 0 && <span>{c.drafts === 1 ? '1 draft' : `${c.drafts} drafts`}</span>}
               {c.pictures > 0 && <span>{c.pictures === 1 ? '1 picture' : `${c.pictures} pictures`}</span>}

@@ -23,6 +23,7 @@ LIPSYNC_API_KEY set, every call but /health needs it as a bearer token.
 from __future__ import annotations
 
 import gc
+import hmac
 import math
 import os
 import shutil
@@ -71,7 +72,7 @@ class Cancelled(Exception):
 
 
 def auth(authorization: str = Header(default="")):
-    if API_KEY and authorization != f"Bearer {API_KEY}":
+    if API_KEY and not hmac.compare_digest(authorization.encode(), f"Bearer {API_KEY}".encode()):
         raise HTTPException(401, "a bearer token (LIPSYNC_API_KEY) is needed")
 
 

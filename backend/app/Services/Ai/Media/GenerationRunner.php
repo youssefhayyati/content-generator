@@ -7,6 +7,7 @@ use App\Models\Generation;
 use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Ai\Models\Recipes;
+use App\Services\Ai\Pricing;
 use App\Services\Ai\UsageMeter;
 use App\Services\Campaigns\Pipeline;
 use App\Services\Lab\Engine;
@@ -137,11 +138,20 @@ class GenerationRunner
             return;
         }
 
-        [$provider, $name] = explode('/', $generation->model, 2);
-        $price = (config("ai.providers.{$provider}.models") ?? [])[$name]['price'] ?? null;
-        $cost = $price ? $price * count($ids) : 0;
-        $this->usage->within($user, $generation, 'studio', fn () => $this->usage->record($provider, $generation->model, 0, 0, $cost));
+        // Billed by what it made (a video by its seconds), or for the pod by how long it held the GPU.
+        [$provider] = explode('/', $generation->model, 2);
+        $ran = $generation->started_at ? round($generation->started_at->diffInSeconds(now())) : 0.0;
+        $seconds = $generation->kind === 'video' ? (float) ($generation->params['duration'] ?? 0) : 0.0;
+        $priced = Pricing::run($provider, $generation->model, count($ids), $seconds, $ran);
+        $purpose = match (true) {
+            (bool) $generation->node_run_id => 'lab',
+            (bool) $generation->campaign_item_id => 'campaign',
+            default => 'studio',
+        };
+        $this->usage->within($user, $generation, $purpose, fn () => $this->usage->record($provider, $generation->model, 0, 0, $priced['cost'], $priced['billing'], $priced['billing'] === Pricing::ESTIMATED ? $ran : 0));
 
+        // The generation's own cost is what a provider bills: the pod's estimate lives in Spending.
+        $cost = $priced['billing'] === Pricing::BILLED ? $priced['cost'] : 0;
         $generation->update(['status' => 'succeeded', 'output_asset_ids' => $ids, 'cost' => $cost, 'finished_at' => now()]);
         app(Recipes::class)->advance($generation);
         $this->report($generation);

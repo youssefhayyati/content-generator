@@ -32,6 +32,7 @@ services:
     environment:
       API_ORIGIN: http://api:8000
       ASSISTANT_ORIGIN: http://assistant:8000
+      PHONE_BRIDGE_ORIGIN: http://phone-bridge:8004
     # Installs packages on the first start and whenever package-lock.json changes
     command: sh -c '[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci --no-audit --no-fund; exec npx vite --host 0.0.0.0 --port 5173 --strictPort'
     ports:
@@ -105,7 +106,7 @@ services:
       TTS_DEVICE: cpu
       TTS_DTYPE: float32
     ports:
-      - "${ASSISTANT_PORT:-8003}:8000"
+      - "127.0.0.1:${ASSISTANT_PORT:-8003}:8000"
     volumes:
       - assistant-models:/cache
       - assistant-media:/app/media
@@ -113,6 +114,28 @@ services:
       - assistant-data:/app/data
     depends_on:
       - api
+    restart: unless-stopped
+
+  # Live phone screens for the Phones page (phone-bridge/server.js): scrcpy's H.264 video from a
+  # phone plugged into this machine, and touches back, through the host's adb server. The Vite
+  # proxy serves it at /phone-bridge/. It checks the API's signed tickets with APP_KEY, read
+  # from the stack's .env. On :8006 (8004 is music's, 8005 lipsync's).
+  phone-bridge:
+    image: node:22-alpine
+    working_dir: /app
+    command: node server.js
+    volumes:
+      - ./phone-bridge:/app:ro
+      - type: bind
+        source: ./.env
+        target: /laravel/.env
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      ADB_SERVER_HOST: host.docker.internal
+    ports:
+      - "127.0.0.1:${PHONE_BRIDGE_PORT:-8006}:8004"
     restart: unless-stopped
 
   # Songs for the assistant's videos: ACE-Step 1.5 (MIT), written from a description of the music
@@ -165,8 +188,8 @@ services:
   mailpit:
     image: axllent/mailpit
     ports:
-      - "${MAILPIT_UI_PORT:-8025}:8025"
-      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
 
   # Local text models, free and private, at http://ollama:11434 from the API.
   # Pull a model once: docker compose exec ollama ollama pull llama3.1:8b

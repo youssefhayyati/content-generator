@@ -14,6 +14,7 @@ import Assistant from './pages/Assistant'
 import Automations from './pages/Automations'
 import Calendar from './pages/Calendar'
 import Campaigns from './pages/Campaigns'
+import Clips from './pages/Clips'
 import Comments from './pages/Comments'
 import Create from './pages/Create'
 import Flows from './pages/Flows'
@@ -29,6 +30,7 @@ import Phones from './pages/Phones'
 import Publishing from './pages/Publishing'
 import Reposts from './pages/Reposts'
 import Settings from './pages/Settings'
+import Spending from './pages/Spending'
 import Showcase from './pages/Showcase'
 import Studio from './pages/Studio'
 import { pageLabel } from './nav'
@@ -43,6 +45,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/accounts': Accounts,
   '/dashboard/assistant': Assistant,
   '/dashboard/studio': Studio,
+  '/dashboard/clips': Clips,
   '/dashboard/generate': Generators,
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
@@ -54,6 +57,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/flows': Flows,
   '/dashboard/analytics': Analytics,
   '/dashboard/models': Models,
+  '/dashboard/spending': Spending,
   '/dashboard/phones': Phones,
   '/dashboard/publishing': Publishing,
   '/dashboard/reposts': Reposts,

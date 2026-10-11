@@ -25,11 +25,14 @@ class Listening
     public function asset(Asset $asset, ?string $language = null, ?callable $progress = null): array
     {
         $known = $asset->meta['transcript'] ?? null;
-        if (! empty($known['words'])) {
+        // Heard before by the model that listens now: kept. By another (older ones were this server's rough
+        // Whisper base, which named no model), it's heard again by the better one.
+        $model = $this->listener->model();
+        if (! empty($known['words']) && ($known['model'] ?? 'sound/whisper') === $model) {
             return ['text' => (string) ($known['text'] ?? ''), 'words' => $known['words'], 'language' => $known['language'] ?? null, 'duration' => (float) ($known['duration'] ?? $asset->duration ?? 0)];
         }
         $heard = $this->file(Media::path($asset), (float) ($asset->duration ?? 0), $language, $progress);
-        $asset->update(['meta' => [...$asset->meta ?? [], 'transcript' => $heard]]);
+        $asset->update(['meta' => [...$asset->meta ?? [], 'transcript' => [...$heard, 'model' => $model]]]);
 
         return $heard;
     }

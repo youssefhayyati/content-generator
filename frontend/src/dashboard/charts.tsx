@@ -82,13 +82,17 @@ export function ColumnChart({
   height = 150,
   caption,
   unit = 'posts',
+  format,
 }: {
   data: Array<{ label: string; full: string; value: number; current?: boolean }>
   height?: number
   caption: string
   unit?: string
+  /** How a value reads (money, say): in place of "3 posts". */
+  format?: (value: number) => string
 }) {
   const [ref, width] = useWidth<HTMLDivElement>(300)
+  const say = (v: number) => (format ? format(v) : `${v} ${v === 1 ? unit.replace(/s$/, '') : unit}`)
   const [hover, setHover] = useState<number | null>(null)
   const max = Math.max(1, ...data.map((d) => d.value))
   const yMax = Math.ceil(max / niceStep(max)) * niceStep(max)
@@ -111,7 +115,7 @@ export function ColumnChart({
               key={d.label + i}
               tabIndex={0}
               role="img"
-              aria-label={`${d.full}: ${d.value} ${unit}`}
+              aria-label={`${d.full}: ${say(d.value)}`}
               onPointerEnter={() => setHover(i)}
               onPointerLeave={() => setHover(null)}
               onFocus={() => setHover(i)}
@@ -132,7 +136,7 @@ export function ColumnChart({
               )}
               {i === peak && d.value > 0 && (
                 <text x={x + barW / 2} y={plotH - h - 7} textAnchor="middle" className="fill-fg font-mono text-[10.5px]">
-                  {d.value}
+                  {format ? format(d.value) : d.value}
                 </text>
               )}
               <text
@@ -150,11 +154,11 @@ export function ColumnChart({
       {hover !== null && (
         <Tip
           left={Math.min(width - 150, Math.max(0, hover * slot + slot / 2 - 75))}
-          value={`${data[hover].value} ${data[hover].value === 1 ? unit.replace(/s$/, '') : unit}`}
+          value={say(data[hover].value)}
           label={data[hover].full}
         />
       )}
-      <SrTable caption={caption} rows={data.map((d) => [d.full, d.value])} />
+      <SrTable caption={caption} rows={data.map((d) => [d.full, format ? format(d.value) : d.value])} />
     </div>
   )
 }
@@ -307,10 +311,12 @@ export function BarList({
   rows,
   caption,
   unit = 'posts',
+  format,
 }: {
   rows: Array<{ key: string; label: ReactNode; name: string; value: number }>
   caption: string
   unit?: string
+  format?: (value: number) => string
 }) {
   const [hover, setHover] = useState<string | null>(null)
   const max = Math.max(1, ...rows.map((r) => r.value))
@@ -324,7 +330,7 @@ export function BarList({
           <li
             key={r.key}
             tabIndex={0}
-            aria-label={`${r.name}: ${r.value} ${unit}, ${Math.round((r.value / total) * 100)}%`}
+            aria-label={`${r.name}: ${format ? format(r.value) : `${r.value} ${unit}`}, ${Math.round((r.value / total) * 100)}%`}
             onPointerEnter={() => setHover(r.key)}
             onPointerLeave={() => setHover(null)}
             onFocus={() => setHover(r.key)}
@@ -344,7 +350,7 @@ export function BarList({
                 />
               </span>
               <span className="w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg">
-                {hover === r.key ? `${Math.round((r.value / total) * 100)}%` : r.value}
+                {hover === r.key ? `${Math.round((r.value / total) * 100)}%` : format ? format(r.value) : r.value}
               </span>
             </span>
           </li>

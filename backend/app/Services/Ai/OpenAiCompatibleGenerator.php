@@ -211,6 +211,15 @@ class OpenAiCompatibleGenerator implements TextGenerator
             throw new GenerationFailed('Couldn’t reach the model. Is the '.($this->provider === 'ollama' ? 'Ollama server' : 'gateway').' running?');
         }
 
+        // Ollama refuses reasoning_effort outright for models that can't think (llama3.2, gemma…),
+        // which would fail every call that asks for an effort; ask again without it.
+        if ($response->status() === 400 && isset($body['reasoning_effort'])
+            && str_contains((string) $response->json('error.message', ''), 'does not support thinking')) {
+            unset($body['reasoning_effort']);
+
+            return $this->send($body, $stream);
+        }
+
         if ($response->status() === 401 || $response->status() === 403) {
             throw new GenerationFailed('The '.$this->provider.' rejected the key.');
         }

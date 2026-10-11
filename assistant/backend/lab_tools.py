@@ -269,6 +269,7 @@ async def lab_edit(ops: list, session, project: int | None = None):
         payload = await client.request("POST", f"/api/projects/{pid}/lab/ops", json={"ops": expanded})
     except Exception as exc:
         return {"error": str(exc)}
+    await session.try_send(type="lab_changed", project=pid)  # the canvas shows it now, not at its next look
     out = _summary(payload)
     out["results"] = payload.get("results")
     return out
@@ -299,7 +300,8 @@ async def lab_run(node: str, session, project: int | None = None):
         await session.flowai.run_node(pid, node)
     except Exception as exc:
         return {"error": str(exc)}
-    return {"started": names, "takes": takes, "cost": cost, "note": "it runs in the background; look again with lab_graph"}
+    await session.try_send(type="lab_changed", project=pid)
+    return {"started": names, "takes": takes, "cost": cost, "note": "it runs in the background, live on the canvas; you are told when it ends"}
 
 
 @tool(
@@ -350,9 +352,11 @@ async def lab_schedule(node: str, when: str, session, project: int | None = None
 )
 async def lab_stop(node: str, session, project: int | None = None):
     try:
-        await _client(session).request("POST", f"/api/projects/{_project(session, project)}/lab/nodes/{node}/stop")
+        pid = _project(session, project)
+        await _client(session).request("POST", f"/api/projects/{pid}/lab/nodes/{node}/stop")
     except Exception as exc:
         return {"error": str(exc)}
+    await session.try_send(type="lab_changed", project=pid)
     return {"stopped": node}
 
 

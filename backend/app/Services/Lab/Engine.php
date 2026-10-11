@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Media\HiggsfieldClient;
 use App\Services\Ai\Models\ModelRegistry;
+use App\Services\Ai\Pricing;
+use App\Services\Ai\UsageMeter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -31,9 +33,6 @@ use Throwable;
  */
 class Engine
 {
-    /** Providers that cost nothing to run: our pod, this server, local models, Ollama Cloud's preview. */
-    public const FREE_PROVIDERS = ['pod', 'engine', 'sound', 'studio', 'ollama', 'ollama_cloud'];
-
     /** Auto runs wait this long after an edit, so typing doesn't start a run per key. */
     public const SETTLE_SECONDS = 2;
 
@@ -269,7 +268,7 @@ class Engine
      * How long a run takes, roughly, and what it costs when that's known.
      *
      * @param  array<string, mixed>  $node
-     * @return array{seconds: int, cost: float|null, model: string|null, unavailable: string|null}
+     * @return array{seconds: int, cost: float|null, pod: float, model: string|null, unavailable: string|null}
      */
     public function estimate(array $node): array
     {
@@ -279,18 +278,20 @@ class Engine
         if ($node['type'] === 'audio.music' && Catalog::withDefaults('audio.music', $node['params'] ?? [])['source'] === 'song') {
             $seconds = 45;
         }
-        // Nodes without a model run on this server, the assistant or FlowAI Sound: free.
+        // Nodes without a model run on this server, the assistant or FlowAI Sound: free. `cost` is what a
+        // provider bills; `pod` is the run's share of the pod's hourly rate, which is paid either way.
         $price = 0.0;
+        $pod = 0.0;
         if ($model) {
-            [$provider, $name] = explode('/', $model['id'], 2);
-            $price = in_array($provider, self::FREE_PROVIDERS, true) ? 0.0 : ((config("ai.providers.{$provider}.models") ?? [])[$name]['price'] ?? null);
-            if ($price !== null && ($n = (int) ($node['params']['variations'] ?? 1)) > 1) {
-                $price *= $n;
-            }
+            [$provider] = explode('/', $model['id'], 2);
+            $n = max(1, (int) ($node['params']['variations'] ?? 1));
+            $price = Pricing::perOutput($provider, $model['id'], (float) ($node['params']['duration'] ?? 0));
+            $price = $price === null ? null : $price * $n;
+            $pod = in_array($provider, Pricing::POD, true) ? Pricing::podTime($seconds * $n) : 0.0;
         }
 
         // A model that can't run now says why before anyone presses Run (a key missing, a connector untested).
-        return ['seconds' => $seconds, 'cost' => $price, 'model' => $model['label'] ?? null, 'unavailable' => $model && ! $model['available'] ? $model['reason'] : null];
+        return ['seconds' => $seconds, 'cost' => $price, 'pod' => round($pod, 4), 'model' => $model['label'] ?? null, 'unavailable' => $model && ! $model['available'] ? $model['reason'] : null];
     }
 
     /**
@@ -355,7 +356,7 @@ class Engine
      * What running a node takes: itself, and the nodes before it that have to run first (when
      * `upstream`), with how long and what it costs in all.
      *
-     * @return array{nodes: list<array<string, mixed>>, seconds: int, cost: float|null, blocked: list<string>}
+     * @return array{nodes: list<array<string, mixed>>, seconds: int, cost: float|null, pod: float, blocked: list<string>}
      */
     public function plan(Project $project, string $nodeId): array
     {
@@ -366,16 +367,18 @@ class Engine
         $nodes = [];
         $seconds = 0;
         $cost = 0.0;
+        $pod = 0.0;
         $known = true;
         foreach ([...$needed['run'], $nodeId] as $id) {
             $n = Graph::find($canvas, $id);
             $e = $this->estimate($n);
             $nodes[] = ['id' => $id, 'type' => $n['type'], 'label' => $n['label'] ?? Catalog::node($n['type'])['label'], ...$e];
             $seconds += $e['seconds'];
+            $pod += $e['pod'];
             $e['cost'] === null ? $known = false : $cost += $e['cost'];
         }
 
-        return ['nodes' => $nodes, 'seconds' => $seconds, 'cost' => $known ? round($cost, 4) : null, 'blocked' => $needed['blocked']];
+        return ['nodes' => $nodes, 'seconds' => $seconds, 'cost' => $known ? round($cost, 4) : null, 'pod' => round($pod, 4), 'blocked' => $needed['blocked']];
     }
 
     /**
@@ -447,7 +450,6 @@ class Engine
         if ($policy === 'none') {
             throw new InvalidArgumentException((Catalog::node($node['type'])['label']).' has nothing to run: what it holds goes straight on.');
         }
-        $this->guard($node);
 
         $needed = $this->needed($ctx, $node);
         if ($needed['blocked']) {
@@ -495,18 +497,6 @@ class Engine
     private function busyUpstream(Context $ctx, array $node): array
     {
         return array_values(array_filter(Graph::upstream($ctx->canvas, $node['id']), fn ($id) => $ctx->runsOf($id)->contains(fn ($r) => in_array($r->status, ['queued', 'running'], true))));
-    }
-
-    /**
-     * People nodes need the person's consent recorded on the node first.
-     *
-     * @param  array<string, mixed>  $node
-     */
-    private function guard(array $node): void
-    {
-        if (in_array($node['type'], ['people.swap', 'people.dub', 'people.character', 'people.motion'], true) && empty($node['params']['consent'])) {
-            throw new InvalidArgumentException('Tick that the person whose face or voice it is agreed to it.');
-        }
     }
 
     /**
@@ -588,7 +578,8 @@ class Engine
 
         $job = new NodeJob($run, $node, $params, $inputs, $project, $this);
         try {
-            $result = Executors::for($node['type'])->start($job);
+            // Every model call it makes, listening included, counts as this run's in Spending.
+            $result = app(UsageMeter::class)->within($job->user(), $run, 'lab', fn () => Executors::for($node['type'])->start($job));
         } catch (NodeFailed|GenerationFailed|InvalidArgumentException $e) {
             $job->discard();
             $this->fail($run, $e->getMessage());

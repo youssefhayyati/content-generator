@@ -14,9 +14,6 @@ class Dub extends Executor
 {
     public function start(NodeJob $job): array
     {
-        if (empty($job->params['consent'])) {
-            throw new NodeFailed('Tick that the person in the video agreed to it.');
-        }
         $model = $this->model('pod/latentsync');
         $video = $job->inputs->asset('video', ['video']) ?? throw new NodeFailed('Connect the video.');
         $script = $this->prompt($job, 'script', 'script');

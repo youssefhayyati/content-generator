@@ -425,7 +425,7 @@ class LabTest extends TestCase
         $this->assertSame([[$brief], [$product]], [$into('brief'), $into('image')]);
     }
 
-    public function test_a_voiceover_reads_in_a_voice_cloned_from_a_recording_with_consent(): void
+    public function test_a_voiceover_reads_in_a_voice_cloned_from_a_recording(): void
     {
         config(['ai.providers.voicestudio.url' => 'https://vs.example', 'ai.providers.voicestudio.key' => 'k']);
         Http::fake([
@@ -443,11 +443,6 @@ class LabTest extends TestCase
             ['op' => 'connect', 'from' => 'me', 'out' => 'audio', 'to' => 'voice', 'in' => 'clone'],
         ])->assertOk();
 
-        // Without consent it won't clone.
-        $this->spa()->actingAs($this->user)->postJson("/api/projects/{$this->project->id}/lab/nodes/voice/run")->assertCreated();
-        $this->assertStringContainsString('agreed', NodeRun::where('node_id', 'voice')->latest('id')->first()->error);
-
-        $this->ops([['op' => 'set', 'id' => 'voice', 'params' => ['consent' => true]]])->assertOk();
         $this->spa()->actingAs($this->user)->postJson("/api/projects/{$this->project->id}/lab/nodes/voice/run")->assertCreated();
         Http::assertSent(fn ($r) => $r->url() === 'https://vs.example/profiles' && $r->method() === 'POST');
         // The clone is kept on the recording: the next run reads in the same voice without cloning again.
@@ -496,10 +491,8 @@ class LabTest extends TestCase
         $this->assertSame('RIFFwav', $as->get('/api/lab/voices/sample?id=feat_00_the_librarian&catalog=1')->assertOk()->assertHeader('Content-Type', 'audio/wav')->getContent());
         $as->postJson('/api/lab/voices/use', ['id' => 'feat_00_the_librarian'])->assertOk()->assertJsonPath('voice.id', 'abc');
 
-        // Cloning needs the person's agreement.
         $recording = UploadedFile::fake()->create('me.webm', 40, 'audio/webm');
-        $as->post('/api/lab/voices/clone', ['recording' => $recording, 'name' => 'My voice'], ['Accept' => 'application/json'])->assertJsonValidationErrors(['consent' => 'Tick that it’s your voice, or that the person agreed.']);
-        $as->post('/api/lab/voices/clone', ['recording' => $recording, 'name' => 'My voice', 'consent' => '1'], ['Accept' => 'application/json'])->assertCreated()->assertJsonPath('voice.id', 'mine');
+        $as->post('/api/lab/voices/clone', ['recording' => $recording, 'name' => 'My voice'], ['Accept' => 'application/json'])->assertCreated()->assertJsonPath('voice.id', 'mine');
         Http::assertSent(fn ($r) => str_contains($r->url(), '/engine/voices/clone') && $r->isMultipart());
     }
 

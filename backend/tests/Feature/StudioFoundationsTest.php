@@ -12,8 +12,11 @@ use App\Models\Post;
 use App\Models\User;
 use App\Services\Ai\UsageMeter;
 use App\Services\Media\MediaInspector;
+use App\Services\Publishing\Adb;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -122,6 +125,168 @@ class StudioFoundationsTest extends TestCase
         $rack = Device::where('name', 'Rack 1')->firstOrFail();
         $this->spa()->patchJson("/api/devices/{$rack->id}", ['ref' => ''])->assertJsonValidationErrors('ref');
         $this->spa()->patchJson("/api/devices/{$rack->id}", ['name' => 'Rack one'])->assertOk()->assertJsonPath('ref', 'dev-7');
+    }
+
+    public function test_a_scan_lists_the_plugged_in_phones_and_marks_the_registered_ones(): void
+    {
+        $user = User::factory()->create();
+        $known = $user->devices()->create(['name' => 'Desk phone', 'driver' => 'http', 'ref' => 'SER1']);
+        $this->mock(Adb::class)->shouldReceive('devices')->andReturn([
+            ['serial' => 'SER1', 'state' => 'device', 'model' => 'Pixel 3', 'manufacturer' => 'Google', 'android' => '9'],
+            ['serial' => 'SER2', 'state' => 'unauthorized', 'model' => null, 'manufacturer' => null, 'android' => null],
+        ]);
+
+        $this->actingAs($user)->spa()->getJson('/api/devices/scan')->assertOk()
+            ->assertJsonPath('available', true)
+            ->assertJsonPath('phones.0.name', 'Google Pixel 3')
+            ->assertJsonPath('phones.0.device_id', $known->id)
+            ->assertJsonPath('phones.1.name', 'SER2')
+            ->assertJsonPath('phones.1.device_id', null);
+        $this->assertNotNull($known->fresh()->last_seen_at);
+
+        // Another studio's phone with the same serial isn't "yours".
+        $this->actingAs(User::factory()->create())->spa()->getJson('/api/devices/scan')->assertJsonPath('phones.0.device_id', null);
+    }
+
+    public function test_a_scan_without_an_adb_server_says_so(): void
+    {
+        $this->mock(Adb::class)->shouldReceive('devices')->andThrow(new \RuntimeException('No adb server at host:5037.'));
+
+        $this->actingAs(User::factory()->create())->spa()->getJson('/api/devices/scan')->assertOk()
+            ->assertJsonPath('available', false)->assertJsonPath('error', 'No adb server at host:5037.')->assertJsonCount(0, 'phones');
+    }
+
+    public function test_a_real_phone_can_be_watched_and_driven_by_hand(): void
+    {
+        $user = User::factory()->create();
+        $phone = $user->devices()->create(['name' => 'Desk phone', 'driver' => 'http', 'ref' => 'SER1']);
+        $adb = $this->mock(Adb::class);
+        $adb->shouldReceive('screenshot')->with('SER1')->andReturn(['png' => 'PNGDATA', 'width' => 1080, 'height' => 2160]);
+        $adb->shouldReceive('tap')->once()->with('SER1', 540, 1200);
+        $adb->shouldReceive('swipe')->once()->with('SER1', 500, 1600, 500, 400, 300);
+        $adb->shouldReceive('key')->once()->with('SER1', 'back');
+        $adb->shouldReceive('type')->once()->with('SER1', 'hello world');
+
+        $this->actingAs($user)->spa()->get("/api/devices/{$phone->id}/live")->assertOk()
+            ->assertHeader('Content-Type', 'image/png')->assertHeader('X-Screen-Width', 1080)->assertHeader('X-Screen-Height', 2160);
+        $this->assertNotNull($phone->fresh()->last_seen_at);
+
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'tap', 'x' => 540, 'y' => 1200])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'swipe', 'x' => 500, 'y' => 1600, 'x2' => 500, 'y2' => 400])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'back'])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'text', 'text' => 'hello world'])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'reboot'])->assertJsonValidationErrors('key');
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'tap'])->assertJsonValidationErrors(['x', 'y']);
+
+        // A run on the phone owns it; hands off until it's done.
+        $phone->forceFill(['booked_run_id' => 99])->save();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'home'])->assertStatus(409);
+
+        $sim = $user->devices()->create(['name' => 'Sim', 'driver' => 'simulator']);
+        $this->spa()->getJson("/api/devices/{$sim->id}/live")->assertStatus(422);
+
+        $this->actingAs(User::factory()->create())->spa()->getJson("/api/devices/{$phone->id}/live")->assertForbidden();
+    }
+
+    public function test_the_team_phone_is_mirrored_and_driven_through_the_phone_api(): void
+    {
+        config(['publishing.phone_api.url' => 'https://phone.test/hack/v1', 'publishing.phone_api.key' => 'hk_team']);
+        $busy = null;
+        Http::fake(function (HttpRequest $r) use (&$busy) {
+            return match (true) {
+                str_ends_with($r->url(), '/phone/status') => Http::response(['ok' => true, 'data' => ['device_id' => 'heracles-phone', 'online' => true, 'busy' => $busy]]),
+                str_ends_with($r->url(), '/phone/geometry') => Http::response(['ok' => true, 'data' => ['w' => 1080, 'h' => 2400]]),
+                str_contains($r->url(), '/phone/screenshot') => Http::response('JPEGDATA', 200, ['Content-Type' => 'image/jpeg']),
+                default => Http::response(['ok' => true, 'data' => null]),
+            };
+        });
+        $user = User::factory()->create();
+        $phone = $user->devices()->create(['name' => 'Team phone', 'driver' => 'http', 'ref' => 'heracles-phone']);
+        $this->mock(Adb::class)->shouldNotReceive('screenshot', 'tap', 'swipe', 'key', 'type');
+
+        $this->actingAs($user)->spa()->getJson('/api/devices')->assertOk()->assertJsonPath('0.remote', ['online' => true, 'busy' => false]);
+        $this->spa()->get("/api/devices/{$phone->id}/live")->assertOk()
+            ->assertHeader('Content-Type', 'image/jpeg')->assertHeader('X-Screen-Width', 1080)->assertHeader('X-Screen-Height', 2400)->assertHeader('X-Phone-Busy', '0');
+        $this->spa()->postJson("/api/devices/{$phone->id}/stream")->assertStatus(422);
+
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'tap', 'x' => 540, 'y' => 1200])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'swipe', 'x' => 500, 'y' => 1800, 'x2' => 500, 'y2' => 600])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'swipe', 'x' => 300, 'y' => 300, 'x2' => 300, 'y2' => 300, 'ms' => 900])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'back'])->assertNoContent();
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'text', 'text' => 'hello world'])->assertNoContent();
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/tap') && $r['x'] === 540 && $r['y'] === 1200 && $r->hasHeader('Authorization', 'Bearer hk_team'));
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/swipe') && $r['direction'] === 'up' && $r['distance'] === 'long');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/long-press') && $r['ms'] === 900);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/key') && $r['key'] === 'back');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/phone/type') && $r['text'] === 'hello world');
+
+        // Its input board has no volume keys and types ASCII only
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'volume_up'])->assertJsonValidationErrors('key');
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'text', 'text' => 'café'])->assertJsonValidationErrors('text');
+
+        // A task on the Phone API (the assistant posting) has the phone: hands off
+        $busy = ['task_id' => 't1'];
+        $this->spa()->postJson("/api/devices/{$phone->id}/control", ['action' => 'key', 'key' => 'home'])->assertStatus(409);
+    }
+
+    public function test_the_live_stream_ticket_is_signed_and_carries_who_may_touch(): void
+    {
+        $user = User::factory()->create();
+        $phone = $user->devices()->create(['name' => 'Desk phone', 'driver' => 'http', 'ref' => 'SER1']);
+
+        $res = $this->actingAs($user)->spa()->postJson("/api/devices/{$phone->id}/stream")->assertOk()->assertJsonPath('control', true);
+        parse_str((string) parse_url($res->json('url'), PHP_URL_QUERY), $query);
+        [$body, $sig] = explode('.', $query['ticket']);
+        $this->assertSame(hash_hmac('sha256', $body, config('app.key')), $sig);
+        $ticket = json_decode(base64_decode(strtr($body, '-_', '+/')), true);
+        $this->assertSame(['d' => $phone->id, 's' => 'SER1', 'c' => true], array_intersect_key($ticket, array_flip(['d', 's', 'c'])));
+        $this->assertGreaterThan(now()->timestamp, $ticket['e']);
+
+        // While a run drives the phone, the stream is watch-only.
+        $phone->forceFill(['booked_run_id' => 99])->save();
+        $this->spa()->postJson("/api/devices/{$phone->id}/stream")->assertJsonPath('control', false);
+
+        $sim = $user->devices()->create(['name' => 'Sim', 'driver' => 'simulator']);
+        $this->spa()->postJson("/api/devices/{$sim->id}/stream")->assertStatus(422);
+        $this->actingAs(User::factory()->create())->spa()->postJson("/api/devices/{$phone->id}/stream")->assertForbidden();
+    }
+
+    public function test_deleting_a_phone_unlinks_its_accounts_but_not_while_it_runs(): void
+    {
+        $user = User::factory()->create();
+        $phone = $user->devices()->create(['name' => 'Desk phone', 'driver' => 'http', 'ref' => 'SER1']);
+        $account = Account::factory()->for($user)->create(['device_id' => $phone->id]);
+
+        $phone->forceFill(['booked_run_id' => 99])->save();
+        $this->actingAs($user)->spa()->deleteJson("/api/devices/{$phone->id}")->assertStatus(409);
+        $phone->forceFill(['booked_run_id' => null])->save();
+
+        $this->actingAs(User::factory()->create())->spa()->deleteJson("/api/devices/{$phone->id}")->assertForbidden();
+
+        $this->actingAs($user)->spa()->deleteJson("/api/devices/{$phone->id}")->assertNoContent();
+        $this->assertModelMissing($phone);
+        $this->assertNull($account->fresh()->device_id);
+        $this->assertSame(1, ActionLog::where('action', 'device.deleted')->count());
+    }
+
+    public function test_a_phone_that_cannot_be_reached_says_why(): void
+    {
+        $user = User::factory()->create();
+        $phone = $user->devices()->create(['name' => 'Desk phone', 'driver' => 'http', 'ref' => 'SER1']);
+        $this->mock(Adb::class)->shouldReceive('screenshot')->andThrow(new \RuntimeException("adb: device 'SER1' not found"));
+
+        $this->actingAs($user)->spa()->getJson("/api/devices/{$phone->id}/live")->assertStatus(503)->assertJsonPath('message', "adb: device 'SER1' not found");
+
+        // adb's own words, turned into what to do about it.
+        $this->assertSame(Adb::NOT_CONNECTED, Adb::explain("device 'SER1' not found"));
+        $this->assertStringContainsString('Tap Allow', Adb::explain('device unauthorized.'));
+        $this->assertSame('adb: something else', Adb::explain('something else'));
+    }
+
+    public function test_only_plain_text_is_typed_into_a_phone(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        (new Adb('nowhere', 1))->type('SER1', 'café');
     }
 
     public function test_the_pre_export_check_holds_media_and_captions_to_the_placement(): void

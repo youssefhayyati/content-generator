@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { animate, AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
-import { LoaderCircle, X, type LucideIcon } from 'lucide-react'
+import { Hourglass, LoaderCircle, X, type LucideIcon } from 'lucide-react'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
 import type { User } from '../lib/api'
@@ -266,6 +266,27 @@ export function StateBadge({ state, label, className }: { state: PostState; labe
     >
       <span className={cn('size-1.5 rounded-full', s.dot)} />
       {label ?? s.label}
+    </span>
+  )
+}
+
+/**
+ * Something under way: working (running now) or waiting (queued behind something, or for your OK).
+ * Shown wherever a canvas or a draft is listed, so a busy one is told apart at a glance.
+ */
+export function BusyBadge({ state, label, title, className }: { state: 'working' | 'waiting'; label?: string; title?: string; className?: string }) {
+  const working = state === 'working'
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium',
+        working ? 'border-accent/30 text-accent-soft' : 'border-warn/30 text-warn',
+        className,
+      )}
+    >
+      {working ? <LoaderCircle className="size-3 animate-spin" /> : <Hourglass className="size-3" />}
+      {label ?? (working ? 'Working' : 'Waiting')}
     </span>
   )
 }

@@ -174,9 +174,9 @@ The third line'], 'The lines'),
 
             /* ------------------------------------------------------------ voices and lips */
             'talking-portrait' => [
-                'name' => 'Talking portrait (lip sync)', 'category' => 'Voices & lips', 'tagline' => 'A portrait animated, then made to say your script in a voice you pick, lips matching. Consent is ticked on the node.',
+                'name' => 'Talking portrait (lip sync)', 'category' => 'Voices & lips', 'tagline' => 'A portrait animated, then made to say your script in a voice you pick, lips matching.',
                 'graph' => $graph([
-                    $n('portrait', 'source.media', 0, 0, [], 'A portrait (with consent)', ['person']),
+                    $n('portrait', 'source.media', 0, 0, [], 'A portrait', ['person']),
                     $n('script', 'source.text', 0, 1, ['text' => 'Hi! Our pumpkin latte is back, and before ten it’s two for one.'], 'What they say'),
                     $n('animate', 'video.animate', 1, 0, ['prompt' => 'The person looks at the camera and talks naturally, small head movements, steady camera', 'duration' => 5]),
                     $n('dub', 'people.dub', 2, 0),
@@ -212,9 +212,9 @@ The third line'], 'The lines'),
                 ], $out('reel', 'video', 'script', 4, 0)),
             ],
             'face-swap' => [
-                'name' => 'A face on a video', 'category' => 'Voices & lips', 'tagline' => 'A consenting person’s face on the video, then captions. Consent is ticked on the node.',
+                'name' => 'A face on a video', 'category' => 'Voices & lips', 'tagline' => 'A person’s face on the video, then captions.',
                 'graph' => $graph([
-                    $n('face', 'source.media', 0, 0, [], 'The face (with consent)', ['person']),
+                    $n('face', 'source.media', 0, 0, [], 'The face', ['person']),
                     $n('video', 'source.media', 0, 1, [], 'The video'),
                     $n('swap', 'people.swap', 1, 0),
                     $n('captions', 'video.captions', 2, 0),
@@ -238,7 +238,7 @@ The third line'], 'The lines'),
             'hf-character' => [
                 'name' => 'Your character, any scene', 'category' => 'Higgsfield', 'tagline' => 'Train a character once from photos (Soul ID), then picture them anywhere with the same face: a carousel in three scenes.',
                 'graph' => $graph([
-                    $n('photos', 'source.media', 0, 0, [], 'Photos of them (with consent)', ['person']),
+                    $n('photos', 'source.media', 0, 0, [], 'Photos of them', ['person']),
                     $n('brief', 'source.brief', 0, 2),
                     $n('character', 'people.character', 1, 0),
                     $n('scene-1', 'image.character', 2, 0, ['prompt' => 'Smiling with {product} in a sunny café, candid, {style}'], 'Scene 1'),
@@ -257,7 +257,7 @@ The third line'], 'The lines'),
             'hf-trend' => [
                 'name' => 'Ride a trend (copy the moves)', 'category' => 'Higgsfield', 'tagline' => 'The person in your photo does the moves of a trending video (Kling Motion Control), captioned, with a caption that rides the trend.',
                 'graph' => $graph([
-                    $n('who', 'source.media', 0, 0, [], 'Who moves (with consent)', ['person']),
+                    $n('who', 'source.media', 0, 0, [], 'Who moves', ['person']),
                     $n('moves', 'source.media', 0, 1, [], 'The moves (a video you may use)'),
                     $n('brief', 'source.brief', 0, 2),
                     $n('motion', 'people.motion', 1, 0),
