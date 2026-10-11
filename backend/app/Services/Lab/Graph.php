@@ -3,6 +3,7 @@
 namespace App\Services\Lab;
 
 use App\Models\Generation;
+use App\Services\Lab\Nodes\Write;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -10,16 +11,22 @@ use InvalidArgumentException;
  * A Creative Lab canvas (version 2): nodes joined port to port, and the operations that change it.
  *
  *   {version: 2, rev, nodes: [{id, type, x, y, params, pin?, branch?, label?}],
- *    edges: [{from, out, to, in}], view: {x, y, zoom}}
+ *    edges: [{from, out, to, in, pick?}], view: {x, y, zoom}}
  *
  * Every change, from the page or from the assistant, is an operation applied to the newest canvas
  * (apply), so two people (or a person and the assistant) editing at once never undo each other.
  * An edge runs from an output port to an input port whose type accepts it; an input that takes one
- * thing keeps only its newest edge; nothing may loop back on itself.
+ * thing keeps only its newest edge; nothing may loop back on itself. An edge from text written in
+ * several pieces (versions, lines) can `pick` one of them: 1, 2…, or 0 for all of it.
  */
 class Graph
 {
     public const MAX_NODES = 300;
+
+    /** Tidying: columns this far apart (a card is 268 wide), cards this far apart in a column. */
+    private const COLUMN = 340;
+
+    private const GAP = 56;
 
     /**
      * Any canvas as version 2. The first Creative Lab canvases (notes, texts, assets and generations
@@ -103,6 +110,8 @@ class Graph
                     'remove' => self::remove($canvas, (array) ($op['ids'] ?? [$op['id'] ?? null])),
                     'connect' => self::connect($canvas, $op),
                     'disconnect' => self::disconnect($canvas, $op),
+                    'pick' => self::pick($canvas, $op),
+                    'tidy' => self::tidy($canvas),
                     'branch' => self::branch($canvas, (string) ($op['id'] ?? '')),
                     'insert' => self::insert($canvas, (array) ($op['graph'] ?? []), (float) ($op['x'] ?? 0), (float) ($op['y'] ?? 0)),
                     'auto' => [[...$canvas, 'auto' => (bool) ($op['on'] ?? false)], []],
@@ -268,7 +277,7 @@ class Graph
         if (self::find($canvas, $id)) {
             throw new InvalidArgumentException("There is already a node “{$id}”.");
         }
-        [$x, $y] = isset($node['x'], $node['y']) ? [(float) $node['x'], (float) $node['y']] : self::freeSpot($canvas);
+        [$x, $y] = isset($node['x'], $node['y']) ? [(float) $node['x'], self::clear($canvas, (float) $node['x'], (float) $node['y'])] : self::freeSpot($canvas);
         $new = array_filter([
             'id' => $id, 'type' => $type, 'x' => $x, 'y' => $y,
             'params' => self::cleanParams($type, (array) ($node['params'] ?? [])),
@@ -296,7 +305,7 @@ class Graph
             return [...$n, 'params' => self::cleanParams($n['type'], array_filter($params, fn ($v) => $v !== null))];
         });
 
-        return [$canvas, []];
+        return [self::autoPick($canvas, $id), []];
     }
 
     /**
@@ -359,11 +368,99 @@ class Graph
         }
 
         $edge = ['from' => $from['id'], 'out' => $out['name'], 'to' => $to['id'], 'in' => $in['name']];
-        $canvas['edges'] = array_values(array_filter($canvas['edges'], fn ($e) => ! ($e == $edge)
+        $before = collect($canvas['edges'])->first(fn ($e) => self::same($e, $edge));
+        $canvas['edges'] = array_values(array_filter($canvas['edges'], fn ($e) => ! self::same($e, $edge)
             && ! (empty($in['multi']) && $e['to'] === $to['id'] && $e['in'] === $in['name'])));
-        $canvas['edges'][] = $edge;
+        // Drawn again, a line keeps the piece it picked unless told another.
+        $pick = self::pickValue($op['pick'] ?? null) ?? (isset($before['pick']) ? (int) $before['pick'] : null);
+        $canvas['edges'][] = $pick === null ? $edge : [...$edge, 'pick' => $pick];
+        $canvas = self::autoPick($canvas, $from['id']);
 
-        return [$canvas, $edge];
+        return [$canvas, collect($canvas['edges'])->first(fn ($e) => self::same($e, $edge))];
+    }
+
+    /**
+     * Which piece a line takes, from text written in several (versions, lines): {"op":"pick", "from", "to",
+     * "in", "pick": 2}. 0 takes all of it; null lets it be picked for it again.
+     *
+     * @param  array<string, mixed>  $canvas
+     * @param  array<string, mixed>  $op
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
+     */
+    private static function pick(array $canvas, array $op): array
+    {
+        $pick = self::pickValue($op['pick'] ?? null);
+        $found = false;
+        foreach ($canvas['edges'] as $i => $e) {
+            if ($e['to'] === ($op['to'] ?? null) && (! isset($op['in']) || $e['in'] === $op['in'])
+                && (! isset($op['from']) || $e['from'] === $op['from']) && (! isset($op['out']) || $e['out'] === $op['out'])) {
+                $found = true;
+                if ($pick === null) {
+                    unset($canvas['edges'][$i]['pick']);
+                } else {
+                    $canvas['edges'][$i]['pick'] = $pick;
+                }
+            }
+        }
+        if (! $found) {
+            throw new InvalidArgumentException('There is no such line.');
+        }
+
+        return [$canvas, []];
+    }
+
+    private static function pickValue(mixed $v): ?int
+    {
+        return is_numeric($v) ? max(0, min(10, (int) $v)) : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $a
+     * @param  array<string, mixed>  $b
+     */
+    private static function same(array $a, array $b): bool
+    {
+        return $a['from'] === $b['from'] && $a['out'] === $b['out'] && $a['to'] === $b['to'] && $a['in'] === $b['in'];
+    }
+
+    /**
+     * A Write node asked for several versions gives every line out of it its own (#1, #2…, round again
+     * past the last), so three pictures fed by it get three prompts; asked for one, its lines take it all.
+     * A piece picked by hand stays, as does "all of it" (0).
+     *
+     * @param  array<string, mixed>  $canvas
+     * @return array<string, mixed>
+     */
+    private static function autoPick(array $canvas, string $id): array
+    {
+        $node = self::find($canvas, $id);
+        if (! $node || $node['type'] !== 'text.write' || in_array($node['params']['task'] ?? 'caption', Write::LISTS, true)) {
+            return $canvas;
+        }
+        $n = Write::variants($node['params'] ?? []);
+        $kept = fn (array $e) => isset($e['pick']) && ($e['pick'] === 0 || $e['pick'] <= $n);
+        $used = [];
+        foreach ($canvas['edges'] as $i => $e) {
+            if ($e['from'] !== $id) {
+                continue;
+            }
+            if ($n <= 1) {
+                unset($canvas['edges'][$i]['pick']);
+            } elseif ($kept($e) && $e['pick'] > 0) {
+                $used[] = $e['pick'];
+            }
+        }
+        if ($n > 1) {
+            foreach ($canvas['edges'] as $i => $e) {
+                if ($e['from'] !== $id || $kept($e)) {
+                    continue;
+                }
+                $free = array_values(array_diff(range(1, $n), $used));
+                $canvas['edges'][$i]['pick'] = $used[] = $free[0] ?? count($used) % $n + 1;
+            }
+        }
+
+        return $canvas;
     }
 
     /**
@@ -436,7 +533,10 @@ class Graph
     }
 
     /**
-     * A fragment (a template's nodes and edges) added with new ids, its top left at x, y.
+     * A fragment (a template's nodes and edges) added with new ids, its top left at x, y. What the
+     * canvas has already stands in for the fragment's own: its Brief (a template's empty one would be
+     * a second brief, with nothing in it), and the campaign's photos for a photo node that asks for
+     * them (`reuse`: the kinds of photo it takes, References::GROUPS, in order).
      *
      * @param  array<string, mixed>  $canvas
      * @param  array<string, mixed>  $fragment
@@ -448,10 +548,16 @@ class Graph
         if (! $nodes) {
             throw new InvalidArgumentException('There is nothing to add.');
         }
-        $left = min(array_map(fn ($n) => (float) ($n['x'] ?? 0), $nodes));
-        $top = min(array_map(fn ($n) => (float) ($n['y'] ?? 0), $nodes));
+        $alias = self::reuse($canvas, $nodes);
+        $added = array_values(array_filter($nodes, fn ($n) => ! isset($alias[(string) ($n['id'] ?? '')])));
+        $left = $added ? min(array_map(fn ($n) => (float) ($n['x'] ?? 0), $added)) : 0;
+        $top = $added ? min(array_map(fn ($n) => (float) ($n['y'] ?? 0), $added)) : 0;
+        // Never on top of what's there: the whole fragment lower down until it's clear.
+        for ($tries = 0; $tries < 40 && collect($added)->contains(fn ($n) => self::taken($canvas, $x + (float) ($n['x'] ?? 0) - $left, $y + (float) ($n['y'] ?? 0) - $top)); $tries++) {
+            $y += 380;
+        }
         $map = [];
-        foreach ($nodes as $n) {
+        foreach ($added as $n) {
             $map[(string) ($n['id'] ?? Str::random(6))] = $id = self::newId($canvas, $n['type'], array_values($map));
             $canvas['nodes'][] = array_filter([
                 'id' => $id, 'type' => $n['type'],
@@ -460,13 +566,64 @@ class Graph
                 'label' => $n['label'] ?? null,
             ], fn ($v) => $v !== null);
         }
+        $resolve = fn (string $id) => isset($alias[$id]) ? ($alias[$id][0] === 'canvas' ? $alias[$id][1] : ($map[$alias[$id][1]] ?? null)) : ($map[$id] ?? null);
         foreach ($fragment['edges'] ?? [] as $e) {
-            if (isset($map[$e['from'] ?? ''], $map[$e['to'] ?? ''])) {
-                [$canvas] = self::connect($canvas, ['from' => $map[$e['from']], 'out' => $e['out'] ?? null, 'to' => $map[$e['to']], 'in' => $e['in'] ?? null]);
+            $from = $resolve((string) ($e['from'] ?? ''));
+            $to = $resolve((string) ($e['to'] ?? ''));
+            if ($from && $to) {
+                [$canvas] = self::connect($canvas, ['from' => $from, 'out' => $e['out'] ?? null, 'to' => $to, 'in' => $e['in'] ?? null, 'pick' => $e['pick'] ?? null]);
             }
+        }
+        foreach ($alias as $id => [, $target]) {
+            $map[$id] = $resolve($id) ?? $target;
         }
 
         return [$canvas, ['ids' => $map]];
+    }
+
+    /**
+     * The fragment's nodes that something already there replaces: id => ['canvas', its id] or
+     * ['fragment', the id of another node in the fragment].
+     *
+     * @param  array<string, mixed>  $canvas
+     * @param  list<array<string, mixed>>  $nodes
+     * @return array<string, array{0: string, 1: string}>
+     */
+    private static function reuse(array $canvas, array $nodes): array
+    {
+        // The brief with a campaign first: that's the one the interview made.
+        $briefs = array_values(array_filter($canvas['nodes'], fn ($n) => $n['type'] === 'source.brief'));
+        usort($briefs, fn ($a, $b) => (int) empty($a['params']['campaign_id']) <=> (int) empty($b['params']['campaign_id']));
+        $photos = fn (array $list) => collect($list)
+            ->filter(fn ($n) => ($n['type'] ?? null) === 'source.media' && isset($n['label']) && ! empty($n['params']['assets']))
+            ->reverse()->mapWithKeys(fn ($n) => [$n['label'] => (string) $n['id']])->all(); // the first of a kind wins
+        $onCanvas = $photos($canvas['nodes']);
+        $inFragment = $photos($nodes);
+
+        $alias = [];
+        foreach ($nodes as $n) {
+            $id = (string) ($n['id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            if ($n['type'] === 'source.brief' && $briefs && ! array_filter((array) ($n['params'] ?? []), fn ($v) => $v !== null && $v !== '' && $v !== [])) {
+                $alias[$id] = ['canvas', $briefs[0]['id']];
+            } elseif ($n['type'] === 'source.media' && empty($n['params']['assets']) && ! empty($n['reuse'])) {
+                foreach ((array) $n['reuse'] as $kind) {
+                    $label = References::GROUPS[$kind] ?? null;
+                    if ($label && isset($onCanvas[$label])) {
+                        $alias[$id] = ['canvas', $onCanvas[$label]];
+                        break;
+                    }
+                    if ($label && isset($inFragment[$label]) && $inFragment[$label] !== $id) {
+                        $alias[$id] = ['fragment', $inFragment[$label]];
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $alias;
     }
 
     /* ------------------------------------------------------------------ */
@@ -554,6 +711,147 @@ class Graph
                 return "{$stem}-{$n}";
             }
         }
+    }
+
+    /**
+     * Tidy the canvas into columns, by how far along the work each node is: a node that feeds just one
+     * sits right before it, one that feeds several (a brief, a writer for three pictures) as far left as
+     * what feeds it allows. In each column, the order that keeps lines short, a few passes over: a chain
+     * (a picture, its animation, its design) on one row, any other node pulled toward what it's joined
+     * to (a brief, joined to everything, pulls little). Notes stay.
+     *
+     * @param  array<string, mixed>  $canvas
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>}
+     */
+    private static function tidy(array $canvas): array
+    {
+        $nodes = array_column(array_filter($canvas['nodes'], fn ($n) => $n['type'] !== 'util.note'), null, 'id');
+        if (count($nodes) < 2) {
+            return [$canvas, ['moved' => 0]];
+        }
+        $parents = $children = array_fill_keys(array_keys($nodes), []);
+        foreach ($canvas['edges'] as $e) {
+            if (isset($nodes[$e['from']], $nodes[$e['to']])) {
+                $parents[$e['to']][$e['from']] = true;
+                $children[$e['from']][$e['to']] = true;
+            }
+        }
+        $order = array_values(array_filter(self::order($canvas), fn ($id) => isset($nodes[$id])));
+        $order = [...$order, ...array_diff(array_keys($nodes), $order)];
+        $col = [];
+        foreach ($order as $id) {
+            $col[$id] = $parents[$id] ? max(array_map(fn ($p) => ($col[$p] ?? 0) + 1, array_keys($parents[$id]))) : 0;
+        }
+        foreach (array_reverse($order) as $id) {
+            if (count($children[$id]) === 1) {
+                $col[$id] = max($col[$id], $col[array_key_first($children[$id])] - 1);
+            }
+        }
+        $columns = [];
+        foreach ($order as $id) {
+            $columns[$col[$id]][] = $id;
+        }
+        ksort($columns);
+
+        $left = min(array_map(fn ($n) => (float) $n['x'], $nodes));
+        $top = min(array_map(fn ($n) => (float) $n['y'], $nodes));
+        $y = array_map(fn ($n) => (float) $n['y'], $nodes);
+        $weight = fn (string $id) => 1 / max(1, count($children[$id]));
+        for ($pass = 0; $pass < 4; $pass++) {
+            foreach ($columns as $c => $list) {
+                $want = [];
+                foreach ($list as $id) {
+                    // Fed by a node that feeds only it: the next step of a chain, on the same row.
+                    $lead = collect(array_keys($parents[$id]))->first(fn ($p) => count($children[$p]) === 1);
+                    if ($lead !== null) {
+                        $want[$id] = $y[$lead];
+
+                        continue;
+                    }
+                    [$sum, $w] = [0.0, 0.0];
+                    foreach (array_keys($parents[$id]) as $p) {
+                        [$sum, $w] = [$sum + $y[$p] * $weight($p), $w + $weight($p)];
+                    }
+                    foreach (array_keys($children[$id]) as $ch) {
+                        [$sum, $w] = [$sum + $y[$ch] * $weight($id), $w + $weight($id)];
+                    }
+                    $want[$id] = $w > 0 ? $sum / $w : $y[$id];
+                }
+                usort($list, fn ($a, $b) => [$want[$a], $y[$a]] <=> [$want[$b], $y[$b]]);
+                $columns[$c] = $list;
+                $next = $top;
+                foreach ($list as $id) {
+                    $y[$id] = max($want[$id], $next);
+                    $next = $y[$id] + self::height($nodes[$id]) + self::GAP;
+                }
+            }
+        }
+
+        // Pulled toward each other, they may have drifted down: back to where the graph started.
+        $lift = min($y) - $top;
+        $y = array_map(fn ($v) => $v - $lift, $y);
+        $moved = 0;
+        $canvas['nodes'] = array_map(function ($n) use ($nodes, $col, $y, $left, &$moved) {
+            if (! isset($nodes[$n['id']])) {
+                return $n;
+            }
+            [$x, $ny] = [$left + $col[$n['id']] * self::COLUMN, round($y[$n['id']])];
+            $moved += (int) ($x != $n['x'] || $ny != $n['y']);
+
+            return [...$n, 'x' => $x, 'y' => $ny];
+        }, $canvas['nodes']);
+
+        return [$canvas, ['moved' => $moved]];
+    }
+
+    /**
+     * About how tall a node's card is: its header, its ports, and what it shows of what it made.
+     *
+     * @param  array<string, mixed>  $node
+     */
+    private static function height(array $node): float
+    {
+        $kind = Catalog::node($node['type']);
+        $makes = array_column($kind['outputs'], 'type');
+        $shows = match (true) {
+            $node['type'] === 'source.media' => empty($node['params']['assets']) ? 0 : 260,
+            in_array('post', $makes, true) => 200,
+            in_array('image', $makes, true) || in_array('video', $makes, true) => 260,
+            in_array('text', $makes, true) || in_array('moments', $makes, true) => 120,
+            default => 80,
+        };
+
+        return 48 + max(count($kind['inputs']), count($kind['outputs'])) * 24 + $shows;
+    }
+
+    /**
+     * The y where a node put at x, y lands clear of the others: lower down while it would sit on one.
+     *
+     * @param  array<string, mixed>  $canvas
+     */
+    private static function clear(array $canvas, float $x, float $y): float
+    {
+        for ($tries = 0; $tries < 40 && self::taken($canvas, $x, $y); $tries++) {
+            $y += 380;
+        }
+
+        return $y;
+    }
+
+    /**
+     * Whether a card at x, y would sit on another one's header.
+     *
+     * @param  array<string, mixed>  $canvas
+     */
+    private static function taken(array $canvas, float $x, float $y): bool
+    {
+        foreach ($canvas['nodes'] as $n) {
+            if (abs((float) $n['x'] - $x) < 240 && abs((float) $n['y'] - $y) < 140) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

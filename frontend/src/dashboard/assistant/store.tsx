@@ -664,6 +664,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   start: () => void
   /** A new conversation; with a campaign, that FlowAI campaign's posts in it as drafts. */
   newConversation: (campaign?: number) => void
+  /** A new conversation that opens with the assistant asking what to make (Creative Lab's New post, no campaign questions). */
+  newPost: () => void
   openConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   deleteConversation: (id: string) => void
@@ -1050,6 +1052,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       link,
       start,
       newConversation: (campaign) => switchTo({ type: 'new', ...(campaign ? { campaign } : {}) }),
+      newPost: () => switchTo({ type: 'new', quick: true }),
       openConversation: (id) => id !== conversation.current && switchTo({ type: 'open', id }),
       renameConversation: (id, title) => link.send({ type: 'rename', id, title }),
       deleteConversation: (id) => {

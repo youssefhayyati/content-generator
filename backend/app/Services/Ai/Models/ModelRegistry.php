@@ -89,9 +89,11 @@ class ModelRegistry
             ->groupBy('model')
             ->pluck('score', 'model');
 
+        // Asked for a kind, the models that make it from a prompt: not Higgsfield's own tools (Ads Studio,
+        // Motion Control…), which take their own inputs and have Creative Lab nodes of their own.
         return array_values(array_filter(
             array_map(fn (array $m) => [...$m, 'score' => isset($scores[$m['id']]) ? (int) round($scores[$m['id']]) : null], $models),
-            fn (array $m) => $kind === null || $m['kind'] === $kind,
+            fn (array $m) => $kind === null || ($m['kind'] === $kind && empty($m['capabilities']->feature)),
         ));
     }
 

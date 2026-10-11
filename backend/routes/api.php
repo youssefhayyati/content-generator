@@ -152,6 +152,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('lab/voices', [LabController::class, 'voices']);
     Route::get('lab/voices/list', [LabController::class, 'voiceList']);
     Route::get('lab/voices/sample', [LabController::class, 'voiceSample']);
+    Route::get('lab/higgsfield/presets/{tool}', [LabController::class, 'presets']);
     Route::post('lab/projects', [LabController::class, 'create']);
     Route::post('campaigns/{campaign}/lab', [LabController::class, 'fromCampaign']);
     Route::get('projects/{project}/lab', [LabController::class, 'show']);

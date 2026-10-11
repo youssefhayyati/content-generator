@@ -73,12 +73,14 @@ class Publisher
      * Open a run: guard, book the phone atomically, mark the post publishing. Null when the
      * phone is busy — the post stays scheduled and the next minute tries again.
      */
-    public function open(Post $post, int $attempt = 1): ?PublishingRun
+    public function open(Post $post, int $attempt = 1, bool $byHand = false): ?PublishingRun
     {
         $post->loadMissing(['account.device', 'device', 'user']);
         $account = $post->account;
         $device = $post->device ?? $account?->device;
-        if (! $account || ! $device || ! $post->isApproved() || ! $account->automation) {
+        // A person pressing Post now is the go-ahead itself: the account's automated publishing (which
+        // lets scheduled posts go out on their own) isn't needed for that.
+        if (! $account || ! $device || ! $post->isApproved() || (! $account->automation && ! $byHand)) {
             return null;
         }
         if ($post->user->publishingPaused() || $device->isPaused()) {
@@ -170,7 +172,9 @@ class Publisher
             'goal' => $run->goal,
             'account' => ['platform' => $account->platform->value, 'handle' => $account->handle, 'app' => $app],
             // id and title: so the agent can say which post it published (and check on it afterwards)
-            'post' => ['id' => $run->post_id, 'title' => $run->post->title, 'caption' => $run->post->body, 'format' => $run->post->format->value, 'placement' => $run->post->placement],
+            // driver: who posts it, the person's own agent (direct), the phone's (agent), or the phone's with
+            // theirs taking over if it fails (auto); null: the phone service's own setting.
+            'post' => ['id' => $run->post_id, 'title' => $run->post->title, 'caption' => $run->post->body, 'format' => $run->post->format->value, 'placement' => $run->post->placement, 'driver' => $run->post->phone_driver],
             'media' => $run->post->assets->map(fn (Asset $a) => ['id' => $a->id, 'kind' => $a->kind, 'mime' => $a->mime, 'url' => "/api/agent/assets/{$a->id}/file"])->values()->all(),
             // R7: the budget the run must stay within, so the agent doesn't have to guess.
             'limits' => ['step_budget' => (int) config('publishing.step_budget'), 'hard_timeout_seconds' => (int) config('publishing.hard_timeout_seconds')],

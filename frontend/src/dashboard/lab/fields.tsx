@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Brush, Check, Eraser, ImagePlus, Plus, Trash2, Undo2, X } from 'lucide-react'
-import { uploadFiles, type Asset, type LabCatalog, type LabField, type LabMoment, type LabNode } from '../../lib/api'
+import { Brush, Check, Eraser, ImagePlus, Plus, Undo2, X } from 'lucide-react'
+import { api, ApiError, uploadFiles, type Asset, type LabCatalog, type LabField, type LabMoment, type LabNode } from '../../lib/api'
+import { Link } from '../../lib/router'
 import { cn } from '../../lib/cn'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
+import { TextOverlay, type TextItem } from './TextOverlay'
 import { LabVoicePicker } from './VoicePicker'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
@@ -19,6 +21,10 @@ export type FieldContext = {
   image: Asset | null
   /** The platform of the account picked on the node (a Post node). */
   platform: string | null
+  /** Every picture or video flowing into its media input, in order (Text over it's slides). */
+  media: Asset[]
+  /** The brand's colours, from the brief connected (for text colours). */
+  palette: string[]
   remember: (assets: Asset[]) => void
 }
 
@@ -221,7 +227,11 @@ export function FieldEditor({ field, value, onChange, ctx }: { field: LabField; 
     case 'assets':
       return wrap(<AssetsField value={Array.isArray(value) ? (value as number[]) : []} onChange={(v) => onChange(v, true)} ctx={ctx} />)
     case 'texts':
-      return wrap(<TextsField value={Array.isArray(value) ? (value as TextItem[]) : []} onChange={onChange} ctx={ctx} />)
+      return wrap(<TextOverlay value={Array.isArray(value) ? (value as TextItem[]) : []} onChange={onChange} ctx={ctx} />)
+    case 'chips':
+      return wrap(<Chips options={field.options ?? {}} top={field.top} value={str} onChange={(v) => onChange(v, true)} />)
+    case 'preset':
+      return wrap(<PresetPicker tool={field.presets ?? ''} value={str} onChange={(v) => onChange(v, true)} />)
     case 'mask':
       return wrap(<MaskField value={value ? Number(value) : null} onChange={(v) => onChange(v, true)} ctx={ctx} />)
     default:
@@ -295,74 +305,71 @@ function AssetsField({ value, onChange, ctx }: { value: number[]; onChange: (v: 
   )
 }
 
-type TextItem = { slide?: number; text?: string; position?: string; size?: string; color?: string; style?: string; box_color?: string; font?: string }
+/** A choice as a row of chips, the first few shown and the rest a click away. */
+function Chips({ options, top, value, onChange }: { options: Record<string, string>; top?: number; value: string; onChange: (v: string) => void }) {
+  const entries = Object.entries(options)
+  const [all, setAll] = useState(false)
+  const pickedLate = top !== undefined && entries.findIndex(([k]) => k === value) > top
+  const shown = all || top === undefined || pickedLate ? entries : entries.slice(0, top + 1)
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {shown.map(([k, label]) => (
+        <button key={k} type="button" onClick={() => onChange(k)} aria-pressed={value === k} className={cn('rounded-full border px-2.5 py-1 text-[11.5px] transition-colors', value === k ? 'border-accent-soft/70 bg-accent/15 text-fg' : 'border-line text-muted hover:border-line-2 hover:text-fg', k === '' && 'border-dashed')}>
+          {label}
+        </button>
+      ))}
+      {shown.length < entries.length && (
+        <button type="button" onClick={() => setAll(true)} className="rounded-full px-2 py-1 text-[11.5px] text-accent-soft hover:underline">
+          +{entries.length - shown.length} more
+        </button>
+      )}
+    </div>
+  )
+}
 
-const POSITIONS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']
-const SIZES = ['small', 'medium', 'large', 'huge']
-const STYLES = { shadow: 'Shadow', box: 'On a panel', outline: 'Outlined', plain: 'Plain' }
+type Preset = { id: string; name: string; preview_url: string | null }
 
-/** The words on a Design node's slides: what, where, how big, in which colour and font. */
-function TextsField({ value, onChange, ctx }: { value: TextItem[]; onChange: (v: unknown, now?: boolean) => void; ctx: FieldContext }) {
-  const set = (i: number, patch: Partial<TextItem>, now = false) => onChange(value.map((t, j) => (j === i ? { ...t, ...patch } : t)), now)
+/** A Higgsfield tool's looks, each with its preview: one click picks it. */
+function PresetPicker({ tool, value, onChange }: { tool: string; value: string; onChange: (v: string) => void }) {
+  const [presets, setPresets] = useState<Preset[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    let live = true
+    api<{ presets: Preset[] }>(`/lab/higgsfield/presets/${tool}`)
+      .then((r) => live && setPresets(r.presets))
+      .catch((e) => {
+        if (!live) return
+        setPresets([])
+        setError(e instanceof ApiError ? e.message : 'The looks couldn’t be loaded.')
+      })
+    return () => {
+      live = false
+    }
+  }, [tool])
+  if (!presets) return <div className="grid grid-cols-3 gap-1.5">{[0, 1, 2].map((i) => <div key={i} className="aspect-square animate-pulse rounded-md bg-white/[0.05]" />)}</div>
+  if (!presets.length) {
+    return (
+      <p className="text-[11.5px] leading-snug text-warn">
+        {error ?? 'No looks are available.'} <Link to="/dashboard/models" className="text-accent-soft hover:underline">Models</Link>
+      </p>
+    )
+  }
+  const words = q.trim().toLowerCase()
+  const shown = presets.filter((p) => !words || p.name.toLowerCase().includes(words))
+  const picked = presets.find((p) => p.id === value)
   return (
     <div className="space-y-2">
-      {value.map((t, i) => (
-        <div key={i} className="space-y-2 rounded-lg border border-line bg-white/[0.02] p-2.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-dim">Slide</span>
-            <input type="number" min={1} max={20} className={cn(inputClass, 'h-7 w-14 px-2 text-[12px]')} value={t.slide ?? 1} onChange={(e) => set(i, { slide: Number(e.target.value) || 1 }, true)} />
-            <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i), true)} className="ml-auto text-dim hover:text-fail" aria-label="Remove these words">
-              <Trash2 className="size-3.5" />
-            </button>
-          </div>
-          <textarea className={cn(inputClass, 'h-auto min-h-[52px] py-1.5 text-[12.5px]')} rows={2} value={t.text ?? ''} placeholder="The words ({offer} works)" onChange={(e) => set(i, { text: e.target.value })} onBlur={() => onChange(value, true)} />
-          <div className="grid grid-cols-2 gap-1.5">
-            <Select value={t.position ?? 'top'} onChange={(e) => set(i, { position: e.target.value }, true)} className="h-8 text-[12px]">
-              {POSITIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </Select>
-            <Select value={t.size ?? 'large'} onChange={(e) => set(i, { size: e.target.value }, true)} className="h-8 text-[12px]">
-              {SIZES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </Select>
-            <Select value={t.style ?? 'shadow'} onChange={(e) => set(i, { style: e.target.value }, true)} className="h-8 text-[12px]">
-              {Object.entries(STYLES).map(([k, l]) => (
-                <option key={k} value={k}>
-                  {l}
-                </option>
-              ))}
-            </Select>
-            <Select value={t.font ?? ''} onChange={(e) => set(i, { font: e.target.value || undefined }, true)} className="h-8 text-[12px]">
-              <option value="">Brand font / default</option>
-              {ctx.catalog.engine.fonts.map((f) => (
-                <option key={f.name} value={f.name}>
-                  {f.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-dim">Colour</span>
-            <input type="color" value={t.color?.startsWith('#') ? t.color : '#ffffff'} onChange={(e) => set(i, { color: e.target.value })} onBlur={() => onChange(value, true)} className="h-7 w-10 cursor-pointer rounded border border-line-2 bg-transparent" />
-            {t.style === 'box' && (
-              <>
-                <span className="text-[11px] text-dim">Panel</span>
-                <input type="color" value={t.box_color?.startsWith('#') ? t.box_color : '#000000'} onChange={(e) => set(i, { box_color: e.target.value })} onBlur={() => onChange(value, true)} className="h-7 w-10 cursor-pointer rounded border border-line-2 bg-transparent" />
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-      <Btn size="sm" icon={Plus} onClick={() => onChange([...value, { slide: 1, text: '', position: value.length ? 'bottom' : 'top', size: value.length ? 'medium' : 'large', style: 'shadow' }], true)}>
-        Add words
-      </Btn>
-      <p className="text-[11px] leading-snug text-dim">A headline connected to the node goes on slide 1 when there are no words here.</p>
+      {presets.length > 9 && <input className={cn(inputClass, 'h-8 text-[12px]')} placeholder="Find a look: anime, clay, comic…" value={q} onChange={(e) => setQ(e.target.value)} />}
+      <div data-scroll className="grid max-h-[300px] grid-cols-3 gap-1.5 overflow-y-auto pr-0.5">
+        {shown.map((p) => (
+          <button key={p.id} type="button" onClick={() => onChange(p.id)} aria-pressed={p.id === value} title={p.name} className={cn('group relative overflow-hidden rounded-md border text-left transition-colors', p.id === value ? 'border-accent-soft ring-2 ring-accent-soft/40' : 'border-line hover:border-line-2')}>
+            {p.preview_url ? <img src={p.preview_url} alt="" loading="lazy" referrerPolicy="no-referrer" className="aspect-square w-full object-cover" /> : <span className="block aspect-square w-full bg-white/[0.05]" />}
+            <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/85 to-transparent px-1.5 pb-1 pt-3 text-[10px] text-white">{p.name}</span>
+          </button>
+        ))}
+      </div>
+      {picked ? <p className="text-[11px] text-dim">Picked: {picked.name}</p> : value ? <p className="text-[11px] text-warn">The look picked isn’t offered any more: pick another.</p> : null}
     </div>
   )
 }

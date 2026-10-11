@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ComponentType } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type Ref } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, ArrowRight, ArrowUpRight, FolderKanban, Megaphone, MessageCircleQuestion, Sparkles, SquareDashed, Trash2, X } from 'lucide-react'
+import { useLenis } from 'lenis/react'
+import { ArrowLeft, ArrowRight, ArrowUpRight, FolderKanban, Megaphone, MessageCircleQuestion, Plus, Sparkles, SquareDashed, Trash2, X } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
-import { api, ApiError, type Campaign, type CampaignSummary, type LabPayload, type Project } from '../../lib/api'
+import { api, ApiError, type Campaign, type CampaignSummary, type LabCatalog, type LabPayload, type LabTemplate, type Project } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useQueryParam, useRouter } from '../../lib/router'
@@ -12,19 +13,32 @@ import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
 import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger } from '../ui'
+import { TemplateBrowser, TemplateSheet, TemplateStrip } from './Gallery'
 
 const studio = (project: number) => `/dashboard/studio?project=${project}`
 
 /**
- * Creative Lab's home: how to start (a few questions about the campaign, a campaign you have, or a
- * blank canvas), the projects, and the assistant beside them from the start, for whoever would
- * rather say what they want and let it ask the questions, make the project and build the nodes.
+ * Creative Lab's home: how to start (a post straight from the assistant, a blank canvas, or a
+ * campaign: a new one from a few questions, or one you have), the projects, and the assistant beside
+ * them from the start, for whoever would rather say what they want and let it make the project and
+ * build the nodes.
  */
 export function LabHome() {
   const { navigate } = useRouter()
   const toast = useToast()
+  const a = useAssistant()
+  const lenis = useLenis()
+  const panel = useRef<HTMLElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
+
+  // A fresh conversation where the assistant asks what to make; below the projects on narrower screens, so it comes up.
+  const newPost = () => {
+    a.newPost()
+    const el = panel.current
+    if (el && el.getBoundingClientRect().top > window.innerHeight / 2) lenis?.scrollTo(el, { offset: -24 })
+    a.inputRef.current?.focus({ preventScroll: true })
+  }
 
   const interview = async (depth: 'quick' | 'full') => {
     setBusy(depth)
@@ -62,12 +76,27 @@ export function LabHome() {
         <div className="min-w-0 space-y-10">
           <StartFrom />
           <Stagger i={0}>
-            <Label className="mb-3">Start a project</Label>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <StartCard icon={MessageCircleQuestion} title="Quick brief" meta="5 questions · 1 min" body="The essentials, like an agency would ask. The AI picks the questions for what you make, and suggests the rest." onClick={() => void interview('quick')} busy={busy === 'quick'} primary />
-              <StartCard icon={Sparkles} title="Thorough brief" meta="10 questions · 3 min" body="Your story, your customers, your voice and your look. The most personal content." onClick={() => void interview('full')} busy={busy === 'full'} />
-              <StartCard icon={Megaphone} title="From a campaign you have" meta="its brief and photos" body="A campaign you’ve already set up: its brief, logo and photos open on the canvas." onClick={() => setPicking(true)} />
-              <StartCard icon={SquareDashed} title="Blank canvas" meta="no brief for now" body="Put the nodes yourself. A brief can be added later, as a node." onClick={() => void blank()} busy={busy === 'blank'} />
+            <WhatYouCanMake onAsk={(t) => {
+              const el = panel.current
+              if (el && el.getBoundingClientRect().top > window.innerHeight / 2) lenis?.scrollTo(el, { offset: -24 })
+              void a.say(`I'd like to make ${t.name.toLowerCase()}, like the example: ${t.tagline}`)
+            }} />
+          </Stagger>
+          <Stagger i={0} className="space-y-6">
+            <div>
+              <Label className="mb-3">Make a post</Label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <StartCard icon={Plus} title="New post" meta="no questions" body="Tell the assistant what you want, a post, a reel or a story, and it makes it. No campaign to set up." onClick={newPost} busy={a.switching} primary />
+                <StartCard icon={SquareDashed} title="Blank canvas" meta="no brief for now" body="Put the nodes yourself. A brief can be added later, as a node." onClick={() => void blank()} busy={busy === 'blank'} />
+              </div>
+            </div>
+            <div>
+              <Label className="mb-3">Or set up a campaign first</Label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <StartCard icon={MessageCircleQuestion} title="New campaign, quick" meta="5 questions · 1 min" body="Creates your campaign from the essentials, like an agency would ask. The AI picks the questions for what you make, and suggests the rest." onClick={() => void interview('quick')} busy={busy === 'quick'} />
+                <StartCard icon={Sparkles} title="New campaign, thorough" meta="10 questions · 3 min" body="Creates your campaign from your story, your customers, your voice and your look. The most personal content." onClick={() => void interview('full')} busy={busy === 'full'} />
+                <StartCard icon={Megaphone} title="From a campaign you have" meta="its brief and photos" body="A campaign you’ve already set up: its brief, logo and photos open on the canvas." onClick={() => setPicking(true)} className="sm:col-span-2" />
+              </div>
             </div>
           </Stagger>
           <Stagger i={1}>
@@ -76,7 +105,7 @@ export function LabHome() {
           </Stagger>
         </div>
         <Stagger i={1} className="xl:sticky xl:top-6">
-          <AssistantPanel />
+          <AssistantPanel ref={panel} />
         </Stagger>
       </div>
 
@@ -85,9 +114,54 @@ export function LabHome() {
   )
 }
 
-function StartCard({ icon: Icon, title, meta, body, onClick, busy, primary }: { icon: ComponentType<{ className?: string; strokeWidth?: number }>; title: string; meta: string; body: string; onClick: () => void; busy?: boolean; primary?: boolean }) {
+/**
+ * Every template, each shown by an example made with it, so what you can get is plain before you
+ * start: a row of them at the top (all of them a click away), one opened big, then a project started
+ * from it (or the assistant asked for one like it).
+ */
+function WhatYouCanMake({ onAsk }: { onAsk: (t: LabTemplate) => void }) {
+  const { navigate } = useRouter()
+  const toast = useToast()
+  const { data: catalog } = useApi<LabCatalog>('/lab/catalog')
+  const [current, setCurrent] = useState<LabTemplate | null>(null)
+  const [open, setOpen] = useState(false)
+  const [all, setAll] = useState(false)
+  const templates = catalog?.templates.filter((t) => !t.mine) ?? []
+  const use = async (t: LabTemplate) => {
+    try {
+      const p = await api<LabPayload>('/lab/projects', { method: 'POST', body: { template: t.key, name: t.name } })
+      navigate(studio(p.project.id))
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'The project couldn’t be made.')
+    }
+  }
+  const ask = (t: LabTemplate) => {
+    setOpen(false)
+    setAll(false)
+    onAsk(t)
+  }
+  if (!catalog) return <Skeleton className="h-[300px] rounded-xl" />
   return (
-    <button type="button" onClick={onClick} disabled={busy} className={cn('group flex flex-col rounded-xl border bg-panel p-4 text-left transition-colors', primary ? 'border-accent/40 hover:border-accent/70' : 'border-line hover:border-line-2')}>
+    <>
+      <TemplateStrip
+        templates={templates}
+        title={<Label>What you can make</Label>}
+        sub="Every template, shown by an example made with it for a demo brand. Open one to see it big and how it was made, then start with it."
+        onOpen={(t) => {
+          setCurrent(t)
+          setOpen(true)
+        }}
+        onAll={() => setAll(true)}
+      />
+      <TemplateSheet t={current} list={templates} catalog={catalog} open={open} onClose={() => setOpen(false)} onStep={setCurrent} onUse={(t) => void use(t)} useLabel="Start with this template" onAsk={ask} />
+      <TemplateBrowser open={all} onClose={() => setAll(false)} templates={templates} catalog={catalog} onUse={(t) => void use(t)} useLabel="Start with this template" onAsk={ask} />
+    </>
+  )
+}
+
+function StartCard({ icon: Icon, title, meta, body, onClick, busy, primary, className }: { icon: ComponentType<{ className?: string; strokeWidth?: number }>; title: string; meta: string; body: string; onClick: () => void; busy?: boolean; primary?: boolean; className?: string }) {
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className={cn('group flex flex-col rounded-xl border bg-panel p-4 text-left transition-colors', primary ? 'border-accent/40 hover:border-accent/70' : 'border-line hover:border-line-2', className)}>
       <span className="flex items-center gap-2.5">
         <span className={cn('grid size-8 place-items-center rounded-lg', primary ? 'bg-accent/[0.12] text-accent-soft' : 'bg-white/[0.05] text-muted')}>
           <Icon className={cn('size-4', busy && 'animate-pulse')} strokeWidth={1.75} />
@@ -107,7 +181,7 @@ function StartCard({ icon: Icon, title, meta, body, onClick, busy, primary }: { 
  * The assistant, open on the home page: it can run the same questions in its chat (photos dropped
  * there come along), make the project, and build its nodes.
  */
-function AssistantPanel() {
+function AssistantPanel({ ref }: { ref?: Ref<HTMLElement> }) {
   const a = useAssistant()
   const toast = useToast()
   useEffect(() => {
@@ -119,7 +193,7 @@ function AssistantPanel() {
   }, [a.conn])
   useLeftLab()
   return (
-    <section aria-label="Assistant" className="flex h-[calc(100dvh-12rem)] min-h-[480px] flex-col overflow-hidden rounded-xl border border-line bg-panel">
+    <section ref={ref} aria-label="Assistant" className="flex h-[calc(100dvh-12rem)] min-h-[480px] flex-col overflow-hidden rounded-xl border border-line bg-panel">
       <div className="border-b border-line px-4 py-3">
         <p className="flex items-center gap-1.5 text-[13px] font-medium">
           <Sparkles className="size-3.5 text-accent-soft" /> Let the assistant do it

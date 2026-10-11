@@ -64,6 +64,11 @@ class PostNode extends Executor
             throw new NodeFailed('Connect the media or the caption, or write the caption here.');
         }
         $device = ! empty($p['device_id']) ? $user->devices()->find($p['device_id']) : null;
+        // Going out from a phone and none picked: the account's, or the only phone there is.
+        if ($when !== 'draft' && ! $device && ! $account->device_id && $user->devices()->count() === 1) {
+            $device = $user->devices()->first();
+        }
+        $driver = in_array($p['driver'] ?? null, ['direct', 'agent', 'auto'], true) ? $p['driver'] : null;
         $format = $assets->contains('kind', 'video') ? PostFormat::Video : ($assets->isNotEmpty() ? PostFormat::Image : PostFormat::Text);
         $check = $this->specs->check($account->platform, $p['placement'] ?? null, $caption, $assets);
 
@@ -81,6 +86,7 @@ class PostNode extends Executor
             'project_id' => $job->project->id,
             'node_id' => $job->node['id'],
             'device_id' => $device?->id,
+            'phone_driver' => $driver,
             'campaign_id' => Brief::campaign($job->inputs->brief())?->id ?? $post->campaign_id,
             'error' => null,
         ]);
@@ -117,12 +123,20 @@ class PostNode extends Executor
         }, $scheduled ? 'approved' : null);
 
         $note = null;
+        $who = ['direct' => 'your agent', 'agent' => 'the phone’s agent', 'auto' => 'the phone’s agent (yours if it fails)'][$driver ?? 'auto'];
+        $phone = $device ?? $account->device;
         if ($when === 'now') {
-            if (! $account->automation || ! ($device ?? $account->device)) {
-                $note = 'Scheduled for now, but it can’t go out by itself: the account needs automated publishing on and a phone.';
-            } elseif (! rescue(fn () => $this->publisher->open($post->fresh()), null, report: false)) {
-                $note = 'The phone is busy or paused: it goes out as soon as it’s free.';
+            if (! $phone) {
+                $note = 'Saved for now, but there’s no phone to post it from: add one on the Phones page, or pick one here.';
+            } elseif (rescue(fn () => $this->publisher->open($post->fresh(), byHand: true), null, report: false)) {
+                $note = "Posting now from {$phone->name}, by {$who}.";
+            } else {
+                $note = "{$phone->name} is busy or paused: it goes out as soon as it’s free, by {$who}.";
             }
+        } elseif ($scheduled) {
+            $note = ! $phone ? 'Scheduled, but there’s no phone to post it from: add one on the Phones page.'
+                : (! $account->automation ? 'Scheduled, but @'.$account->handle.'’s automated publishing is off, so it won’t go out by itself: turn it on under Accounts.'
+                    : "Goes out from {$phone->name}, by {$who}.");
         }
 
         return ['outputs' => ['post' => [

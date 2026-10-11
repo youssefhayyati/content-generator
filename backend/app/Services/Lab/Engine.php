@@ -9,6 +9,7 @@ use App\Models\NodeRun;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\Ai\GenerationFailed;
+use App\Services\Ai\Media\HiggsfieldClient;
 use App\Services\Ai\Models\ModelRegistry;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -234,6 +235,7 @@ class Engine
             'source' => ! empty($value['source_id']),
             'post' => ! empty($value['post_id']),
             'channel' => ! empty($value['account_id']),
+            'character' => ! empty($value['reference_id']),
             default => ! empty($value['assets']),
         };
     }
@@ -249,8 +251,9 @@ class Engine
         if ($base !== 'auto') {
             return $base;
         }
-        $p = $node['params'] ?? [];
-        if ($node['type'] === 'audio.music' && ($p['source'] ?? 'composer') === 'song') {
+        // With its defaults: a Music node placed as it comes writes a song (slow), not a mood.
+        $p = Catalog::withDefaults($node['type'], $node['params'] ?? []);
+        if ($node['type'] === 'audio.music' && $p['source'] === 'song') {
             return 'manual';
         }
         if (in_array($node['type'], ['image.generate', 'image.edit'], true)) {
@@ -266,14 +269,14 @@ class Engine
      * How long a run takes, roughly, and what it costs when that's known.
      *
      * @param  array<string, mixed>  $node
-     * @return array{seconds: int, cost: float|null, model: string|null}
+     * @return array{seconds: int, cost: float|null, model: string|null, unavailable: string|null}
      */
     public function estimate(array $node): array
     {
         $kind = Catalog::node($node['type']);
-        $model = isset(collect($kind['fields'])->firstWhere('kind', 'model')['key']) ? $this->modelFor($node) : null;
+        $model = $this->modelFor($node);
         $seconds = (int) ($model['capabilities']->seconds ?? $kind['seconds'] ?? 10);
-        if ($node['type'] === 'audio.music' && ($node['params']['source'] ?? 'composer') === 'song') {
+        if ($node['type'] === 'audio.music' && Catalog::withDefaults('audio.music', $node['params'] ?? [])['source'] === 'song') {
             $seconds = 45;
         }
         // Nodes without a model run on this server, the assistant or FlowAI Sound: free.
@@ -286,7 +289,8 @@ class Engine
             }
         }
 
-        return ['seconds' => $seconds, 'cost' => $price, 'model' => $model['label'] ?? null];
+        // A model that can't run now says why before anyone presses Run (a key missing, a connector untested).
+        return ['seconds' => $seconds, 'cost' => $price, 'model' => $model['label'] ?? null, 'unavailable' => $model && ! $model['available'] ? $model['reason'] : null];
     }
 
     /**
@@ -297,9 +301,11 @@ class Engine
      */
     public function modelFor(array $node): ?array
     {
-        $field = collect(Catalog::node($node['type'])['fields'] ?? [])->firstWhere('kind', 'model');
+        $kind = Catalog::node($node['type']);
+        $field = collect($kind['fields'] ?? [])->firstWhere('kind', 'model');
         if (! $field) {
-            return null;
+            // A node made for one model (Higgsfield's tools) runs on that one.
+            return isset($kind['model_id']) ? $this->models->find($kind['model_id']) : null;
         }
         $choices = $this->modelsFor($field['models']);
         $picked = $node['params']['model'] ?? null;
@@ -318,9 +324,12 @@ class Engine
         if (isset($this->modelLists[$which])) {
             return $this->modelLists[$which];
         }
-        $all = collect($this->models->all());
+        $everything = collect($this->models->all());
+        // Higgsfield's own tools (Cinema Studio, Ads Studio, Motion Control…) are only offered on their nodes.
+        $all = $everything->filter(fn ($m) => empty($m['capabilities']->feature));
         $takesImage = fn ($m) => (int) ($m['capabilities']->max_inputs ?? 0) > 0 || ! empty($m['capabilities']->requires_image);
         $list = match ($which) {
+            'cinema', 'ads', 'motion', 'restyle', 'character' => $everything->filter(fn ($m) => ($m['capabilities']->feature ?? null) === $which),
             'text' => $all->where('kind', 'text'),
             'image' => $all->where('kind', 'image')->reject(fn ($m) => ! empty($m['capabilities']->requires_image)),
             'image_edit' => $all->where('kind', 'image')->filter($takesImage),
@@ -392,7 +401,22 @@ class Engine
                 $seen[$e['from']] = true;
                 $up = Graph::find($ctx->canvas, $e['from']);
                 $state = $this->nodeState($ctx, $up);
-                if (in_array($state['status'], ['done', 'queued', 'running'], true)) {
+                if (in_array($state['status'], ['queued', 'running'], true)) {
+                    continue;
+                }
+                if ($state['status'] === 'done') {
+                    // Done, but with something before it out of date (a setting changed two nodes up):
+                    // once that runs its input changes, so it runs again after it. A version a person
+                    // pinned stays as it is.
+                    if ($state['policy'] !== 'none' && ! (isset($up['pin']) && empty($up['soft']))) {
+                        $deeper = $this->needed($ctx, $up, $seen);
+                        // A run already on its way before it counts too: it changes what this one gets.
+                        if ($deeper['run'] || $this->busyUpstream($ctx, $up)) {
+                            $run = [...$run, ...$deeper['run'], $up['id']];
+                            $blocked = [...$blocked, ...$deeper['blocked']];
+                        }
+                    }
+
                     continue;
                 }
                 if ($state['policy'] === 'none') {
@@ -439,7 +463,7 @@ class Engine
         foreach ($needed['run'] as $id) {
             $up = Graph::find($canvas, $id);
             if (! $ctx->runsOf($id)->contains(fn ($r) => in_array($r->status, ['queued', 'running'], true))) {
-                $this->queue($project, $up, $by, after: $this->waitsOn($ctx, $up, $needed['run']));
+                $this->queue($project, $up, $by, after: array_values(array_unique([...$this->waitsOn($ctx, $up, $needed['run']), ...$this->busyUpstream($ctx, $up)])));
             }
         }
 
@@ -480,7 +504,7 @@ class Engine
      */
     private function guard(array $node): void
     {
-        if (in_array($node['type'], ['people.swap', 'people.dub'], true) && empty($node['params']['consent'])) {
+        if (in_array($node['type'], ['people.swap', 'people.dub', 'people.character', 'people.motion'], true) && empty($node['params']['consent'])) {
             throw new InvalidArgumentException('Tick that the person whose face or voice it is agreed to it.');
         }
     }
@@ -673,6 +697,10 @@ class Engine
                 // The engine's job stops too (the pod's own work with it).
                 if ($g->external_id && (str_starts_with($g->model, 'pod/') || str_starts_with($g->model, 'engine/'))) {
                     app(EngineClient::class)->cancel((string) $g->external_id);
+                }
+                // A Higgsfield request still queued is canceled before it's charged for.
+                if ($g->external_id && str_starts_with($g->model, 'higgsfield/') && $g->kind !== 'character') {
+                    app(HiggsfieldClient::class)->cancel((string) $g->external_id);
                 }
                 $g->update(['status' => 'canceled', 'finished_at' => now()]);
             }

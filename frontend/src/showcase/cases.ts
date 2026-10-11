@@ -70,7 +70,7 @@ const KLING = 'Kling 3 Pro'
 const CLEAN = ' No text, no lettering, no logos.'
 
 /** The demo brands, each with the voice its account profile gives the writer. */
-const BRANDS = {
+export const BRANDS = {
   maisoncire: { name: "Maison Cire", handle: "maisoncire", trade: "Candle maker", voice: { tone: "Quiet, sensory and unhurried, like a perfumer's notebook.", style: "Short sentences. Concrete smells, textures and light. One idea per line.", do: "Name the scent notes. Say that every candle is poured by hand in small batches.", avoid: "Exclamation marks. The words cozy, vibe, treat yourself and must-have. More than one emoji.", hashtags: "Two at most, lowercase." } },
   lowtidecoffee: { name: "Low Tide Coffee", handle: "lowtidecoffee", trade: "Roaster and café", voice: { tone: "Dry, local and a little cheeky, like the person behind the counter who already knows your order.", style: "Short. One joke at most. Talks about the harbour and the weather like a neighbour would.", avoid: "Exclamation marks, vibes, strings of emoji.", hashtags: "Two at most." } },
   kilnandco: { name: "Kiln & Co", handle: "kilnandco", trade: "Ceramics studio", voice: { tone: "Warm, proud of the craft, precise about the process.", style: "Plain words a beginner would understand. Calm, never salesy.", do: "Use the potter's real terms (wedging, throwing, trimming, glazing, firing) and say in a few words what each one does.", avoid: "Magic, journey, labor of love, exclamation marks, numbered emoji.", hashtags: "Three at most, at the very end." } },

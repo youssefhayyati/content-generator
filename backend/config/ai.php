@@ -116,9 +116,12 @@ return [
             'key_id' => env('HIGGSFIELD_KEY_ID'),
             'key_secret' => env('HIGGSFIELD_KEY_SECRET'),
             // The models your Higgsfield plan includes.
-            'plan' => array_values(array_filter(explode(',', (string) env('HIGGSFIELD_PLAN', 'ideogram-4,wan-2-7-i2v,soul-v2,soul,soul-cinema,grok-image-2,kling-3-pro,seedance-2,hailuo-2-3')))),
-            // route: the model's endpoint. image_field: where an input image goes. params: what may be passed through.
+            'plan' => array_values(array_filter(explode(',', (string) env('HIGGSFIELD_PLAN', 'ideogram-4,wan-2-7-i2v,soul-v2,soul,soul-cinema,grok-image-2,kling-3-pro,seedance-2,hailuo-2-3,cinema-studio-4,soul-id,ads-studio,motion-control-std,motion-control-pro,genjutsu-restyle')))),
+            // route: the model's endpoint. image_field: where an input image goes. params: what may be passed through
+            // (the request schema, docs.higgsfield.ai; i2v_params when the image-to-video route takes fewer).
             // price: dollars per output, from your plan, for the usage numbers (null if unknown).
+            // feature: one of Higgsfield's own tools (Cinema Studio, Soul ID, Ads Studio, Motion Control, Restyle),
+            // with a Creative Lab node of its own rather than a place in the plain picture and video pickers.
             'models' => [
                 'ideogram-4' => ['label' => 'Ideogram 4.0', 'kind' => 'image', 'route' => '/ideogram/v4.0',
                     'image_field' => 'image_url', 'params' => ['aspect_ratio', 'rendering_speed', 'image_weight'], 'price' => null,
@@ -128,34 +131,73 @@ return [
                     'image_field' => 'image_url', 'requires_image' => true, 'params' => ['duration', 'resolution', 'negative_prompt', 'seed'], 'price' => null,
                     'capabilities' => ['durations' => [5, 10, 15], 'resolutions' => ['720p', '1080p'], 'max_inputs' => 1, 'requires_image' => true],
                     'purpose' => 'Short clips that bring a still to life'],
+                // Soul makes 1 or 4 pictures a request (batch_size), at 720p unless asked: 1080p for posts.
                 'soul-v2' => ['label' => 'Higgsfield Soul 2', 'kind' => 'image', 'route' => '/higgsfield-ai/soul/v2/standard',
-                    'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size'], 'price' => null,
-                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 0, 'seed' => true, 'max_outputs' => 4],
+                    'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size', 'custom_reference_id', 'custom_reference_strength'], 'extra' => ['resolution' => '1080p'], 'price' => null,
+                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 0, 'seed' => true, 'max_outputs' => 4, 'batch_sizes' => [1, 4]],
                     'purpose' => 'High-end social photography and editorial portraits'],
                 'soul' => ['label' => 'Higgsfield Soul', 'kind' => 'image', 'route' => '/higgsfield-ai/soul/standard',
-                    'reference_field' => 'image_reference_url', 'reference_list' => false, 'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size'], 'price' => null,
-                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 1, 'input_optional' => true, 'seed' => true, 'max_outputs' => 4],
+                    'reference_field' => 'image_reference_url', 'reference_list' => false, 'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size', 'custom_reference_id', 'custom_reference_strength'], 'extra' => ['resolution' => '1080p'], 'price' => null,
+                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 1, 'input_optional' => true, 'seed' => true, 'max_outputs' => 4, 'batch_sizes' => [1, 4]],
                     'purpose' => 'Fashion-grade portraits with an optional reference'],
                 'soul-cinema' => ['label' => 'Soul Cinema', 'kind' => 'image', 'route' => '/higgsfield-ai/soul/cinema',
-                    'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size'], 'price' => null,
-                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 0, 'seed' => true, 'max_outputs' => 4],
+                    'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size', 'custom_reference_id', 'custom_reference_strength'], 'extra' => ['resolution' => '1080p'], 'price' => null,
+                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 0, 'seed' => true, 'max_outputs' => 4, 'batch_sizes' => [1, 4]],
                     'purpose' => 'Cinematic campaign stills and key art'],
+                // One picture a request: more are more requests.
                 'grok-image-2' => ['label' => 'Grok Imagine Image 2', 'kind' => 'image', 'route' => '/xai/grok-imagine-image-2.0',
-                    'reference_field' => 'image_urls', 'reference_list' => true, 'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size', 'quality'], 'extra' => ['quality' => 'medium'], 'price' => null,
-                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['1k', '2k'], 'default_resolution' => '2k', 'max_inputs' => 10, 'input_optional' => true, 'seed' => true, 'max_outputs' => 4],
+                    'reference_field' => 'image_urls', 'reference_list' => true, 'params' => ['aspect_ratio', 'resolution', 'quality'], 'extra' => ['quality' => 'medium'], 'price' => null,
+                    'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['1k', '2k'], 'default_resolution' => '2k', 'max_inputs' => 10, 'input_optional' => true],
                     'purpose' => 'Fast, flexible social visuals with up to ten references'],
+                // The image-to-video routes take their shape from the picture: no aspect_ratio there.
                 'kling-3-pro' => ['label' => 'Kling 3 Pro', 'kind' => 'video', 'route' => '/kling-video/v3.0/pro/text-to-video', 'i2v_route' => '/kling-video/v3.0/pro/image-to-video',
-                    'image_field' => 'image_url', 'end_frame_field' => 'last_image_url', 'audio_field' => 'sound', 'audio_values' => ['on', 'off'], 'params' => ['aspect_ratio', 'duration', 'seed'], 'price' => null,
-                    'capabilities' => ['aspect_ratios' => ['16:9', '9:16', '1:1'], 'durations' => [5, 8, 10, 15], 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true, 'seed' => true],
+                    'image_field' => 'image_url', 'end_frame_field' => 'last_image_url', 'audio_field' => 'sound', 'audio_values' => ['on', 'off'], 'params' => ['aspect_ratio', 'duration'], 'i2v_params' => ['duration'], 'price' => null,
+                    'capabilities' => ['aspect_ratios' => ['16:9', '9:16', '1:1'], 'durations' => [5, 8, 10, 15], 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true],
                     'purpose' => 'Cinematic text-to-video or first/last-frame animation'],
                 'seedance-2' => ['label' => 'Seedance 2', 'kind' => 'video', 'route' => '/bytedance/seedance-2.0/text-to-video', 'i2v_route' => '/bytedance/seedance-2.0/image-to-video',
-                    'image_field' => 'image_url', 'end_frame_field' => 'end_image_url', 'audio_field' => 'generate_audio', 'params' => ['aspect_ratio', 'duration', 'resolution', 'seed'], 'price' => null,
-                    'capabilities' => ['aspect_ratios' => ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], 'durations' => [5, 8, 10, 15], 'resolutions' => ['480p', '720p', '1080p', '4k'], 'default_resolution' => '1080p', 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true, 'seed' => true],
+                    'image_field' => 'image_url', 'end_frame_field' => 'end_image_url', 'audio_field' => 'generate_audio', 'params' => ['aspect_ratio', 'duration', 'resolution'], 'i2v_params' => ['duration', 'resolution'], 'price' => null,
+                    'capabilities' => ['aspect_ratios' => ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], 'durations' => [5, 8, 10, 15], 'resolutions' => ['480p', '720p', '1080p', '4k'], 'default_resolution' => '1080p', 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true],
                     'purpose' => 'Social video with sound, from text or first/last frames'],
                 'hailuo-2-3' => ['label' => 'Hailuo 2.3', 'kind' => 'video', 'route' => '/minimax/hailuo-2.3/standard/text-to-video', 'i2v_route' => '/minimax/hailuo-2.3/standard/image-to-video',
-                    'image_field' => 'image_url', 'params' => ['duration', 'seed'], 'extra' => ['prompt_optimizer' => true], 'price' => null,
-                    'capabilities' => ['durations' => [6, 10], 'max_inputs' => 1, 'input_optional' => true, 'seed' => true],
+                    'image_field' => 'image_url', 'params' => ['duration'], 'extra' => ['prompt_optimizer' => true], 'price' => null,
+                    'capabilities' => ['durations' => [6, 10], 'max_inputs' => 1, 'input_optional' => true],
                     'purpose' => 'Fast text-to-video or image animation for short-form content'],
+
+                /* Higgsfield's own tools, each a Creative Lab node (Catalog, group higgsfield). */
+
+                // A director's shot: camera move, genre, lens, film stock and grade picked, the rest left to it.
+                // Reference pictures make it reference-to-video (<<<image_1>>> in the prompt points at one).
+                'cinema-studio-4' => ['label' => 'Cinema Studio 4', 'kind' => 'video', 'route' => '/higgsfield/cinema-studio/4.0',
+                    'reference_field' => 'image_urls', 'reference_list' => true,
+                    'params' => ['aspect_ratio', 'duration', 'resolution', 'generate_audio', 'camera_movement', 'genre', 'era', 'light', 'pacing', 'camera_lens', 'camera_model', 'camera_aperture', 'color_palette'], 'price' => null,
+                    'capabilities' => ['feature' => 'cinema', 'aspect_ratios' => ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'], 'durations' => [4, 5, 6, 8, 10, 12, 15, 20, 25, 30], 'resolutions' => ['480p', '720p'], 'max_inputs' => 30, 'input_optional' => true, 'audio' => true, 'seconds' => 240],
+                    'purpose' => 'Cinematic shots with real camera moves (dolly zoom, bullet time, drone orbit…), with sound'],
+                // Trains a character from photos of one person; Soul pictures then keep that face.
+                'soul-id' => ['label' => 'Soul ID', 'kind' => 'character', 'route' => '/v1/custom-references', 'price' => null,
+                    'capabilities' => ['feature' => 'character', 'max_inputs' => 100, 'seconds' => 420],
+                    'purpose' => 'A character trained once from photos, the same face in every picture'],
+                // Finished ads (headline and copy drawn in), 1 to 8 concepts from one brief.
+                'ads-studio' => ['label' => 'Ads Studio', 'kind' => 'image', 'route' => '/higgsfield/ads-studio/v1.0',
+                    'reference_field' => 'image_urls', 'reference_list' => true, 'params' => ['aspect_ratio', 'batch_size', 'niche', 'target_audience', 'language'], 'price' => null,
+                    'capabilities' => ['feature' => 'ads', 'aspect_ratios' => ['1:1', '4:5', '5:4', '16:9', '9:16', '4:3', '3:4', '21:9', '3:2', '2:3'], 'max_inputs' => 10, 'input_optional' => true, 'max_outputs' => 8, 'seconds' => 120],
+                    'purpose' => 'Ready-to-post ads from a brief and product photos, several concepts at once'],
+                // The moves of one video, done by the person in a picture (trends, dances, gestures).
+                'motion-control-std' => ['label' => 'Kling 3 Motion Control', 'kind' => 'video', 'route' => '/kling-video/v3/motion-control/std',
+                    'image_field' => 'image_url', 'video_field' => 'video_url', 'requires_image' => true, 'requires_video' => true, 'prompt_optional' => true,
+                    'params' => ['keep_original_sound', 'character_orientation'], 'price' => null,
+                    'capabilities' => ['feature' => 'motion', 'max_inputs' => 1, 'requires_image' => true, 'seconds' => 300],
+                    'purpose' => 'The moves from a video, done by the person in your picture'],
+                'motion-control-pro' => ['label' => 'Kling 3 Motion Control Pro', 'kind' => 'video', 'route' => '/kling-video/v3/motion-control/pro',
+                    'image_field' => 'image_url', 'video_field' => 'video_url', 'requires_image' => true, 'requires_video' => true, 'prompt_optional' => true,
+                    'params' => ['keep_original_sound', 'character_orientation'], 'price' => null,
+                    'capabilities' => ['feature' => 'motion', 'max_inputs' => 1, 'requires_image' => true, 'seconds' => 420],
+                    'purpose' => 'The same, sharper hands and faces; slower and dearer'],
+                // A video in another look (anime, clay, comic…), its motion, framing and sound kept.
+                'genjutsu-restyle' => ['label' => 'Genjutsu Restyle', 'kind' => 'video', 'route' => '/higgsfield/genjutsu/restyle/v1.0',
+                    'video_field' => 'video_url', 'reference_field' => 'image_urls', 'reference_list' => true, 'requires_video' => true, 'prompt_optional' => true,
+                    'params' => ['preset_id', 'resolution'], 'presets' => '/models/higgsfield/genjutsu/restyle/v1.0/presets', 'price' => null,
+                    'capabilities' => ['feature' => 'restyle', 'resolutions' => ['480p', '720p', '1080p'], 'max_inputs' => 5, 'input_optional' => true, 'seconds' => 300],
+                    'purpose' => 'Your video in another look, its motion and sound kept'],
             ],
         ],
 

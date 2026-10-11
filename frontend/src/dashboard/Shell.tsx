@@ -37,7 +37,7 @@ import { cn } from '../lib/cn'
 import { useRouter } from '../lib/router'
 import { useSession } from '../lib/session'
 import { firstName, fmtRelative, postState, titleOf, useApi, type Overview } from './data'
-import { NAV, NAV_GROUPS, pageLabel, SETTINGS, type NavItem } from './nav'
+import { NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, type NavItem } from './nav'
 import { useToast } from './toast'
 import { Avatar, Kbd, Menu, Platforms, StateBadge } from './ui'
 
@@ -100,7 +100,7 @@ export function Shell({ children }: { children: ReactNode }) {
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key.toLowerCase() === 'n') {
         e.preventDefault()
-        navigate('/dashboard/create')
+        navigate(NEW_POST)
       } else if (e.key === '[') {
         e.preventDefault()
         setRail((r) => !r)
@@ -286,7 +286,7 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
       <div className="shrink-0 px-3 pb-1 pt-3">
         <button
           type="button"
-          onClick={() => navigate('/dashboard/create')}
+          onClick={() => navigate(NEW_POST)}
           aria-label={rail ? 'New post' : undefined}
           {...tipProps('New post  N')}
           className={cn(
@@ -597,7 +597,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
 
   const needle = q.trim().toLowerCase()
   const pages: Result[] = [
-    { key: 'new', label: 'New post', icon: Plus, to: '/dashboard/create', hint: <Kbd>N</Kbd> },
+    { key: 'new', label: 'New post', icon: Plus, to: NEW_POST, hint: <Kbd>N</Kbd> },
     ...NAV.map((n) => ({ key: n.path, label: n.label, icon: n.icon, to: n.path })),
   ].filter((r) => !needle || r.label.toLowerCase().includes(needle))
   const found: Result[] = posts.map((p) => ({

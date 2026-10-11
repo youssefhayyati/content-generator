@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['title', 'body', 'format', 'placement', 'platforms', 'status', 'account_id', 'campaign_id', 'variant_id', 'scheduled_at', 'published_at', 'approved_at', 'approved_by', 'post_url', 'error', 'project_id', 'node_id', 'device_id', 'metrics', 'metrics_at'])]
+#[Fillable(['title', 'body', 'format', 'placement', 'platforms', 'status', 'account_id', 'campaign_id', 'variant_id', 'scheduled_at', 'published_at', 'approved_at', 'approved_by', 'post_url', 'error', 'project_id', 'node_id', 'device_id', 'phone_driver', 'metrics', 'metrics_at'])]
 class Post extends Model
 {
     /** @use HasFactory<PostFactory> */

@@ -30,6 +30,12 @@ class Executors
         'finish.design' => Nodes\Design::class,
         'finish.channel' => Nodes\Channel::class,
         'finish.post' => Nodes\PostNode::class,
+        'video.cinema' => Nodes\Cinema::class,
+        'people.character' => Nodes\Character::class,
+        'image.character' => Nodes\CharacterPicture::class,
+        'people.motion' => Nodes\Motion::class,
+        'image.ads' => Nodes\Ads::class,
+        'video.restyle' => Nodes\Restyle::class,
     ];
 
     public static function for(string $type): Executor

@@ -154,18 +154,20 @@ export function LabVoicePicker({ id, value, onChange, prefix = '', emptyLabel }:
         </Btn>
       </div>
 
+      {/* Cloning is always one click away, like in the assistant's voice picker. */}
+      {list?.clonable !== false && <CloneVoice className="mt-1.5" clone={clone} onCloned={(v) => void use(v, false)} />}
+
       <AnimatePresence initial={false}>
         {open && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease }} className="overflow-hidden">
             <div className="space-y-3 pt-2">
-              {list?.clonable && <CloneVoice clone={clone} onCloned={(v) => void use(v, false)} />}
               {list?.choosable !== false && (
-                <div className="flex gap-1.5">
-                  <label className="relative block min-w-0 flex-1">
+                <div className="space-y-1.5">
+                  <label className="relative block">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
                     <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Describe it: warm, british, narration…" aria-label="Find a voice" className={cn(inputClass, 'h-8 pl-8 text-[12.5px]')} />
                   </label>
-                  <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" className={cn(inputClass, 'h-8 w-[7.5rem] shrink-0 px-2 text-[12px]')}>
+                  <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" className={cn(inputClass, 'h-8 px-2 text-[12px]')}>
                     <option value="">Any language</option>
                     {(list?.languages ?? []).map((l) => (
                       <option key={l} value={l}>

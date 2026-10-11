@@ -342,8 +342,12 @@ function PhoneFields({ device, onDone }: { device: Device | null; onDone: () => 
       {driver === 'http' && (
         <label className="block">
           <Label>Device ID on the phone-control service</Label>
-          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="phone-1" className={cn(inputClass, 'mt-2')} />
+          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="heracles-phone" className={cn(inputClass, 'mt-2')} />
           <FieldError message={errors.ref} />
+          <p className="mt-1.5 text-[11.5px] text-dim">
+            The phone’s name (Phone: heracles-phone), not the team key: the key signs in to the console and stays in the
+            assistant’s <span className="font-mono text-[11px]">PHONE_API_KEY</span>.
+          </p>
         </label>
       )}
 

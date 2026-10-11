@@ -49,6 +49,47 @@ class HiggsfieldClient
     }
 
     /**
+     * Start training a Soul ID character from pictures (public URLs). It isn't a generation: it answers
+     * with the character's id, polled at /v1/custom-references/{id} until it's completed.
+     *
+     * @param  list<string>  $imageUrls
+     * @return array{id: string, status_url: string}
+     */
+    public function createCharacter(string $name, string $version, array $imageUrls, string $idempotencyKey): array
+    {
+        $r = $this->call(fn () => $this->http()->withHeaders(['Idempotency-Key' => $idempotencyKey])->post('/v1/custom-references', [
+            'name' => mb_substr($name, 0, 100),
+            'model_version' => $version,
+            'input_images' => array_map(fn ($url) => ['type' => 'image_url', 'image_url' => $url], $imageUrls),
+        ]));
+        $id = (string) ($r->json('id') ?? throw new GenerationFailed('Higgsfield didn’t start training the character.'));
+
+        return ['id' => $id, 'status_url' => "/v1/custom-references/{$id}"];
+    }
+
+    /**
+     * Cancel a request while it's still queued, so a stopped node isn't paid for. Once it has started
+     * Higgsfield refuses (400), and that's fine: nothing more can be done.
+     */
+    public function cancel(string $requestId): void
+    {
+        rescue(fn () => $this->http()->timeout(10)->post("/requests/{$requestId}/cancel"), report: false);
+    }
+
+    /**
+     * A tool's style presets (Restyle's looks): id, name and a preview picture each.
+     *
+     * @return list<array{id: string, name: string, preview_url: string|null}>
+     */
+    public function presets(string $path): array
+    {
+        return collect($this->call(fn () => $this->http()->timeout(20)->get($path))->json('items') ?? [])
+            ->filter(fn ($p) => is_array($p) && filled($p['id'] ?? null))
+            ->map(fn ($p) => ['id' => (string) $p['id'], 'name' => (string) ($p['name'] ?? 'Style'), 'preview_url' => $p['preview_url'] ?? null])
+            ->values()->all();
+    }
+
+    /**
      * Upload a file so a model can read it; returns the public URL to pass as image_url.
      */
     public function upload(string $contents, string $mime): string

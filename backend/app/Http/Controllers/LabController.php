@@ -10,6 +10,7 @@ use App\Models\Post;
 use App\Models\Project;
 use App\Models\VideoSource;
 use App\Services\Ai\GenerationFailed;
+use App\Services\Ai\Media\HiggsfieldClient;
 use App\Services\Intake\Brief;
 use App\Services\Lab\Catalog;
 use App\Services\Lab\Engine;
@@ -19,6 +20,7 @@ use App\Services\Lab\NodeFailed;
 use App\Services\Lab\References;
 use App\Services\Lab\Templates;
 use App\Services\Lab\VideoSources;
+use App\Services\PostQueue;
 use App\Services\Sound\SoundClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -77,6 +79,8 @@ class LabController extends Controller
             'devices' => $user->devices()->get()->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'driver' => $d->driver, 'ref' => $d->ref, 'status' => $d->status,
                 'drives' => $d->driver === 'simulator' ? 'The simulator' : 'The phone agent or the publishing automation, whichever serves this phone'])->values(),
             'campaigns' => $user->campaigns()->latest('id')->limit(50)->get(['id', 'name', 'stage'])->values(),
+            // The queue's next free posting time, for Post's "Next free slot" (null: no posting times yet).
+            'queue_next' => app(PostQueue::class)->nextFree($user)?->toIso8601ZuluString(),
         ]);
     }
 
@@ -89,6 +93,25 @@ class LabController extends Controller
         $price = (config("ai.providers.{$provider}.models") ?? [])[$name]['price'] ?? null;
 
         return $price === null ? null : (float) $price;
+    }
+
+    /**
+     * A Higgsfield tool's style presets (Restyle's looks), with their previews, for the node's picker.
+     * Kept for an hour: the catalogue changes rarely.
+     */
+    public function presets(string $tool, HiggsfieldClient $higgsfield): JsonResponse
+    {
+        $path = ['restyle' => config('ai.providers.higgsfield.models.genjutsu-restyle.presets')][$tool] ?? abort(404, 'There is no such tool.');
+        if (! filled(config('ai.providers.higgsfield.key_id')) || ! filled(config('ai.providers.higgsfield.key_secret'))) {
+            return response()->json(['message' => 'Connect Higgsfield under Models to see its looks.', 'presets' => []], 409);
+        }
+        try {
+            $presets = Cache::remember("higgsfield.presets.{$tool}", 3600, fn () => $higgsfield->presets($path) ?: null) ?? [];
+        } catch (GenerationFailed $e) {
+            return response()->json(['message' => $e->getMessage(), 'presets' => []], 502);
+        }
+
+        return response()->json(['presets' => $presets]);
     }
 
     /** Voices the engine reads with (for Pictures to video and Dub), searched. */
@@ -219,7 +242,8 @@ class LabController extends Controller
     }
 
     /**
-     * Everything out of date (or never run), in order: what it takes, or (with `confirm`) running it.
+     * Everything out of date (or never run), in order, and what's done but comes after one of those (it
+     * would be out of date once they've run): what it takes, or (with `confirm`) running it.
      */
     public function runAll(Request $request, Project $project): JsonResponse
     {
@@ -234,7 +258,8 @@ class LabController extends Controller
                 continue;
             }
             $s = $this->engine->nodeState($ctx, $n);
-            if (in_array($s['status'], ['ready', 'stale', 'failed'], true) || ($s['status'] === 'missing' && ! array_filter($s['missing'], fn ($m) => ! str_starts_with($m, 'Waiting for')))) {
+            $after = $s['status'] === 'done' && empty($n['pin']) && array_intersect(Graph::upstream($canvas, $id), array_column($todo, 'id'));
+            if ($after || in_array($s['status'], ['ready', 'stale', 'failed'], true) || ($s['status'] === 'missing' && ! array_filter($s['missing'], fn ($m) => ! str_starts_with($m, 'Waiting for')))) {
                 $todo[] = ['id' => $id, 'type' => $n['type'], 'label' => $n['label'] ?? Catalog::node($n['type'])['label'], ...$this->engine->estimate($n)];
             }
         }

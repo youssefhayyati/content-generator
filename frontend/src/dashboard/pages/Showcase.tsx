@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api, ApiError, type LabCatalog, type LabPayload, type LabTemplate } from '../../lib/api'
 import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Copy, Wand2 } from 'lucide-react'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
@@ -7,6 +8,9 @@ import { useRouter } from '../../lib/router'
 import { CASES, GROUPS, KIND_LABEL, MAKE_LABEL, makePath, VOICE_LABEL, type Case, type Group, type Voice } from '../../showcase/cases'
 import { Clip, FlowMap, monogram, Picture, PostText, platformName } from '../../showcase/pieces'
 import { Stage } from '../../showcase/stage'
+import { useApi } from '../data'
+import { TemplateGrid, TemplateSheet } from '../lab/Gallery'
+import { useToast } from '../toast'
 import { Btn, Label, Modal, PageHeader, Segmented, Stagger } from '../ui'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -72,7 +76,46 @@ export default function Showcase() {
       </Stagger>
 
       <CaseModal c={current} open={open} onClose={() => setOpen(false)} onStep={step} />
+
+      <LabMade />
     </div>
+  )
+}
+
+/** Creative Lab's templates, each shown by an example made with it: open one, then start a project from it. */
+function LabMade() {
+  const { navigate } = useRouter()
+  const toast = useToast()
+  const { data: catalog } = useApi<LabCatalog>('/lab/catalog')
+  const [current, setCurrent] = useState<LabTemplate | null>(null)
+  const [open, setOpen] = useState(false)
+  const templates = catalog?.templates.filter((t) => !t.mine) ?? []
+  if (!templates.length) return null
+  return (
+    <Stagger i={2} className="mt-16">
+      <h2 className="text-[22px] font-medium tracking-[-0.02em]">
+        Made in <Serif>Creative Lab.</Serif>
+      </h2>
+      <p className="mt-2 max-w-[70ch] text-[13px] leading-relaxed text-muted">Every template on the canvas, shown by an example made with it, on the GPU pod’s models, for the same demo brands. Open one to see what it was given, the steps it ran and how it came out, then start with it.</p>
+      <TemplateGrid templates={templates} className="mt-5" onOpen={(t) => {
+        setCurrent(t)
+        setOpen(true)
+      }} />
+      <TemplateSheet
+        t={current}
+        list={templates}
+        catalog={catalog}
+        open={open}
+        onClose={() => setOpen(false)}
+        onStep={setCurrent}
+        useLabel="Start with this template"
+        onUse={(t) => {
+          api<LabPayload>('/lab/projects', { method: 'POST', body: { template: t.key, name: t.name } })
+            .then((p) => navigate(`/dashboard/studio?project=${p.project.id}`))
+            .catch((e) => toast(e instanceof ApiError ? e.message : 'The project couldn’t be made.'))
+        }}
+      />
+    </Stagger>
   )
 }
 

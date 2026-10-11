@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CalendarDays, Copy, ExternalLink, GitBranch, History, LoaderCircle, Pin, PinOff, Play, Scissors, ShieldCheck, Square, Trash2, X } from 'lucide-react'
+import { AlertTriangle, CalendarDays, ChevronDown, Send, Copy, ExternalLink, GitBranch, History, KeyRound, LoaderCircle, Pin, PinOff, Play, Scissors, ShieldCheck, Square, Trash2, TypeOutline, X } from 'lucide-react'
 import { api, ApiError, type Asset, type LabCatalog, type LabMoment, type LabNode, type LabPayload, type LabPlan, type LabSource, type LabValue } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { Link } from '../../lib/router'
@@ -10,6 +10,8 @@ import { useToast } from '../toast'
 import { Btn, Label, inputClass } from '../ui'
 import { FieldEditor, shown, type FieldContext } from './fields'
 import { costLine, fmtSeconds, hueOf, iconOf } from './look'
+import { AiBadge } from './NodeCard'
+import { useRemove } from './remove'
 import { newNodeId, type Lab, type LabHistoryRun } from './useLab'
 
 /**
@@ -26,7 +28,10 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
   const [plan, setPlan] = useState<LabPlan | null>(null)
   const [asset, setAsset] = useState<Asset | null>(null)
   const [extra, setExtra] = useState<Record<number, Asset>>({})
+  const [more, setMore] = useState(false)
+  const remove = useRemove(lab, catalog)
   useEffect(() => setLabel(node?.label ?? ''), [nodeId, node?.label])
+  useEffect(() => setMore(false), [nodeId])
 
   const assets = useMemo(() => ({ ...data.assets, ...extra }), [data.assets, extra])
 
@@ -37,6 +42,7 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
     const moments = into('moments')[0]?.moments ?? null
     const img = into('image')[0]?.assets?.[0]
     const account = catalog.accounts.find((a) => a.id === Number(node.params?.account_id))
+    const brief = into('brief')[0]?.brief
     return {
       catalog,
       node,
@@ -44,21 +50,27 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
       moments,
       image: img ? assets[img] ?? null : null,
       platform: account?.platform ?? null,
+      media: into('media').flatMap((v) => v.assets ?? []).map((id) => assets[id]).filter((a) => a && (a.kind === 'image' || a.kind === 'video')),
+      palette: (brief?.palette ?? []).filter(Boolean),
       remember: (list: Asset[]) => setExtra((e) => ({ ...e, ...Object.fromEntries(list.map((a) => [a.id, a])) })),
     }
   }, [node, data, catalog, assets])
 
-  // What running it takes (the nodes before it that have to run too), for slow or paid nodes.
+  // What running it takes (the nodes before it that have to run too), for slow or paid nodes. Asked
+  // again only when the node, how it stands or what it costs changes: never on every refresh of the
+  // page (`lab` itself is new each time), which blanked the plan and made this panel flicker. The
+  // last plan stays on screen until the new one is in.
+  const askPlan = lab.plan
+  useEffect(() => setPlan(null), [nodeId])
   useEffect(() => {
-    setPlan(null)
     if (!state || state.policy === 'none' || state.policy === 'post') return
     if (!['ready', 'stale', 'failed', 'missing', 'done'].includes(state.status)) return
     let cancelled = false
-    lab.plan(nodeId).then((p) => !cancelled && setPlan(p)).catch(() => {})
+    askPlan(nodeId).then((p) => !cancelled && setPlan(p)).catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [nodeId, state?.status, state?.policy, lab])
+  }, [nodeId, state?.status, state?.policy, state?.estimate?.cost, state?.estimate?.model, askPlan])
 
   if (!node || !kind || !ctx) return null
   const hue = hueOf(kind)
@@ -67,7 +79,10 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
   const connected = (port: string) => data.canvas.edges.some((e) => e.to === node.id && e.in === port)
   const running = state?.status === 'running' || state?.status === 'queued'
   const fields = kind.fields.filter((f) => shown(f, params, connected))
+  const main = fields.filter((f) => !f.advanced)
+  const advanced = fields.filter((f) => f.advanced)
   const before = plan?.nodes.filter((n) => n.id !== nodeId) ?? []
+  const editor = (f: (typeof fields)[number]) => <FieldEditor key={f.key} field={f} ctx={ctx} value={node.params?.[f.key] ?? f.default} onChange={(v, now) => lab.setParams(node.id, { [f.key]: v }, now)} />
 
   const runIt = async () => {
     if (await lab.run(nodeId)) toast(before.length ? `Running it, with the ${before.length} before it.` : `${kind.label}: running.`)
@@ -91,6 +106,10 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
             aria-label="Name"
           />
           <p className="mt-0.5 text-[11.5px] leading-snug text-dim">{kind.detail}</p>
+          <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-snug text-muted">
+            <AiBadge kind={kind} long />
+            {kind.ai_detail && <span className="pt-px">{kind.ai_detail}</span>}
+          </p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close" className="text-dim hover:text-fg">
           <X className="size-4" />
@@ -133,6 +152,17 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
                 </Btn>
               </div>
             )}
+            {state.estimate?.unavailable && (
+              <p className="flex gap-1.5 text-[11.5px] leading-snug text-warn">
+                <KeyRound className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  {state.estimate.model ?? 'Its model'} can’t run yet: {state.estimate.unavailable}{' '}
+                  <Link to="/dashboard/models" className="text-accent-soft hover:underline">
+                    Models
+                  </Link>
+                </span>
+              </p>
+            )}
             {state.status === 'failed' && state.failed?.error && (
               <p className="flex gap-1.5 text-[12px] leading-snug text-fail">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -147,15 +177,18 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
         {node.type === 'source.youtube' && <YoutubePanel lab={lab} node={node} source={state?.source ?? null} />}
 
         {/* Settings */}
-        {fields.length > 0 && (
+        {main.length > 0 && <section className="space-y-3.5">{main.map(editor)}</section>}
+        {advanced.length > 0 && (
           <section className="space-y-3.5">
-            {fields.map((f) => (
-              <FieldEditor key={f.key} field={f} ctx={ctx} value={node.params?.[f.key] ?? f.default} onChange={(v, now) => lab.setParams(node.id, { [f.key]: v }, now)} />
-            ))}
+            <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="flex items-center gap-1.5 text-[12px] text-muted hover:text-fg">
+              <ChevronDown className={cn('size-3.5 transition-transform', more && 'rotate-180')} />
+              {more ? 'Fewer settings' : `More settings (${advanced.length})`}
+            </button>
+            {more && advanced.map(editor)}
           </section>
         )}
 
-        {node.type === 'finish.post' && <PostPanel lab={lab} node={node} />}
+        {node.type === 'finish.post' && <PostPanel lab={lab} node={node} catalog={catalog} />}
 
         {/* What it made */}
         <Outputs lab={lab} node={node} catalog={catalog} assets={assets} onAsset={setAsset} onSelect={onSelect} />
@@ -176,7 +209,7 @@ export function Inspector({ lab, catalog, nodeId, onClose, onSelect }: { lab: La
           </Btn>
         )}
         <Btn size="sm" variant="subtle" icon={Trash2} className="ml-auto" onClick={() => {
-          void lab.ops([{ op: 'remove', id: node.id }])
+          remove([node.id])
           onClose()
         }}>
           Remove
@@ -223,9 +256,29 @@ function Outputs({ lab, node, catalog, assets, onAsset, onSelect }: { lab: Lab; 
       })
   }
 
+  /** Text over what it made: a Text over it node after it, joined, open to write on. */
+  const textOver = () => {
+    const kind = catalog.nodes[node.type]
+    const port = kind?.outputs.find((o) => (o.type === 'image' || o.type === 'video') && (outs[o.name]?.assets?.length ?? 0) > 0)
+    if (!port) return
+    const id = newNodeId(data.canvas, catalog.nodes['finish.design'])
+    void lab.ops([
+      { op: 'add', node: { id, type: 'finish.design', x: node.x + 340, y: node.y } },
+      { op: 'connect', from: node.id, out: port.name, to: id, in: 'media' },
+    ]).then((r) => r && onSelect(id))
+  }
+  const canTextOver = !['finish.design', 'finish.channel', 'finish.post'].includes(node.type) && media.some((a) => a.kind === 'image' || a.kind === 'video')
+
   return (
     <section className="space-y-3">
-      <Label>What it made{state?.current && state.versions && state.versions > 1 ? ` · version ${state.current.version}` : ''}</Label>
+      <div className="flex items-center gap-2">
+        <Label>What it made{state?.current && state.versions && state.versions > 1 ? ` · version ${state.current.version}` : ''}</Label>
+        {canTextOver && (
+          <Btn size="sm" variant="subtle" icon={TypeOutline} className="ml-auto" onClick={textOver}>
+            Add text over it
+          </Btn>
+        )}
+      </div>
       {media.some((a) => a.kind === 'image') && (
         <div className="grid grid-cols-2 gap-1.5">
           {media.filter((a) => a.kind === 'image').map((a) => (
@@ -241,10 +294,11 @@ function Outputs({ lab, node, catalog, assets, onAsset, onSelect }: { lab: Lab; 
       {media.filter((a) => a.kind === 'audio').map((a) => (
         <Player key={a.id} asset={a} />
       ))}
-      {values.filter((v) => v.type === 'text' && v.text).map((v, i) => (
-        <div key={i} className="relative rounded-lg border border-line bg-white/[0.02] p-3">
-          <p className="whitespace-pre-wrap pr-6 text-[12.5px] leading-relaxed">{v.text}</p>
-          <button type="button" aria-label="Copy" onClick={() => void navigator.clipboard.writeText(v.text ?? '').then(() => toast('Copied.'))} className="absolute right-2 top-2 text-dim hover:text-fg">
+      {values.filter((v) => v.type === 'text' && v.text).flatMap((v, i) => (v.items && v.items.length > 1 ? v.items.map((t, k) => ({ key: `${i}-${k}`, n: k + 1, text: t })) : [{ key: `${i}`, n: 0, text: v.text ?? '' }])).map((piece) => (
+        <div key={piece.key} className="relative rounded-lg border border-line bg-white/[0.02] p-3">
+          {piece.n > 0 && <p className="mb-1 font-mono text-[10.5px] text-dim">#{piece.n}</p>}
+          <p className="whitespace-pre-wrap pr-6 text-[12.5px] leading-relaxed">{piece.text}</p>
+          <button type="button" aria-label="Copy" onClick={() => void navigator.clipboard.writeText(piece.text).then(() => toast('Copied.'))} className="absolute right-2 top-2 text-dim hover:text-fg">
             <Copy className="size-3.5" />
           </button>
         </div>
@@ -287,13 +341,14 @@ function Versions({ lab, node, pinned, currentId }: { lab: Lab; node: LabNode; p
   const [runs, setRuns] = useState<LabHistoryRun[] | null>(null)
   const [assets, setAssets] = useState<Record<number, Asset>>({})
   const [open, setOpen] = useState(false)
+  const askHistory = lab.history
   useEffect(() => {
     if (!open) return
-    lab.history(node.id).then((h) => {
+    askHistory(node.id).then((h) => {
       setRuns(h.runs)
       setAssets(h.assets)
     }).catch(() => setRuns([]))
-  }, [open, node.id, lab, currentId])
+  }, [open, node.id, askHistory, currentId])
 
   return (
     <section className="space-y-2">
@@ -451,27 +506,62 @@ function YoutubePanel({ lab, node, source }: { lab: Lab; node: LabNode; source: 
 }
 
 /** A Post node: saving or scheduling it (a person's decision), and how it went. */
-function PostPanel({ lab, node }: { lab: Lab; node: LabNode }) {
+const POSTED_BY: Record<string, string> = { direct: 'your agent', agent: 'the phone’s agent', auto: 'the phone’s agent (yours if it fails)' }
+
+function PostPanel({ lab, node, catalog }: { lab: Lab; node: LabNode; catalog: LabCatalog }) {
   const toast = useToast()
   const data = lab.data as LabPayload
   const state = data.nodes[node.id]
   const post = state?.post
   const when = String(node.params?.when ?? 'draft')
   const [saving, setSaving] = useState(false)
-  const verb = when === 'draft' ? (post ? 'Save the draft again' : 'Save as a draft') : when === 'now' ? 'Post now' : 'Approve and schedule'
+  // Already out: running it again makes a new post, so it asks once more first.
+  const [again, setAgain] = useState(false)
+  useEffect(() => setAgain(false), [node.id, when])
+  const out = post?.status === 'published' || post?.status === 'publishing'
+  const verb = when === 'draft' ? (post && !out ? 'Save the draft again' : 'Save as a draft') : when === 'now' ? 'Post now' : 'Approve and schedule'
+  // Where it goes from: the phone picked, else the account's (on the node, or on its Where it goes), else the only one.
+  const channel = data.canvas.edges.filter((e) => e.to === node.id && e.in === 'channel').map((e) => data.nodes[e.from]?.outputs?.[e.out]).find(Boolean)
+  const account = catalog.accounts.find((a) => a.id === Number(channel?.account_id ?? node.params?.account_id))
+  const phone = catalog.devices.find((d) => d.id === Number(node.params?.device_id))?.name ?? account?.device ?? (catalog.devices.length === 1 ? catalog.devices[0].name : null)
+  const who = POSTED_BY[String(node.params?.driver ?? 'auto')] ?? POSTED_BY.auto
 
   const save = async () => {
+    if (out && when !== 'draft' && !again) return setAgain(true)
+    setAgain(false)
     setSaving(true)
     const ok = await lab.run(node.id)
     setSaving(false)
-    if (ok) toast(when === 'draft' ? 'Saved as a draft.' : when === 'now' ? 'Sent to the phone.' : 'Approved and scheduled.')
+    if (ok) toast(when === 'draft' ? 'Saved as a draft.' : when === 'now' ? `Posting now, by ${who}.` : 'Approved and scheduled.')
   }
 
   return (
     <section className="space-y-3 rounded-lg border border-line bg-white/[0.02] p-3">
-      <Btn variant={when === 'draft' ? 'ghost' : 'primary'} icon={when === 'draft' ? undefined : CalendarDays} loading={saving || state?.status === 'running' || state?.status === 'queued'} onClick={() => void save()} className="w-full">
-        {verb}
+      <Btn variant={when === 'draft' ? 'ghost' : again ? 'danger' : 'primary'} icon={when === 'draft' ? undefined : when === 'now' ? Send : CalendarDays} loading={saving || state?.status === 'running' || state?.status === 'queued'} onClick={() => void save()} className="w-full">
+        {again ? `${verb}: a second post` : verb}
       </Btn>
+      {again && <p className="text-[11.5px] leading-snug text-warn">This one is already {post?.status === 'publishing' ? 'going out' : 'out'}. Pressing again posts it a second time, as a new post.</p>}
+      {when === 'queue' && (
+        <p className={cn('text-[11.5px] leading-snug', catalog.queue_next ? 'text-muted' : 'text-warn')}>
+          {catalog.queue_next ? (
+            `Next free slot: ${new Date(catalog.queue_next).toLocaleString([], { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`
+          ) : (
+            <>
+              The queue has no posting times yet: add some under{' '}
+              <Link to="/dashboard/automations" className="text-accent-soft hover:underline">
+                Automations
+              </Link>
+              , or pick a time.
+            </>
+          )}
+        </p>
+      )}
+      {when !== 'draft' && (
+        <p className={cn('text-[11.5px] leading-snug', phone ? 'text-muted' : 'text-warn')}>
+          {phone ? `${when === 'now' ? 'Goes out right away' : 'Goes out on time'} from ${phone}, posted by ${who}.` : 'There’s no phone to post it from yet: add one on the Phones page.'}
+          {when !== 'now' && account && !account.automation && <span className="block text-warn">@{account.handle}’s automated publishing is off: scheduled posts won’t go out by themselves until it’s on.</span>}
+        </p>
+      )}
       {state?.status === 'failed' && state.failed?.error && <p className="text-[12px] leading-snug text-fail">{state.failed.error}</p>}
       {Object.values(state?.outputs ?? {}).flatMap((v) => v.warnings ?? []).map((w) => (
         <p key={w} className="text-[11.5px] leading-snug text-warn">{w}</p>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, AudioWaveform, LayoutTemplate, LoaderCircle, Play, Sparkles, X } from 'lucide-react'
-import { api, type LabCatalog, type LabPayload, type LabPlan, type LabTemplate } from '../../lib/api'
+import { api, ApiError, type LabCatalog, type LabPayload, type LabPlan, type LabTemplate } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
@@ -11,6 +11,7 @@ import { useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
 import { Btn, Label, Modal, Skeleton, Toggle, inputClass } from '../ui'
 import { Canvas, canvasCenter } from './Canvas'
+import { TemplateBrowser } from './Gallery'
 import { useLeftLab } from './Home'
 import { Inspector } from './Inspector'
 import { Library } from './Library'
@@ -39,6 +40,8 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
     }
   })
   const [runAll, setRunAll] = useState<LabPlan | null>(null)
+  // The templates with their examples: all of them, or one opened.
+  const [browse, setBrowse] = useState<{ start: LabTemplate | null } | null>(null)
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
   const a = useAssistant()
@@ -151,8 +154,8 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <Library catalog={catalog} onAdd={(t) => add(t)} onTemplate={insert} className="hidden w-[232px] shrink-0 border-r border-line md:flex" />
-        <Canvas lab={lab} catalog={catalog} selected={selected} onSelect={select} onAdd={(t, x, y) => add(t, x, y)} onOpen={(nid) => select(nid)} className="min-w-0 flex-1" />
+        <Library catalog={catalog} onAdd={(t) => add(t)} onTemplate={insert} onPreview={(t) => setBrowse({ start: t })} className="hidden w-[232px] shrink-0 border-r border-line md:flex" />
+        <Canvas lab={lab} catalog={catalog} selected={selected} onSelect={select} onAdd={(t, x, y) => add(t, x, y)} onOpen={(nid) => select(nid)} onTemplate={(t) => setBrowse({ start: t })} className="min-w-0 flex-1" />
         <AnimatePresence initial={false}>
           {open && (
             <motion.div
@@ -204,11 +207,33 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
       </div>
 
       <RunAll plan={runAll} onClose={() => setRunAll(null)} onRun={async () => {
-        const res = await lab.runAll(true)
-        setRunAll(null)
-        const errors = Object.values(res.errors ?? {})
-        toast(errors.length ? `Started ${res.started?.length ?? 0}. ${errors[0]}` : `Running ${res.started?.length ?? 0} node${res.started?.length === 1 ? '' : 's'}.`)
+        try {
+          const res = await lab.runAll(true)
+          setRunAll(null)
+          const errors = Object.values(res.errors ?? {})
+          toast(errors.length ? `Started ${res.started?.length ?? 0}. ${errors[0]}` : `Running ${res.started?.length ?? 0} node${res.started?.length === 1 ? '' : 's'}.`)
+        } catch (e) {
+          toast(e instanceof ApiError ? e.message : 'They couldn’t be started.')
+        }
       }} />
+      <TemplateBrowser
+        open={!!browse}
+        start={browse?.start ?? null}
+        onClose={() => setBrowse(null)}
+        templates={catalog.templates}
+        catalog={catalog}
+        useLabel="Add to the canvas"
+        onUse={(t) => {
+          setBrowse(null)
+          insert(t)
+        }}
+        onAsk={(t) => {
+          setBrowse(null)
+          setOpen(true)
+          setSide('assistant')
+          void a.say(`Build ${t.name.toLowerCase()} on this canvas, like the template's example: ${t.tagline}`)
+        }}
+      />
       <SaveTemplate open={saving} onClose={() => setSaving(false)} projectId={id} defaultName={data.project.name} onSaved={() => api<LabCatalog>('/lab/catalog').then(setCatalog)} />
     </div>
   )
@@ -242,8 +267,11 @@ function RunAll({ plan, onClose, onRun }: { plan: LabPlan | null; onClose: () =>
             {!!plan.nodes.length && (
               <Btn variant="primary" icon={Play} loading={busy} onClick={async () => {
                 setBusy(true)
-                await onRun()
-                setBusy(false)
+                try {
+                  await onRun()
+                } finally {
+                  setBusy(false)
+                }
               }}>
                 Run {plan.nodes.length}
               </Btn>

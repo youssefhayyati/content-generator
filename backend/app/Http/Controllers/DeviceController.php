@@ -90,11 +90,13 @@ class DeviceController extends Controller
         return $request->validate([
             'name' => [$partial ? 'sometimes' : 'required', 'string', 'max:60'],
             'driver' => [$partial ? 'sometimes' : 'required', Rule::in(Device::DRIVERS)],
-            // The phone-control service addresses each phone by its device ID.
-            'ref' => [$driver === 'http' && ! $partial ? 'required' : 'nullable', 'string', 'max:120'],
+            // The phone-control service addresses each phone by its device ID (heracles-phone), never by the team key
+            // (hk_…), which signs the assistant in and stays in its PHONE_API_KEY.
+            'ref' => [$driver === 'http' && ! $partial ? 'required' : 'nullable', 'string', 'max:120', 'not_regex:/^hk_/'],
             'profile' => ['sometimes', Rule::in(Device::PROFILES)],
         ], [
             'ref.required' => 'Enter the device ID the phone-control service uses for this phone.',
+            'ref.not_regex' => 'That’s the team key, not the phone’s name: it stays in the assistant’s PHONE_API_KEY. Enter the device ID, e.g. heracles-phone.',
         ]);
     }
 }

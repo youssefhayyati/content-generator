@@ -56,8 +56,18 @@ function applyLocal(canvas: LabCanvas, ops: LabOp[]): LabCanvas {
         break
       case 'connect':
         if (op.out && op.in) {
-          const edge = { from: String(op.from), out: String(op.out), to: String(op.to), in: String(op.in) } as LabEdge
+          const edge = { from: String(op.from), out: String(op.out), to: String(op.to), in: String(op.in), ...(op.pick != null ? { pick: Number(op.pick) } : {}) } as LabEdge
           c = { ...c, edges: [...c.edges.filter((e) => !(e.from === edge.from && e.out === edge.out && e.to === edge.to && e.in === edge.in)), edge] }
+        }
+        break
+      case 'pick':
+        c = {
+          ...c,
+          edges: c.edges.map((e) => {
+            if (e.to !== op.to || (op.in && e.in !== op.in) || (op.from && e.from !== op.from) || (op.out && e.out !== op.out)) return e
+            const { pick: _old, ...rest } = e
+            return op.pick == null ? rest : { ...rest, pick: Number(op.pick) }
+          }),
         }
         break
       case 'view':
@@ -88,7 +98,9 @@ export function useLab(projectId: number, onError: (message: string) => void) {
       // Assets come in pieces: keep the ones we have.
       const assets = { ...(d?.assets ?? {}), ...(p.assets ?? {}) }
       const fresh = !keepCanvas && pending.current === 0 && !!p.canvas
-      const canvas = fresh ? p.canvas : (d?.canvas ?? p.canvas)
+      // Settings typed but not sent yet stay on top of what the API has, so a field never jumps back.
+      const unsent = [...paramTimers.current.entries()].map(([id, e]) => ({ op: 'set', id, params: e.patch }))
+      const canvas = fresh ? (unsent.length ? applyLocal(p.canvas, unsent) : p.canvas) : (d?.canvas ?? p.canvas)
       // The revision goes with the canvas we show, so the next poll brings what we haven't taken.
       return { ...(d ?? p), ...p, canvas, assets, rev: fresh ? p.rev : (d?.rev ?? -1) }
     })
@@ -216,7 +228,18 @@ export function useLab(projectId: number, onError: (message: string) => void) {
 
   const refresh = useCallback(() => api<LabPayload>(`/projects/${projectId}/lab`).then((p) => take(p)), [projectId, take])
 
-  return { data, failed, busy, ops, setParams, flush, moveLocal, run, stop, plan, runAll, history, refresh }
+  /** Put back nodes as they were (an undone remove): the same ids, so their results come back with them. */
+  const restore = useCallback(
+    (nodes: LabNode[], edges: LabEdge[]) =>
+      ops([
+        ...nodes.map((n) => ({ op: 'add', node: { id: n.id, type: n.type, x: n.x, y: n.y, params: n.params ?? {}, label: n.label, branch: n.branch } })),
+        ...edges.map((e) => ({ op: 'connect', ...e })),
+        ...nodes.filter((n) => n.pin && !n.soft).map((n) => ({ op: 'pin', id: n.id, run: n.pin })),
+      ]),
+    [ops],
+  )
+
+  return { data, failed, busy, ops, setParams, flush, moveLocal, run, stop, plan, runAll, history, refresh, restore }
 }
 
 export type Lab = ReturnType<typeof useLab>

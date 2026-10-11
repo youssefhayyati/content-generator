@@ -462,6 +462,7 @@ class PhoneJob:
     shot: bytes | None = field(default=None, repr=False)  # the same, for FlowAI
     run: str | None = None  # publish: FlowAI's run
     budget: int = 40  # publish: FlowAI's step budget
+    prefer: str | None = None  # publish: who the post asks to drive (agent, direct, auto); None: the page's switch
     started_at: str = field(default_factory=_iso)
     started: float = field(default_factory=time.monotonic)
     runner: asyncio.Task | None = None
@@ -641,7 +642,7 @@ class PhoneWork:
     async def _start(self, job: PhoneJob, goal: str, mode: str | None, schema: dict | None, steps: int):
         """A task for the goal: our own agent's on the direct controls (PHONE_DRIVER direct, or auto with the
         API's agent out of service or failed at this job), else the API's."""
-        if self.client.driver and (job.handed_over or self.client.direct_now()):
+        if self.client.driver and (job.handed_over or self._direct(job)):
             job.direct, job.task = True, f"direct-{uuid.uuid4().hex[:16]}"
             job.run_args = (goal, steps, schema)
         else:
@@ -680,10 +681,20 @@ class PhoneWork:
         return (job.kind in ("post", "publish", "feedback") and job.attempts <= RETRIES and not job.tapped_post
                 and bool(DROPPED.search(why)) and self._steps_left(job, max_steps) >= RETRY_MIN_STEPS)
 
+    def _prefer(self, job: PhoneJob) -> str:
+        """Who drives this job: the post's own pick (a FlowAI post says agent, direct or auto), else the switch."""
+        return job.prefer if job.prefer in ("agent", "direct", "auto") else self.client.prefer
+
+    def _direct(self, job: PhoneJob) -> bool:
+        """Whether the job starts on our own agent."""
+        if job.prefer not in ("agent", "direct", "auto"):
+            return self.client.direct_now()
+        return job.prefer == "direct" or (job.prefer == "auto" and time.monotonic() < self.client.agent_down_until)
+
     def _may_hand_over(self, job: PhoneJob, why: str, max_steps: int | None) -> bool:
         """The phone's agent failed at the job or hung (not the phone dropping out, which a retry is for, and not
         someone stopping it), our own agent is there to take over, and nothing public happened yet."""
-        return (bool(self.client.driver) and self.client.prefer == "auto" and not job.direct
+        return (bool(self.client.driver) and self._prefer(job) == "auto" and not job.direct
                 and not job.handed_over and not job.tapped_post and not re.search(r"\bcancelled\b", why)
                 and bool(AGENT_DOWN.search(why) or not DROPPED.search(why))
                 and self._steps_left(job, max_steps) >= RETRY_MIN_STEPS)
@@ -774,7 +785,7 @@ class PhoneWork:
         agent to take over (PHONE_DRIVER=auto), the phone's agent silent for AGENT_QUIET_S while it should be
         working is out of service."""
         answered = False
-        quiet = AGENT_QUIET_S if watch and self.client.driver and self.client.prefer == "auto" else None
+        quiet = AGENT_QUIET_S if watch and self.client.driver and self._prefer(job) == "auto" else None
         async with aclosing(self.client.events(job.task, job.seq)) as events:
             while True:
                 try:

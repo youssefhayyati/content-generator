@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AudioWaveform, ChevronLeft, ChevronRight, Clock3, GripVertical, PenLine } from 'lucide-react'
 import { PLATFORMS, PlatformIcon } from '../../components/ui/PlatformIcon'
@@ -6,33 +6,32 @@ import { api, type Page, type Post } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
-import { addDays, fmtDateTime, postState, sameDay, startOfWeek, STATE, titleOf, useApi, useInvalidate, type PostState } from '../data'
-import { Agenda, PublishProof, WeekGrid } from '../pages/Calendar'
+import { fmtDateTime, postState, STATE, titleOf, useApi, useInvalidate, type PostState } from '../data'
+import { Agenda, MonthGrid, monthYear, PublishProof, useCalendarRange, VIEWS, WeekGrid } from '../pages/Calendar'
 import { useToast } from '../toast'
-import { Btn, Label, Platforms, StateBadge } from '../ui'
+import { Btn, Label, Platforms, Segmented, StateBadge } from '../ui'
 import { useAssistant } from './store'
 
 export const DRAFT_DRAG = 'application/x-assistant-draft'
 
-const monthYear = (d: Date) => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-
 /**
- * The Calendar tab: the week as FlowAI has it. Drop one of the conversation's drafts on a slot to
- * book it there, drag a post to move it, click an empty slot to plan one with the assistant.
+ * The Calendar tab: the week (by the hour) or the month (by the day) as FlowAI has it. Drop one of
+ * the conversation's drafts on a slot to book it there, drag a post to move it, click an empty slot
+ * to plan one with the assistant.
  */
 export function CalendarView() {
   const a = useAssistant()
   const toast = useToast()
   const invalidate = useInvalidate()
   const { navigate } = useRouter()
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const view = useCalendarRange()
+  const { mode, days, start } = view
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [now, setNow] = useState(() => new Date())
 
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const { data, loading, setData } = useApi<Page<Post>>('/posts', {
-    from: weekStart.toISOString(),
-    to: addDays(weekStart, 7).toISOString(),
+    from: start.toISOString(),
+    to: view.end.toISOString(),
     sort: 'scheduled',
     per_page: 500,
   })
@@ -80,17 +79,17 @@ export function CalendarView() {
   return (
     <section className="overflow-hidden rounded-xl border border-line bg-panel">
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 md:px-5">
-        <p className="text-[15px] font-medium tracking-[-0.01em]">{monthYear(weekStart)}</p>
+        <p className="text-[15px] font-medium tracking-[-0.01em]">{monthYear(mode === 'week' ? start : view.cursor)}</p>
         <div className="flex items-center gap-1">
-          <button type="button" aria-label="Previous week" onClick={() => setWeekStart((w) => addDays(w, -7))} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
+          <button type="button" aria-label={`Previous ${mode}`} onClick={() => view.shift(-1)} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
             <ChevronLeft className="size-4" />
           </button>
-          <button type="button" aria-label="Next week" onClick={() => setWeekStart((w) => addDays(w, 7))} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
+          <button type="button" aria-label={`Next ${mode}`} onClick={() => view.shift(1)} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
             <ChevronRight className="size-4" />
           </button>
         </div>
-        {!sameDay(weekStart, startOfWeek(now)) && (
-          <Btn size="sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>
+        {!view.current && (
+          <Btn size="sm" onClick={() => view.shift(0)}>
             Today
           </Btn>
         )}
@@ -103,23 +102,39 @@ export function CalendarView() {
             </span>
           ))}
         </div>
+        <Segmented id="assistant-calendar-view" label="Calendar view" options={VIEWS} value={mode} onChange={view.setMode} />
       </div>
 
       <div className="grid grid-cols-1 @3xl:grid-cols-[minmax(0,1fr)_240px]">
         <div className="min-w-0">
-          <WeekGrid
-            key={weekStart.toISOString()}
-            days={days}
-            posts={posts}
-            ready={!loading && !!data}
-            now={now}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onCreate={plan}
-            onMove={move}
-            drop={{ type: DRAFT_DRAG, onDrop: book }}
-          />
-          <Agenda days={days} posts={posts} now={now} onSelect={setSelectedId} />
+          {mode === 'week' ? (
+            <WeekGrid
+              key={start.toISOString()}
+              days={days}
+              posts={posts}
+              ready={!loading && !!data}
+              now={now}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onCreate={plan}
+              onMove={move}
+              drop={{ type: DRAFT_DRAG, onDrop: book }}
+            />
+          ) : (
+            <MonthGrid
+              days={days}
+              month={view.cursor}
+              posts={posts}
+              now={now}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onCreate={plan}
+              onMove={move}
+              onOpenDay={view.openDay}
+              drop={{ type: DRAFT_DRAG, onDrop: book }}
+            />
+          )}
+          <Agenda days={days} month={mode === 'month' ? view.cursor : undefined} posts={posts} now={now} onSelect={setSelectedId} />
         </div>
 
         <aside className="border-t border-line p-4 @3xl:border-l @3xl:border-t-0">

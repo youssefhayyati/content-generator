@@ -1,11 +1,11 @@
-import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AlertTriangle, AudioLines, Check, CircleDashed, Clock, LoaderCircle, Pin, Play, Square } from 'lucide-react'
+import { AlertTriangle, AudioLines, Check, CircleDashed, Clock, LoaderCircle, Pin, Play, Sparkles, Square, X } from 'lucide-react'
 import type { Asset, LabNode, LabNodeKind, LabNodeState, LabPortType, LabValue } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
-import { CARD_W, HEAD_H, NOTE_W, PORT_HUE, ROW_H, fits, hueOf, iconOf, portRows } from './look'
+import { CARD_W, HEAD_H, NOTE_W, PORT_HUE, ROW_H, costLine, fits, hueOf, iconOf, portRows } from './look'
 
 type Wire = { from: string; out: string; type: LabPortType }
 
@@ -22,7 +22,8 @@ const STATUS: Record<string, { label: string; cls: string; icon: typeof Check }>
 
 /**
  * A node on the canvas: its kind as a coloured glyph, its name and how it stands; its inputs (left)
- * and outputs (right) as typed ports; then a preview of what it made. Drag it by its header.
+ * and outputs (right) as typed ports; then a preview of what it made. Drag it by its header; the ×
+ * on its corner (on hover, or selected) removes it; a right click opens its menu.
  */
 export function NodeCard({
   node,
@@ -40,6 +41,8 @@ export function NodeCard({
   onWire,
   onRun,
   onStop,
+  onRemove,
+  onMenu,
 }: {
   node: LabNode
   kind: LabNodeKind | undefined
@@ -56,6 +59,9 @@ export function NodeCard({
   onWire: (out: string, type: LabPortType, e: ReactPointerEvent) => void
   onRun: () => void
   onStop: () => void
+  onRemove: () => void
+  /** A right click: the node's menu, where the pointer is. */
+  onMenu: (clientX: number, clientY: number) => void
 }) {
   const drag = useRef<{ x: number; y: number; nx: number; ny: number; moved: boolean } | null>(null)
   const hue = hueOf(kind)
@@ -67,12 +73,22 @@ export function NodeCard({
   const rows = portRows(kind)
   const note = node.type === 'util.note'
   const runnable = state && state.policy !== 'none'
+  // A run that costs money (or might: the price unknown) asks once more, saying what it costs.
+  const paid = !!state?.estimate && state.estimate.cost !== 0
+  const [confirm, setConfirm] = useState(false)
+  useEffect(() => {
+    if (!confirm) return
+    const t = window.setTimeout(() => setConfirm(false), 4000)
+    return () => window.clearTimeout(t)
+  }, [confirm])
 
   const dragProps = {
     onPointerDown: (e: ReactPointerEvent) => {
       if ((e.target as HTMLElement).closest('button')) return
       e.stopPropagation()
       onSelect()
+      // Only the main button drags: a right click opens the menu, and its pointerup never comes back.
+      if (e.button !== 0) return
       drag.current = { x: e.clientX, y: e.clientY, nx: node.x, ny: node.y, moved: false }
       ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     },
@@ -90,19 +106,47 @@ export function NodeCard({
       drag.current = null
       if (d?.moved) onMoved(Math.round(d.nx + (e.clientX - d.x) / zoom), Math.round(d.ny + (e.clientY - d.y) / zoom))
     },
+    onPointerCancel: () => {
+      drag.current = null
+    },
   }
+  const menuProps = {
+    onContextMenu: (e: ReactMouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onSelect()
+      onMenu(e.clientX, e.clientY)
+    },
+  }
+  const remove = (
+    <button
+      type="button"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={onRemove}
+      aria-label={`Remove ${node.label || kind?.label || 'this node'}`}
+      title="Remove"
+      className={cn(
+        'absolute -right-2.5 -top-2.5 z-10 grid size-6 place-items-center rounded-full border border-line-2 bg-panel-3 text-muted shadow-lg transition-[opacity,color,border-color] duration-150 hover:border-fail/60 hover:text-fail focus-visible:opacity-100',
+        selected ? 'opacity-100' : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100',
+      )}
+    >
+      <X className="size-3.5" />
+    </button>
+  )
 
   if (note) {
     return (
       <motion.div
         {...dragProps}
+        {...menuProps}
         onDoubleClick={onOpen}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3, ease }}
-        className={cn('pointer-events-auto absolute cursor-grab select-none rounded-xl border bg-[#2a2716] p-4 shadow-[0_18px_40px_-24px_rgb(0_0_0_/_0.9)] active:cursor-grabbing', selected ? 'border-[#f5d76e]/70' : 'border-[#f5d76e]/20')}
+        className={cn('group pointer-events-auto absolute cursor-grab select-none rounded-xl border bg-[#2a2716] p-4 shadow-[0_18px_40px_-24px_rgb(0_0_0_/_0.9)] active:cursor-grabbing', selected ? 'border-[#f5d76e]/70' : 'border-[#f5d76e]/20')}
         style={{ left: node.x, top: node.y, width: NOTE_W }}
       >
+        {remove}
         <p className="whitespace-pre-wrap text-[12.5px] leading-snug text-[#f3e9b5]">{String(node.params?.text || 'A note…')}</p>
       </motion.div>
     )
@@ -120,8 +164,9 @@ export function NodeCard({
         e.stopPropagation()
         onSelect()
       }}
+      {...menuProps}
       className={cn(
-        'pointer-events-auto absolute select-none rounded-[14px] border bg-panel-2 shadow-[0_22px_50px_-26px_rgb(0_0_0_/_0.95)] transition-[border-color,box-shadow] duration-300',
+        'group pointer-events-auto absolute select-none rounded-[14px] border bg-panel-2 shadow-[0_22px_50px_-26px_rgb(0_0_0_/_0.95)] transition-[border-color,box-shadow] duration-300',
         selected ? 'border-white/45 shadow-[0_0_0_3px_rgb(255_255_255_/_0.07),0_22px_50px_-26px_rgb(0_0_0_/_0.95)]' : 'border-line-2',
         status === 'failed' && !selected && 'border-fail/55',
         status === 'stale' && !selected && 'border-dashed border-warn/55',
@@ -129,6 +174,7 @@ export function NodeCard({
       )}
       style={{ left: node.x, top: node.y, width: CARD_W, ['--flow-hue' as string]: hue }}
     >
+      {remove}
       {/* Header: the handle to drag it by. */}
       <div {...dragProps} className="relative flex cursor-grab items-center gap-2.5 px-3 active:cursor-grabbing" style={{ height: HEAD_H }}>
         <span aria-hidden className="absolute inset-y-3 left-0 w-[3px] rounded-r-full" style={{ background: hue }} />
@@ -140,6 +186,7 @@ export function NodeCard({
             <span className="truncate text-[13px] font-medium leading-tight tracking-[-0.01em]">{node.label || kind?.label || node.type}</span>
             {node.branch && <span className="shrink-0 rounded bg-white/10 px-1 font-mono text-[9px] text-muted">{node.branch}</span>}
             {node.pin && !node.soft && <Pin className="size-3 shrink-0 text-accent-soft" />}
+            <AiBadge kind={kind} className="ml-auto" />
           </span>
           <span className={cn('mt-0.5 flex items-center gap-1 text-[10.5px] leading-none', s.cls)}>
             <s.icon className={cn('size-3', status === 'running' && 'animate-spin')} strokeWidth={2} />
@@ -152,9 +199,19 @@ export function NodeCard({
             <Square className="size-3" fill="currentColor" />
           </button>
         ) : (status === 'ready' || status === 'stale' || status === 'failed' || (status === 'done' && state.policy === 'manual')) ? (
-          <button type="button" onClick={onRun} aria-label={state.run_label} title={`${state.run_label}${state.estimate ? ` · ${Math.round(state.estimate.seconds)} s` : ''}`} className="grid size-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-white/[0.08]" style={{ color: hue }}>
-            <Play className="size-3.5" fill="currentColor" />
-          </button>
+          confirm ? (
+            <button type="button" onClick={() => {
+              setConfirm(false)
+              onRun()
+            }} title={`${state.run_label} · ${costLine(state.estimate)}`} className="flex h-7 shrink-0 items-center gap-1 rounded-md bg-white/[0.08] px-2 font-mono text-[10px] text-fg transition-colors hover:bg-white/[0.14]">
+              <Play className="size-3" fill="currentColor" style={{ color: hue }} />
+              {state.estimate?.cost == null ? 'cost ?' : `$${state.estimate.cost.toFixed(2)}`}
+            </button>
+          ) : (
+            <button type="button" onClick={() => (paid ? setConfirm(true) : onRun())} aria-label={state.run_label} title={`${state.run_label}${state.estimate ? ` · ${costLine(state.estimate)}` : ''}`} className="grid size-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-white/[0.08]" style={{ color: hue }}>
+              <Play className="size-3.5" fill="currentColor" />
+            </button>
+          )
         ) : null)}
       </div>
 
@@ -216,6 +273,25 @@ export function NodeCard({
   )
 }
 
+/** Whether a node needs AI to run, at a glance: AI, AI for some settings, or no AI. */
+export function AiBadge({ kind, long = false, className }: { kind: LabNodeKind | undefined; long?: boolean; className?: string }) {
+  const ai = kind?.ai ?? 'no'
+  const label = ai === 'yes' ? 'AI' : ai === 'some' ? (long ? 'AI for some settings' : 'AI · some') : 'No AI'
+  return (
+    <span
+      title={kind?.ai_detail ?? undefined}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px font-mono text-[9px] uppercase leading-[14px] tracking-[0.06em]',
+        ai === 'yes' ? 'bg-accent/15 text-accent-soft' : ai === 'some' ? 'border border-dashed border-accent-soft/40 text-accent-soft/80' : 'bg-white/[0.05] text-dim',
+        className,
+      )}
+    >
+      {ai !== 'no' && <Sparkles className="size-2.5" strokeWidth={2} />}
+      {label}
+    </span>
+  )
+}
+
 export function filled(v: LabValue | undefined) {
   if (!v) return false
   switch (v.type) {
@@ -241,7 +317,8 @@ export function filled(v: LabValue | undefined) {
 /** Every asset id a node holds or made, by kind. */
 export function nodeAssets(node: LabNode, state: LabNodeState | undefined, assets: Record<number, Asset>) {
   const ids = node.type === 'source.media' ? ((node.params?.assets as number[]) ?? []) : Object.values(state?.outputs ?? {}).flatMap((v) => v.assets ?? [])
-  return ids.map((id) => assets[id]).filter(Boolean)
+  // An asset on two ports (a Character's look) shows once.
+  return [...new Set(ids)].map((id) => assets[id]).filter(Boolean)
 }
 
 /** What the node made (or holds), small. */
@@ -251,7 +328,8 @@ function Preview({ node, state, assets }: { node: LabNode; state: LabNodeState |
   const images = media.filter((a) => a.kind === 'image')
   const videos = media.filter((a) => a.kind === 'video')
   const sounds = media.filter((a) => a.kind === 'audio')
-  const text = Object.values(outs).find((v) => v.type === 'text' && v.text)?.text
+  const written = Object.values(outs).find((v) => v.type === 'text' && v.text)
+  const text = written?.text
   const moments = Object.values(outs).find((v) => v.type === 'moments')?.moments
   const brief = Object.values(outs).find((v) => v.type === 'brief')?.brief
   const error = state?.status === 'failed' ? state.failed?.error : null
@@ -377,7 +455,20 @@ function Preview({ node, state, assets }: { node: LabNode; state: LabNodeState |
       </div>,
     )
   }
-  if (text && !moments?.length) {
+  if (written?.items && written.items.length > 1 && !moments?.length) {
+    // Several pieces: numbered, the way the lines out of it pick them.
+    parts.push(
+      <ol key="items" className="space-y-1.5">
+        {written.items.slice(0, 4).map((t, i) => (
+          <li key={i} className="flex gap-1.5 text-[11.5px] leading-snug text-muted">
+            <span className="shrink-0 font-mono text-[10px] text-dim">#{i + 1}</span>
+            <span className="line-clamp-2 min-w-0 flex-1">{t}</span>
+          </li>
+        ))}
+        {written.items.length > 4 && <li className="text-[10.5px] text-dim">+{written.items.length - 4} more</li>}
+      </ol>,
+    )
+  } else if (text && !moments?.length) {
     parts.push(
       <p key="txt" className="line-clamp-5 whitespace-pre-wrap text-[11.5px] leading-snug text-muted">
         {text}
@@ -388,6 +479,9 @@ function Preview({ node, state, assets }: { node: LabNode; state: LabNodeState |
   if (transcript?.words && !text) parts.push(<p key="tr" className="text-[11px] text-dim">{transcript.words} words{transcript.language ? ` · ${transcript.language}` : ''}</p>)
   if (error) parts.push(<p key="err" className="line-clamp-3 text-[11px] leading-snug text-fail">{error}</p>)
   if (state?.status === 'missing' && state.missing?.length && !error) parts.push(<p key="miss" className="line-clamp-2 text-[10.5px] leading-snug text-dim">{state.missing[0]}</p>)
+  if (state?.estimate?.unavailable && state.status !== 'done' && !error) parts.push(<p key="off" className="line-clamp-2 text-[10.5px] leading-snug text-warn">Can’t run yet: {state.estimate.unavailable}</p>)
+  const character = Object.values(outs).find((v) => v.type === 'character' && v.reference_id)
+  if (character) parts.push(<p key="char" className="text-[10.5px] text-muted">Trained: {character.name ?? 'the character'}, ready for Character pictures</p>)
   const warnings = Object.values(outs).flatMap((v) => v.warnings ?? [])
   if (warnings.length) parts.push(<p key="warn" className="line-clamp-2 text-[10.5px] text-warn">{warnings[0]}</p>)
 

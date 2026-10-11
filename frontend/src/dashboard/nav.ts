@@ -105,4 +105,7 @@ export const OFF_NAV: NavItem[] = [
   { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
 ]
 
+/** Where every "New post" goes, from anywhere: Creative Lab, which starts with the brief. */
+export const NEW_POST = '/dashboard/studio'
+
 export const pageLabel = (path: string) => [...NAV, ...OFF_NAV].find((n) => n.path === path)?.label ?? 'Overview'

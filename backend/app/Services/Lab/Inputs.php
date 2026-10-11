@@ -47,6 +47,16 @@ class Inputs
 
                     continue;
                 }
+                // A line that picks one of several texts (version 2 of the captions, line 3 of the lines) carries that one only.
+                if (! empty($edge['pick']) && ($value['type'] ?? null) === 'text') {
+                    $items = $value['items'] ?? [(string) ($value['text'] ?? '')];
+                    if (! isset($items[$edge['pick'] - 1])) {
+                        $missing[] = "{$label} has ".count($items).' to pick from, not '.$edge['pick'].': pick another, or ask it for more.';
+
+                        continue;
+                    }
+                    $value = ['type' => 'text', 'text' => (string) $items[$edge['pick'] - 1], 'model' => $value['model'] ?? null, 'pick' => (int) $edge['pick']];
+                }
                 $values[] = $value;
             }
             if (! empty($port['required']) && ! $values && ! Graph::into($ctx->canvas, $node['id'], $port['name'])) {
@@ -81,6 +91,7 @@ class Inputs
             'source' => ['source', $v['source_id'] ?? null],
             'post' => ['post', $v['post_id'] ?? null],
             'channel' => ['channel', $v['account_id'] ?? null, $v['placement'] ?? null],
+            'character' => ['character', $v['reference_id'] ?? null],
             default => [$v['type'] ?? '?', array_map('intval', $v['assets'] ?? [])],
         }, $values), $this->ports);
     }
@@ -173,6 +184,22 @@ class Inputs
     public function first(string $port): ?array
     {
         return $this->ports[$port][0] ?? null;
+    }
+
+    /**
+     * The Soul ID character on a port: its id at Higgsfield, the Soul family it was trained for, its name.
+     *
+     * @return array{reference_id: string, version: string, name: string|null}|null
+     */
+    public function character(string $port = 'character'): ?array
+    {
+        foreach ($this->ports[$port] ?? [] as $v) {
+            if (($v['type'] ?? null) === 'character' && ! empty($v['reference_id'])) {
+                return ['reference_id' => (string) $v['reference_id'], 'version' => (string) ($v['version'] ?? 'v2'), 'name' => $v['name'] ?? null];
+            }
+        }
+
+        return null;
     }
 
     public function source(string $port): ?VideoSource

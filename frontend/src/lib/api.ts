@@ -685,7 +685,7 @@ export type Conflict = { kind: 'phone' | 'gap' | 'approvals'; message: string; p
 /* Creative Lab: nodes on a canvas                                      */
 /* ------------------------------------------------------------------ */
 
-export type LabPortType = 'image' | 'video' | 'audio' | 'text' | 'brief' | 'moments' | 'transcript' | 'source' | 'channel' | 'post'
+export type LabPortType = 'image' | 'video' | 'audio' | 'text' | 'brief' | 'moments' | 'transcript' | 'source' | 'channel' | 'character' | 'post'
 
 export type LabField = {
   key: string
@@ -708,6 +708,12 @@ export type LabField = {
   unconnected?: string
   /** A voice the assistant's engine reads with (not FlowAI Sound's). */
   engine?: boolean
+  /** Folded under "More settings" until it's wanted. */
+  advanced?: boolean
+  /** For chips: how many show before "More". */
+  top?: number
+  /** For a preset field: whose presets (a Higgsfield tool). */
+  presets?: string
 }
 
 export type LabInput = { name: string; label: string; accepts: LabPortType[]; multi?: boolean; required?: boolean }
@@ -724,6 +730,11 @@ export type LabNodeKind = {
   run_label?: string
   seconds?: number
   engine?: boolean
+  /** The one model it runs on, when it has none to pick (Higgsfield's tools). */
+  model_id?: string
+  /** Whether it needs AI to run: yes, some (only with some settings, said in ai_detail), or no. */
+  ai?: 'yes' | 'some' | 'no'
+  ai_detail?: string | null
 }
 
 export type LabModel = {
@@ -742,7 +753,8 @@ export type LabModel = {
 }
 
 export type LabNode = { id: string; type: string; x: number; y: number; params?: Record<string, unknown>; label?: string; pin?: number; soft?: boolean; branch?: string }
-export type LabEdge = { from: string; out: string; to: string; in: string }
+/** A line between two nodes; `pick` takes one piece of text written in several (1, 2…), 0 all of it. */
+export type LabEdge = { from: string; out: string; to: string; in: string; pick?: number }
 export type LabCanvas = { version: 2; rev: number; nodes: LabNode[]; edges: LabEdge[]; view: { x: number; y: number; zoom: number }; auto?: boolean }
 
 export type LabTemplate = { key: string; id?: number; name: string; tagline: string; category: string; nodes: number; mine: boolean; graph: { nodes: LabNode[]; edges: LabEdge[] } }
@@ -758,6 +770,8 @@ export type LabCatalog = {
   accounts: Array<{ id: number; platform: PlatformId; handle: string; automation: boolean; device_id: number | null; device: string | null }>
   devices: Array<{ id: number; name: string; driver: 'simulator' | 'http'; ref: string | null; status: string; drives: string }>
   campaigns: Array<{ id: number; name: string | null; stage: string }>
+  /** The queue's next free posting time; null when there are no posting times yet. */
+  queue_next: string | null
 }
 
 export type LabMoment = { n: number; title: string; hook: string; why: string; score: number; start: number; end: number; duration: number; quote: string }
@@ -766,6 +780,10 @@ export type LabValue = {
   type: LabPortType
   assets?: number[]
   text?: string
+  /** Text written in several pieces (versions, a video's lines, a thread's posts). */
+  items?: string[]
+  /** The piece a line picked. */
+  pick?: number
   brief?: Record<string, unknown> & { campaign?: { id: number; name: string | null } | null; account?: { id: number; handle: string; platform: string } | null; palette?: string[] }
   moments?: LabMoment[]
   source_id?: number
@@ -784,6 +802,10 @@ export type LabValue = {
   placement?: string
   handle?: string
   label?: string
+  /** A Soul ID character */
+  reference_id?: string
+  version?: string
+  name?: string
 }
 
 export type LabRun = {
@@ -850,7 +872,8 @@ export type LabNodeState = {
   failed?: LabRun | null
   versions?: number
   missing?: string[]
-  estimate?: { seconds: number; cost: number | null; model: string | null }
+  /** unavailable: why its model can't run now (no key, not tested…), before anyone presses Run. */
+  estimate?: { seconds: number; cost: number | null; model: string | null; unavailable?: string | null }
   pinned?: boolean
   post?: LabPost
   source?: LabSource

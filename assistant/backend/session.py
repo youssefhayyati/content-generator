@@ -25,7 +25,9 @@ Wire protocol
                                                samples of voices still play
             {"type": "conversations"}          the list of the user's conversations
             {"type": "new", "campaign": 3}     a new conversation; with campaign, that FlowAI campaign's
-                                               posts in it as drafts
+                                               posts in it as drafts; with "quick": true (Creative Lab's
+                                               New post), the assistant asks what to make and skips the
+                                               campaign questions
             {"type": "open" | "delete", "id": "..."}
             {"type": "rename", "id": "...", "title": "..."}
             {"type": "focus", "draft": 1, "slide": 1, "text": 2}
@@ -170,6 +172,15 @@ CASTING = (
     "'upbeat acoustic pop, bright ukulele, hand claps and shaker, feel-good and catchy, 112 bpm' or 'dark "
     "cinematic trap, deep 808 bass, sharp hi-hats, confident and hard-hitting, 140 bpm'. Make it catchy and "
     "right for the brand and its audience; no vocals, no song or artist names.")
+
+
+def with_user_turn(messages: list) -> list:
+    """Ollama Cloud's models answer nothing to a chat with no user turn yet (a new conversation that speaks
+    first, like Creative Lab's New post): a stand-in one after the notes, sent to the model, never kept."""
+    if any(m.get("role") == "user" for m in messages):
+        return messages
+    i = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    return [*messages[:i], {"role": "user", "content": "(Nothing said yet: go by the notes above.)"}, *messages[i:]]
 
 
 @dataclass
@@ -422,7 +433,7 @@ class VoiceSession:
                        + ": make what they ask for there, as nodes on the canvas with the lab_ tools, following the "
                        "creative-lab skill, not as drafts here. With no project open, a request to make something "
                        "starts a project: the campaign questions first (quick, 5, or thorough, 10, one at a time), "
-                       "then lab_new_project.")
+                       "then lab_new_project; after New post, skip the questions and make what they ask for.")
         # The date, not the time, so the prompt stays the same all day (the time is a tool call away)
         today = datetime.now(self.flowai.tz if self.flowai else None)
         prompt += f"\n\nToday is {today:%A} {today.day} {today:%B %Y}."
@@ -683,6 +694,17 @@ class VoiceSession:
                 await self.switch(self.store.new(owner))
                 if msg.get("campaign") not in (None, ""):
                     await self.on_action({"type": "action", "name": "open_campaign", "campaign": msg["campaign"]})
+                elif msg.get("quick") and self.flowai:  # Creative Lab's New post: it speaks first
+                    self.lab = {"project": None, "node": None, "control": False}
+                    self.add_note("The user pressed New post in Creative Lab: they want something made straight away, "
+                                  "without the campaign questions. Ask in English, in one short line, what they want "
+                                  "to make (a post, a reel, a story, for which account), with two or three quick "
+                                  "ideas. From their answer, start the project at once with lab_new_project: "
+                                  "interview with depth quick and every field, what they didn't say suggested (ending "
+                                  "the value with \" (suggested)\"). Ask one more question only if you can't tell "
+                                  "what to make. Build the nodes (creative-lab skill, step 2), then say in one line "
+                                  "what's ready and run it once they say yes. If they answer in another language, "
+                                  "carry on in theirs.")
             elif kind == "open":
                 found = await self.store.open(owner, cid) if owner else None
                 if not found:
@@ -1298,7 +1320,7 @@ class VoiceSession:
                 content, calls, chunker = "", [], SentenceChunker()
                 rounds += 1
                 try:
-                    async for msg in self.m.llm.stream([system, *conv.messages], tools.schemas(exclude), usage):
+                    async for msg in self.m.llm.stream([system, *with_user_turn(conv.messages)], tools.schemas(exclude), usage):
                         if msg.content:
                             if first_token:
                                 log.info("LLM first token %.0f ms", (time.perf_counter() - t0) * 1000)

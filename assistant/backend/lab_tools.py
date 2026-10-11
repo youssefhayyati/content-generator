@@ -37,6 +37,8 @@ def _project(session, project) -> int:
 def _value(v: dict) -> str:
     """One output, in a few words."""
     t = v.get("type")
+    if t == "text" and len(v.get("items") or []) > 1:
+        return f"{len(v['items'])} pieces: " + json.dumps([i[:160] for i in v["items"][:6]], ensure_ascii=False)
     if t == "text":
         return json.dumps((v.get("text") or "")[:400], ensure_ascii=False)
     if t in ("image", "video", "audio"):
@@ -55,6 +57,13 @@ def _value(v: dict) -> str:
     if t == "post":
         return f"post {v.get('post_id')} ({v.get('status')})"
     return t or "?"
+
+
+def _picked(edge: dict) -> str:
+    """Which piece of text written in several (versions, lines) a line takes."""
+    if edge.get("pick") is None:
+        return ""
+    return " (takes all)" if edge["pick"] == 0 else f" (takes #{edge['pick']})"
 
 
 def _summary(payload: dict) -> dict:
@@ -81,7 +90,7 @@ def _summary(payload: dict) -> dict:
             p = s["post"]
             item["post"] = {k: p.get(k) for k in ("id", "status", "scheduled_at", "post_url", "error")}
         nodes.append(item)
-    edges = [f"{e['from']}.{e['out']} -> {e['to']}.{e['in']}" for e in canvas["edges"]]
+    edges = [f"{e['from']}.{e['out']} -> {e['to']}.{e['in']}{_picked(e)}" for e in canvas["edges"]]
     return {"project": payload["project"], "nodes": nodes, "lines": edges}
 
 
@@ -219,15 +228,22 @@ async def lab_graph(session, project: int | None = None):
     "lab_edit",
     "Change the Creative Lab graph, in operations applied in order (the user sees them on the canvas). Operations:\n"
     "- {\"op\":\"add\",\"node\":{\"id\":\"caption\",\"type\":\"text.write\",\"x\":400,\"y\":80,\"params\":{...},"
-    "\"label\":\"...\"}} (id optional; place nodes left to right, about 360 apart, rows 380 apart)\n"
+    "\"label\":\"...\"}} (id optional; x/y optional: a node is never put on top of another; end with a tidy)\n"
     "- {\"op\":\"set\",\"id\":\"caption\",\"params\":{\"task\":\"hook\"}} (merges settings)\n"
     "- {\"op\":\"connect\",\"from\":\"brief\",\"out\":\"brief\",\"to\":\"caption\",\"in\":\"brief\"} (out/in optional: "
-    "the first that fits)\n"
+    "the first that fits; pick optional, see below)\n"
+    "- {\"op\":\"pick\",\"from\":\"captions\",\"to\":\"channel-2\",\"in\":\"caption\",\"pick\":2} (which piece of text "
+    "written in several a line takes: 1, 2…, 0 all of it)\n"
+    "- {\"op\":\"tidy\"} (lays the whole graph out in columns, chains on one row: do it after building)\n"
     "- {\"op\":\"disconnect\",\"to\":\"caption\",\"in\":\"brief\"}  {\"op\":\"remove\",\"id\":\"caption\"}\n"
     "- {\"op\":\"label\",\"id\":...,\"label\":...}  {\"op\":\"move\",\"id\":...,\"x\":..,\"y\":..}\n"
     "- {\"op\":\"branch\",\"id\":\"picture-1\"} (a copy of it and everything after it, to try another option)\n"
     "- {\"op\":\"pin\",\"id\":...,\"run\":<run id>|null} (use an older version)\n"
     "- {\"op\":\"insert\",\"template\":\"youtube-clips\",\"x\":80,\"y\":600} (a template's nodes, added)\n"
+    "Several of a kind (three posts, three pictures): ONE Write node with params variants: 3 writes three different "
+    "versions; each line out of it takes its own, #1, #2, #3 in the order you connect them (lines show '(takes #n)'). "
+    "Asking a Write node with variants 1 for 'three captions' in its instructions gives one caption, not three. "
+    "A video's lines (task lines) flow on whole; a line can pick one (pick: 2).\n"
     "Nothing runs by itself: nodes wait for Run (lab_run, once the user agrees, or yourself when they handed you control).",
     {"type": "object", "properties": {
         "ops": {"type": "array", "items": {"type": "object"}, "description": "The operations"},

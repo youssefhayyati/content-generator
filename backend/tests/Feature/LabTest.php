@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Http\Controllers\AssistantController;
 use App\Models\Account;
 use App\Models\Asset;
+use App\Models\Device;
 use App\Models\NodeRun;
 use App\Models\Post;
 use App\Models\Project;
@@ -12,6 +13,7 @@ use App\Models\User;
 use App\Services\Ai\TextGenerator;
 use App\Services\Lab\Graph;
 use App\Services\Lab\Nodes\Captions;
+use App\Services\Lab\Templates;
 use App\Services\Lab\YtDlp;
 use Generator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -228,6 +230,29 @@ class LabTest extends TestCase
         $this->assertSame('draft', $post->fresh()->status->value);
     }
 
+    public function test_post_now_goes_to_the_phone_by_the_agent_picked_without_the_accounts_automation(): void
+    {
+        $this->user->forceFill(['agent_token' => 'agent-token-under-test'])->save();
+        $phone = Device::factory()->for($this->user)->create(['driver' => 'http', 'ref' => 'heracles-phone', 'name' => 'Pixel']);
+        $account = Account::factory()->for($this->user)->create(['platform' => 'instagram', 'handle' => 'maisoncire', 'automation' => false]);
+        $image = Asset::factory()->for($this->user)->create(['kind' => 'image', 'mime' => 'image/png', 'width' => 1080, 'height' => 1350]);
+        $this->ops([
+            ['op' => 'add', 'node' => ['id' => 'media', 'type' => 'source.media', 'params' => ['assets' => [$image->id]]]],
+            ['op' => 'add', 'node' => ['id' => 'post', 'type' => 'finish.post', 'params' => ['account_id' => $account->id, 'caption' => 'Autumn is here.', 'when' => 'now', 'driver' => 'direct']]],
+            ['op' => 'connect', 'from' => 'media', 'out' => 'image', 'to' => 'post', 'in' => 'media'],
+        ])->assertOk();
+        $this->spa()->actingAs($this->user)->postJson("/api/projects/{$this->project->id}/lab/nodes/post/run")->assertCreated();
+
+        // The only phone took it, though the account's automated publishing is off: Post now was the go-ahead.
+        $post = Post::firstOrFail();
+        $this->assertSame(['publishing', $phone->id, 'direct'], [$post->status->value, $post->device_id, $post->phone_driver]);
+        $this->assertSame('Posting now from Pixel, by your agent.', NodeRun::where('node_id', 'post')->latest('id')->value('outputs')['post']['note']);
+        // The phone service is told who posts it.
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer agent-token-under-test'])->getJson('/api/agent/next-job?device_ref=heracles-phone')
+            ->assertOk()->assertJsonPath('post.driver', 'direct')->assertJsonPath('post.caption', 'Autumn is here.');
+    }
+
     public function test_a_template_starts_a_project_and_a_project_saves_as_a_template(): void
     {
         $out = $this->spa()->actingAs($this->user)->postJson('/api/lab/projects', ['name' => 'Latte', 'template' => 'product-picture'])->assertCreated()->json();
@@ -371,6 +396,31 @@ class LabTest extends TestCase
             $this->assertSame(['Logo', 'The product', 'People'], collect($out['canvas']['nodes'])->where('type', 'source.media')->pluck('label')->values()->all());
         }
         $this->assertSame($assets + 1, Asset::count());
+    }
+
+    public function test_a_template_added_later_uses_the_projects_brief_and_the_campaigns_photos(): void
+    {
+        Storage::fake('local');
+        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+        $jar = Asset::factory()->for($this->user)->create();
+        Storage::disk('local')->put($jar->path, $png);
+        $out = $this->spa()->actingAs($this->user)->postJson('/api/lab/projects', [
+            'interview' => ['depth' => 'quick', 'fields' => ['offer' => 'Hand-poured lavender candles', 'audience' => 'Women in Lyon']],
+            'photos' => [['asset_id' => $jar->id, 'kind' => 'product']],
+        ])->assertCreated()->json();
+        $this->project = Project::findOrFail($out['project']['id']);
+        $brief = collect($out['canvas']['nodes'])->firstWhere('type', 'source.brief')['id'];
+        $product = collect($out['canvas']['nodes'])->firstWhere('label', 'The product')['id'];
+
+        // "Your photo, edited", added to the canvas: no second (empty) brief, no empty photo node; the
+        // interview's brief and product photo are what it uses.
+        $graph = Templates::all()['product-scene']['graph'];
+        $canvas = $this->ops([['op' => 'insert', 'graph' => $graph, 'x' => 0, 'y' => 800]])->assertOk()->json('canvas');
+        $this->assertCount(1, collect($canvas['nodes'])->where('type', 'source.brief'));
+        $this->assertCount(1, collect($canvas['nodes'])->where('type', 'source.media'));
+        $edit = collect($canvas['nodes'])->firstWhere('type', 'image.edit')['id'];
+        $into = fn (string $port) => collect($canvas['edges'])->where('to', $edit)->where('in', $port)->pluck('from')->all();
+        $this->assertSame([[$brief], [$product]], [$into('brief'), $into('image')]);
     }
 
     public function test_a_voiceover_reads_in_a_voice_cloned_from_a_recording_with_consent(): void

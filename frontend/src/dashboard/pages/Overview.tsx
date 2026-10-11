@@ -50,6 +50,7 @@ import {
   type Overview as OverviewData,
 } from '../data'
 import { AssetModal, fmtSeconds } from '../media/Media'
+import { NEW_POST } from '../nav'
 import { useOverview, useUser } from '../Shell'
 import { Btn, CountUp, EmptyState, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
 
@@ -72,7 +73,7 @@ export default function Overview() {
             <Btn icon={CalendarDays} onClick={() => navigate('/dashboard/calendar')}>
               Calendar
             </Btn>
-            <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
+            <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
               New post
             </Btn>
           </>
@@ -433,7 +434,7 @@ function Spotlight({ overview, recent }: { overview: OverviewData; recent: Post[
               : 'Give a draft a time, or pick posting times and let the queue fill them.'}
           </p>
           <div className="mt-auto flex flex-wrap gap-2 pt-6">
-            <Btn size="sm" variant="primary" icon={PenLine} onClick={() => navigate(slot ? composeAt(new Date(slot)) : '/dashboard/create')}>
+            <Btn size="sm" variant="primary" icon={PenLine} onClick={() => navigate(slot ? composeAt(new Date(slot)) : NEW_POST)}>
               {slot ? 'Fill that slot' : 'Write a post'}
             </Btn>
             <Btn size="sm" icon={Workflow} onClick={() => navigate('/dashboard/automations')}>
@@ -1011,8 +1012,8 @@ function GettingStarted({ overview }: { overview: OverviewData }) {
       icon: PenLine,
       title: 'Write your first post',
       body: 'One idea, shaped for every platform you pick.',
-      action: 'Open the composer',
-      to: '/dashboard/create',
+      action: 'Open Creative Lab',
+      to: NEW_POST,
       done: overview.counts.total > 0,
     },
     {
@@ -1058,7 +1059,7 @@ function GettingStarted({ overview }: { overview: OverviewData }) {
             Three steps from an empty workspace to a week of posts that are ready to go.
           </p>
           <div className="mt-7">
-            <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
+            <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
               Write the first post
             </Btn>
           </div>

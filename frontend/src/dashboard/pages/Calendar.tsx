@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronLeft, ChevronRight, Clock3, Copy, Layers, MousePointerClick, PenLine, Plus, Smartphone, Trash2, Undo2 } from 'lucide-react'
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Copy, Layers, MousePointerClick, PenLine, Plus, Smartphone, Trash2, Undo2 } from 'lucide-react'
 import { PLATFORMS, PlatformIcon } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
 import { api, type Page, type Post, type PostRun } from '../../lib/api'
@@ -10,6 +10,7 @@ import { Link, useRouter } from '../../lib/router'
 import {
   addDays,
   fmtDateTime,
+  fmtDay,
   fmtTime,
   postState,
   sameDay,
@@ -21,8 +22,9 @@ import {
   useInvalidate,
   type PostState,
 } from '../data'
+import { NEW_POST } from '../nav'
 import { useToast } from '../toast'
-import { Btn, Label, Modal, PageHeader, Platforms, StateBadge, Stagger } from '../ui'
+import { Btn, Label, Modal, PageHeader, Platforms, Segmented, StateBadge, Stagger } from '../ui'
 
 const HOUR = 52
 /** How much of an hour a post's block covers, in minutes. Posts are moments, not meetings. */
@@ -31,10 +33,94 @@ const SNAP_MIN = 15
 /** Beyond this many side by side, posts are too thin to read: the whole group becomes one stack. */
 const MAX_LANES = 2
 
-const monthYear = (d: Date) => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+/** In the month view, a day shows this many posts; with more, one row becomes "+N more". */
+const MONTH_CHIPS = 3
+const POST_DRAG = 'application/x-calendar-post'
+const VIEW_KEY = 'calendar-view'
+
+export const monthYear = (d: Date) => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 const range = (a: Date, b: Date) =>
   `${a.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${b.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 const minutesOf = (d: Date) => d.getHours() * 60 + d.getMinutes()
+
+export type CalendarMode = 'week' | 'month'
+
+export const VIEWS: Array<{ value: CalendarMode; label: ReactNode }> = [
+  { value: 'week', label: <><Clock3 className="size-3.5" />Week</> },
+  { value: 'month', label: <><CalendarDays className="size-3.5" />Month</> },
+]
+
+/** A day picked without a time lands at 9:00, or, today, at the next full hour. */
+function timeFor(day: Date, now: Date) {
+  const at = new Date(day)
+  at.setHours(9, 0, 0, 0)
+  if (sameDay(day, now) && at <= now) at.setHours(now.getHours() + 1, 0, 0, 0)
+  return at
+}
+
+/**
+ * What the calendar shows: a week by the hour, or a month by the day (whole weeks, so it
+ * starts and ends on the neighbouring months' days). The choice is remembered.
+ */
+export function useCalendarRange() {
+  const [mode, setModeState] = useState<CalendarMode>(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === 'month' ? 'month' : 'week'
+    } catch {
+      return 'week'
+    }
+  })
+  const [cursor, setCursor] = useState(() => new Date())
+  const [dir, setDir] = useState(0)
+
+  const { start, days } = useMemo(() => {
+    if (mode === 'week') {
+      const start = startOfWeek(cursor)
+      return { start, days: Array.from({ length: 7 }, (_, i) => addDays(start, i)) }
+    }
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
+    const last = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0)
+    const start = startOfWeek(first)
+    const weeks = Math.ceil((Math.round((last.getTime() - start.getTime()) / 86_400_000) + 1) / 7)
+    return { start, days: Array.from({ length: weeks * 7 }, (_, i) => addDays(start, i)) }
+  }, [mode, cursor])
+
+  const setMode = (next: CalendarMode) => {
+    setDir(0)
+    setModeState(next)
+    try {
+      localStorage.setItem(VIEW_KEY, next)
+    } catch {
+      /* Remembering the view is a nicety. */
+    }
+  }
+
+  /** One week or month back or forward; 0 goes back to today. */
+  const shift = (n: number) => {
+    setDir(n)
+    setCursor((c) => {
+      const today = new Date()
+      if (n === 0) return today
+      if (mode === 'week') return addDays(c, n * 7)
+      const month = new Date(c.getFullYear(), c.getMonth() + n, 1)
+      return month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth() ? today : month
+    })
+  }
+
+  /** From the month: that day's week, by the hour. */
+  const openDay = (d: Date) => {
+    setCursor(d)
+    setMode('week')
+  }
+
+  const now = new Date()
+  const current =
+    mode === 'week'
+      ? sameDay(start, startOfWeek(now))
+      : cursor.getFullYear() === now.getFullYear() && cursor.getMonth() === now.getMonth()
+
+  return { mode, setMode, cursor, start, end: addDays(start, days.length), days, dir, shift, openDay, current }
+}
 
 /** Side-by-side columns for posts whose blocks would overlap, or one stack when there are too many. */
 function lanes(posts: Post[]) {
@@ -73,16 +159,15 @@ export default function Calendar() {
   const { navigate } = useRouter()
   const toast = useToast()
   const invalidate = useInvalidate()
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
-  const [dir, setDir] = useState(0)
+  const view = useCalendarRange()
+  const { mode, days, start } = view
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<Post | null>(null)
   const [now, setNow] = useState(() => new Date())
 
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const { data, loading, setData } = useApi<Page<Post>>('/posts', {
-    from: weekStart.toISOString(),
-    to: addDays(weekStart, 7).toISOString(),
+    from: start.toISOString(),
+    to: view.end.toISOString(),
     sort: 'scheduled',
     per_page: 500,
   })
@@ -99,10 +184,9 @@ export default function Calendar() {
     n: posts.filter((p) => postState(p, now.getTime()) === s).length,
   }))
 
-  const shift = (weeks: number) => {
-    setDir(weeks)
+  const shift = (n: number) => {
     setSelectedId(null)
-    setWeekStart((w) => (weeks === 0 ? startOfWeek(new Date()) : addDays(w, weeks * 7)))
+    view.shift(n)
   }
 
   const act = async (fn: () => Promise<unknown>, message: string) => {
@@ -136,8 +220,7 @@ export default function Calendar() {
     }
   }
 
-  const weekEnd = addDays(weekStart, 6)
-  const isThisWeek = sameDay(weekStart, startOfWeek(now))
+  const onCreate = (at: Date) => navigate(`/dashboard/create?at=${encodeURIComponent(at.toISOString())}`)
 
   return (
     <div>
@@ -149,7 +232,7 @@ export default function Calendar() {
         }
         sub="Drag a post to move it. Click an empty slot to write one for that time."
         actions={
-          <Btn variant="primary" icon={Plus} onClick={() => navigate('/dashboard/create')}>
+          <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
             New post
           </Btn>
         }
@@ -160,26 +243,26 @@ export default function Calendar() {
           <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 md:px-5">
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.p
-                key={monthYear(weekStart)}
+                key={monthYear(mode === 'week' ? start : view.cursor)}
                 initial={{ y: 10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: -10, opacity: 0 }}
                 transition={{ duration: 0.3, ease }}
                 className="text-[15px] font-medium tracking-[-0.01em]"
               >
-                {monthYear(weekStart)}
+                {monthYear(mode === 'week' ? start : view.cursor)}
               </motion.p>
             </AnimatePresence>
-            <span className="font-mono text-[11px] text-dim">{range(weekStart, weekEnd)}</span>
+            {mode === 'week' && <span className="font-mono text-[11px] text-dim">{range(start, addDays(start, 6))}</span>}
             <div className="flex items-center gap-1">
-              <button type="button" aria-label="Previous week" onClick={() => shift(-1)} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
+              <button type="button" aria-label={`Previous ${mode}`} onClick={() => shift(-1)} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
                 <ChevronLeft className="size-4" />
               </button>
-              <button type="button" aria-label="Next week" onClick={() => shift(1)} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
+              <button type="button" aria-label={`Next ${mode}`} onClick={() => shift(1)} className="grid size-7 place-items-center rounded-md text-muted hover:bg-white/[0.06] hover:text-fg">
                 <ChevronRight className="size-4" />
               </button>
             </div>
-            {!isThisWeek && (
+            {!view.current && (
               <Btn size="sm" onClick={() => shift(0)}>
                 Today
               </Btn>
@@ -193,30 +276,45 @@ export default function Calendar() {
                 </span>
               ))}
             </div>
+            <Segmented id="calendar-view" label="Calendar view" options={VIEWS} value={mode} onChange={view.setMode} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px]">
-            <AnimatePresence mode="wait" initial={false} custom={dir}>
+            <AnimatePresence mode="wait" initial={false} custom={view.dir}>
               <motion.div
-                key={weekStart.toISOString()}
-                custom={dir}
-                initial={{ opacity: 0, x: dir * 40 }}
+                key={`${mode}-${start.toISOString()}`}
+                custom={view.dir}
+                initial={{ opacity: 0, x: view.dir * 40 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: dir * -40 }}
+                exit={{ opacity: 0, x: view.dir * -40 }}
                 transition={{ duration: 0.35, ease }}
                 className="min-w-0"
               >
-                <WeekGrid
-                  days={days}
-                  posts={posts}
-                  ready={!loading && !!data}
-                  now={now}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onCreate={(at) => navigate(`/dashboard/create?at=${encodeURIComponent(at.toISOString())}`)}
-                  onMove={reschedule}
-                />
-                <Agenda days={days} posts={posts} now={now} onSelect={setSelectedId} />
+                {mode === 'week' ? (
+                  <WeekGrid
+                    days={days}
+                    posts={posts}
+                    ready={!loading && !!data}
+                    now={now}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                    onCreate={onCreate}
+                    onMove={reschedule}
+                  />
+                ) : (
+                  <MonthGrid
+                    days={days}
+                    month={view.cursor}
+                    posts={posts}
+                    now={now}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                    onCreate={onCreate}
+                    onMove={reschedule}
+                    onOpenDay={view.openDay}
+                  />
+                )}
+                <Agenda days={days} month={mode === 'month' ? view.cursor : undefined} posts={posts} now={now} onSelect={setSelectedId} />
               </motion.div>
             </AnimatePresence>
 
@@ -667,36 +765,313 @@ export function WeekGrid({
   )
 }
 
-/** Phones get a list per day instead of the grid. */
-export function Agenda({ days, posts, now, onSelect }: { days: Date[]; posts: Post[]; now: Date; onSelect: (id: number) => void }) {
+/**
+ * The month, a cell per day. Drag a post to another day to move it there at the same time;
+ * click an empty part of a day to write one for it; click the date for its week by the hour.
+ */
+export function MonthGrid({
+  days,
+  month,
+  posts,
+  now,
+  selectedId,
+  onSelect,
+  onCreate,
+  onMove,
+  onOpenDay,
+  drop,
+}: {
+  days: Date[]
+  /** Any day of the month shown: the days around it are dimmed. */
+  month: Date
+  posts: Post[]
+  now: Date
+  selectedId: number | null
+  onSelect: (id: number) => void
+  onCreate: (at: Date) => void
+  onMove: (post: Post, at: Date) => void
+  onOpenDay: (day: Date) => void
+  /** Something else that can be dropped on a day (the assistant's drafts): its drag type, and what to do with it. */
+  drop?: { type: string; onDrop: (at: Date, value: string) => void }
+}) {
+  const [over, setOver] = useState<number | null>(null)
+  const [dragging, setDragging] = useState<number | null>(null)
+  const [openDay, setOpenDay] = useState<number | null>(null)
+  const rows = days.length / 7
+
+  // The "+N more" list closes on a click anywhere outside it, or on Escape.
+  useEffect(() => {
+    if (openDay === null) return
+    const close = (e: PointerEvent) => {
+      if (!(e.target as Element).closest?.(`[data-more="${openDay}"]`)) setOpenDay(null)
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpenDay(null)
+    document.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [openDay])
+
+  const byDay = days.map((d) =>
+    posts
+      .filter((p) => p.scheduled_at && sameDay(new Date(p.scheduled_at), d))
+      .sort((a, b) => Date.parse(a.scheduled_at!) - Date.parse(b.scheduled_at!)),
+  )
+  const accepts = (e: DragEvent) => e.dataTransfer.types.includes(POST_DRAG) || (!!drop && e.dataTransfer.types.includes(drop.type))
+
+  const dropOn = (e: DragEvent, d: Date) => {
+    const id = e.dataTransfer.getData(POST_DRAG)
+    if (id) {
+      const post = posts.find((p) => p.id === Number(id))
+      if (!post?.scheduled_at) return
+      const from = new Date(post.scheduled_at)
+      if (sameDay(from, d)) return
+      const at = new Date(d)
+      at.setHours(from.getHours(), from.getMinutes(), 0, 0)
+      onMove(post, at)
+    } else if (drop) {
+      drop.onDrop(timeFor(d, now), e.dataTransfer.getData(drop.type))
+    }
+  }
+
+  return (
+    <div className="hidden md:block">
+      <div className="grid grid-cols-7 border-b border-line">
+        {days.slice(0, 7).map((d, i) => (
+          <p key={i} className={cn('px-3 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-dim', i > 0 && 'border-l border-line')}>
+            {d.toLocaleDateString(undefined, { weekday: 'short' })}
+          </p>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7">
+        {days.map((d, di) => {
+          const items = byDay[di]
+          const today = sameDay(d, now)
+          const inMonth = d.getMonth() === month.getMonth()
+          const past = addDays(d, 1) <= now
+          const slot = timeFor(d, now)
+          const open = slot.getTime() > now.getTime()
+          const shown = items.length > MONTH_CHIPS ? items.slice(0, MONTH_CHIPS - 1) : items
+          const hidden = items.length - shown.length
+          const row = Math.floor(di / 7)
+          return (
+            <div
+              key={d.toISOString()}
+              className={cn(
+                'group relative h-[118px] px-1.5 pb-1.5 pt-1 transition-colors',
+                di % 7 > 0 && 'border-l border-line',
+                row > 0 && 'border-t border-line',
+                !inMonth && 'bg-black/20',
+                today && 'bg-white/[0.02]',
+                open && 'cursor-pointer hover:bg-white/[0.015]',
+                over === di && (past ? 'bg-white/[0.02]' : 'bg-accent/[0.07] shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.12)]'),
+              )}
+              onClick={(e) => {
+                if ((e.target as Element).closest('[data-chip], [data-more], button')) return
+                if (open) onCreate(slot)
+              }}
+              onDragOver={(e) => {
+                if (!accepts(e)) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                if (over !== di) setOver(di)
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver((o) => (o === di ? null : o))
+              }}
+              onDrop={(e) => {
+                if (!accepts(e)) return
+                e.preventDefault()
+                setOver(null)
+                dropOn(e, d)
+              }}
+            >
+              <div className="flex items-center justify-between pl-0.5">
+                <button
+                  type="button"
+                  title="See this week by the hour"
+                  onClick={() => onOpenDay(d)}
+                  className={cn(
+                    'grid h-6 min-w-6 place-items-center rounded-full px-1.5 text-[12.5px] font-medium tabular-nums tracking-[-0.01em] transition-colors',
+                    today ? 'bg-accent text-on-accent' : inMonth ? 'text-muted hover:bg-white/[0.06] hover:text-fg' : 'text-dim hover:bg-white/[0.06] hover:text-muted',
+                  )}
+                >
+                  {d.getDate() === 1 ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : d.getDate()}
+                </button>
+                {open && (
+                  <span className="flex items-center gap-1 pr-1 font-mono text-[10px] text-accent-soft opacity-0 transition-opacity group-hover:opacity-100">
+                    <Plus className="size-3" />
+                    {fmtTime(slot)}
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-1 space-y-[3px]">
+                {shown.map((p) => (
+                  <MonthChip key={p.id} post={p} now={now} selected={selectedId === p.id} dragging={dragging === p.id} onSelect={onSelect} onDrag={setDragging} />
+                ))}
+                {hidden > 0 && (
+                  <button
+                    type="button"
+                    data-more={di}
+                    onClick={() => setOpenDay(openDay === di ? null : di)}
+                    className="flex h-[22px] w-full items-center rounded px-1.5 font-mono text-[10.5px] text-muted transition-colors hover:bg-white/[0.06] hover:text-fg"
+                  >
+                    +{hidden} more
+                  </button>
+                )}
+              </div>
+
+              <AnimatePresence>
+                {openDay === di && (
+                  <motion.div
+                    data-more={di}
+                    initial={{ opacity: 0, scale: 0.97 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.97 }}
+                    transition={{ duration: 0.18, ease }}
+                    className={cn(
+                      'absolute z-30 w-[260px] rounded-lg border border-line-2 bg-panel-3 p-1.5 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
+                      row >= rows / 2 ? 'bottom-0' : 'top-0',
+                      di % 7 >= 5 ? 'right-0' : 'left-0',
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2 px-1.5 pb-1.5 pt-0.5">
+                      <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-dim">{fmtDay(d)}</p>
+                      <button type="button" onClick={() => onOpenDay(d)} className="text-[11.5px] text-accent-soft hover:underline">
+                        By the hour
+                      </button>
+                    </div>
+                    <div data-lenis-prevent className="max-h-[240px] space-y-1 overflow-y-auto">
+                      {items.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            onSelect(p.id)
+                            setOpenDay(null)
+                          }}
+                          className={cn(
+                            'flex w-full items-center gap-2 rounded-md border border-l-2 border-transparent px-2 py-1.5 text-left transition-colors hover:brightness-125',
+                            STATE[postState(p, now.getTime())].tone,
+                            selectedId === p.id && 'shadow-[0_0_0_1px_rgb(255_255_255_/_0.4)]',
+                          )}
+                        >
+                          <PlatformIcon id={p.platforms[0]} className="size-3 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate text-[12px]">{titleOf(p)}</span>
+                          <span className="font-mono text-[10px] text-dim">{fmtTime(p.scheduled_at!)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function MonthChip({
+  post,
+  now,
+  selected,
+  dragging,
+  onSelect,
+  onDrag,
+}: {
+  post: Post
+  now: Date
+  selected: boolean
+  dragging: boolean
+  onSelect: (id: number) => void
+  onDrag: (id: number | null) => void
+}) {
+  const movable = post.status !== 'published'
+  return (
+    // A div, not a button: Firefox won't start a drag from a button.
+    <div
+      role="button"
+      tabIndex={0}
+      data-chip
+      draggable={movable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(POST_DRAG, String(post.id))
+        e.dataTransfer.effectAllowed = 'move'
+        onDrag(post.id)
+      }}
+      onDragEnd={() => onDrag(null)}
+      onClick={() => onSelect(post.id)}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault()
+        onSelect(post.id)
+      }}
+      title={`${fmtTime(post.scheduled_at!)} · ${titleOf(post)}`}
+      className={cn(
+        'flex h-[22px] items-center gap-1.5 rounded border border-l-2 border-transparent px-1.5 transition-[opacity,filter,box-shadow] hover:brightness-125',
+        STATE[postState(post, now.getTime())].tone,
+        movable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+        selected && 'shadow-[0_0_0_1px_rgb(255_255_255_/_0.4)]',
+        dragging && 'opacity-40',
+      )}
+    >
+      <PlatformIcon id={post.platforms[0]} className="size-3 shrink-0 text-fg" />
+      <span className="font-mono text-[10px] text-muted">{fmtTime(post.scheduled_at!)}</span>
+      <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium">{titleOf(post)}</span>
+    </div>
+  )
+}
+
+/** Phones get a list per day instead of the grid; for a month, only the days with something on them. */
+export function Agenda({
+  days,
+  month,
+  posts,
+  now,
+  onSelect,
+}: {
+  days: Date[]
+  /** Set in the month view: the days around it, and the empty ones, are left out. */
+  month?: Date
+  posts: Post[]
+  now: Date
+  onSelect: (id: number) => void
+}) {
+  const rows = days
+    .map((d) => ({ d, items: posts.filter((p) => p.scheduled_at && sameDay(new Date(p.scheduled_at), d)) }))
+    .filter(({ d, items }) => !month || (d.getMonth() === month.getMonth() && items.length > 0))
+  if (month && rows.length === 0) return <p className="px-4 py-10 text-center text-[12.5px] text-dim md:hidden">Nothing planned this month.</p>
   return (
     <div className="divide-y divide-line md:hidden">
-      {days.map((d) => {
-        const items = posts.filter((p) => p.scheduled_at && sameDay(new Date(p.scheduled_at), d))
-        return (
-          <div key={d.toISOString()} className="px-4 py-3">
-            <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-dim">
-              {d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
-              {sameDay(d, now) && <span className="text-accent-soft"> · today</span>}
-            </p>
-            <div className="mt-2 space-y-1.5">
-              {items.length === 0 && <p className="text-[12px] text-dim">Nothing planned.</p>}
-              {items.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => onSelect(p.id)}
-                  className={cn('flex w-full items-center gap-2.5 rounded-md border border-l-2 border-transparent px-2.5 py-2 text-left', STATE[postState(p, now.getTime())].tone)}
-                >
-                  <Platforms ids={p.platforms} />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px]">{titleOf(p)}</span>
-                  <span className="font-mono text-[10px] text-dim">{fmtTime(p.scheduled_at!)}</span>
-                </button>
-              ))}
-            </div>
+      {rows.map(({ d, items }) => (
+        <div key={d.toISOString()} className="px-4 py-3">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-dim">
+            {d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
+            {sameDay(d, now) && <span className="text-accent-soft"> · today</span>}
+          </p>
+          <div className="mt-2 space-y-1.5">
+            {items.length === 0 && <p className="text-[12px] text-dim">Nothing planned.</p>}
+            {items.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onSelect(p.id)}
+                className={cn('flex w-full items-center gap-2.5 rounded-md border border-l-2 border-transparent px-2.5 py-2 text-left', STATE[postState(p, now.getTime())].tone)}
+              >
+                <Platforms ids={p.platforms} />
+                <span className="min-w-0 flex-1 truncate text-[12.5px]">{titleOf(p)}</span>
+                <span className="font-mono text-[10px] text-dim">{fmtTime(p.scheduled_at!)}</span>
+              </button>
+            ))}
           </div>
-        )
-      })}
+        </div>
+      ))}
     </div>
   )
 }

@@ -9,7 +9,9 @@ namespace App\Services\Lab;
  * same content somewhere else, add another Where it goes and Post after it.
  *
  * Using a template copies its nodes into the project, to fill in and change. People's own templates
- * (Save as template) are LabTemplate rows; these are built in.
+ * (Save as template) are LabTemplate rows; these are built in. A template's Brief becomes the project's
+ * own when it has one, and a photo node that says what it takes (`reuse`: the product, the people…)
+ * becomes the campaign's photos of that kind (Graph::insert).
  */
 class Templates
 {
@@ -18,7 +20,7 @@ class Templates
      */
     public static function all(): array
     {
-        $n = fn (string $id, string $type, int $c, int $r, array $params = [], ?string $label = null) => array_filter(['id' => $id, 'type' => $type, 'x' => $c * 360, 'y' => $r * 380, 'params' => $params, 'label' => $label], fn ($v) => $v !== null);
+        $n = fn (string $id, string $type, int $c, int $r, array $params = [], ?string $label = null, ?array $reuse = null) => array_filter(['id' => $id, 'type' => $type, 'x' => $c * 360, 'y' => $r * 380, 'params' => $params, 'label' => $label, 'reuse' => $reuse], fn ($v) => $v !== null);
         $e = fn (string $from, string $out, string $to, string $in) => compact('from', 'out', 'to', 'in');
         // The end of every template: where it goes, then the post.
         $out = function (string $media, string $mediaPort, ?string $caption, int $c, int $r, string $suffix = '') use ($n, $e) {
@@ -78,7 +80,7 @@ class Templates
                 'name' => 'Carousel with words', 'category' => 'Pictures', 'tagline' => 'Several pictures in one look, a promise on the first, a caption that says save this.',
                 'graph' => $graph([
                     $n('brief', 'source.brief', 0, 1),
-                    $n('pictures', 'image.generate', 1, 0, ['prompt' => '{product}, the same soft light and palette in every shot, varied angles, calm space for text', 'aspect' => '4:5', 'variations' => 4]),
+                    $n('pictures', 'image.generate', 1, 0, ['prompt' => '{product}, the same soft light and palette in every shot, varied angles, calm empty space at the top', 'aspect' => '4:5', 'variations' => 4]),
                     $n('headline', 'text.write', 1, 1, ['task' => 'headline', 'instructions' => 'A promise that makes people swipe: {offer}']),
                     $n('caption', 'text.write', 1, 2, ['task' => 'caption', 'instructions' => 'What the slides give; end with “Save this for later”.']),
                     $n('design', 'finish.design', 2, 0),
@@ -90,13 +92,27 @@ class Templates
             'product-scene' => [
                 'name' => 'Your photo, edited', 'category' => 'Pictures', 'tagline' => 'Your own photo changed by an instruction (a new scene, a new light), the subject kept as it is.',
                 'graph' => $graph([
-                    $n('product', 'source.media', 0, 0, [], 'Your photo'),
+                    $n('product', 'source.media', 0, 0, [], 'Your photo', ['product', 'other']),
                     $n('brief', 'source.brief', 0, 1),
                     $n('scene', 'image.edit', 1, 0, ['instruction' => 'Keep the product exactly as it is. Put it in a new scene: {style}']),
                     $n('caption', 'text.write', 1, 1, ['task' => 'caption', 'instructions' => '{offer}. {cta}']),
                 ], [
                     $e('product', 'image', 'scene', 'image'), $e('brief', 'brief', 'scene', 'brief'), $e('brief', 'brief', 'caption', 'brief'),
                 ], $out('scene', 'image', 'caption', 2, 0)),
+            ],
+            'words-over-picture' => [
+                'name' => 'Your photo with text over it', 'category' => 'Pictures', 'tagline' => 'Your own photo or video with a headline over it, placed and styled in the text editor, and a caption.',
+                'graph' => $graph([
+                    $n('photo', 'source.media', 0, 0, [], 'Your photo or video', ['product', 'place', 'person', 'other']),
+                    $n('brief', 'source.brief', 0, 1),
+                    $n('headline', 'text.write', 1, 1, ['task' => 'headline', 'instructions' => '{offer}']),
+                    $n('caption', 'text.write', 1, 2, ['task' => 'caption', 'instructions' => '{offer}. {cta}']),
+                    $n('text', 'finish.design', 1, 0),
+                ], [
+                    $e('photo', 'image', 'text', 'media'), $e('photo', 'video', 'text', 'media'), $e('headline', 'text', 'text', 'headline'),
+                    $e('brief', 'brief', 'headline', 'brief'), $e('brief', 'brief', 'caption', 'brief'), $e('brief', 'brief', 'text', 'brief'),
+                    $e('text', 'video', 'where', 'media'), // a video with text over it goes on too
+                ], $out('text', 'image', 'caption', 2, 0)),
             ],
 
             /* ------------------------------------------------------------ moving pictures */
@@ -116,7 +132,7 @@ class Templates
             'moving-pictures-translated' => [
                 'name' => 'Moving pictures, in another language', 'category' => 'Moving pictures', 'tagline' => 'Your photos in motion with the voiceover translated and read in a voice for that language.',
                 'graph' => $graph([
-                    $n('photos', 'source.media', 0, 0, [], 'Your photos'),
+                    $n('photos', 'source.media', 0, 0, [], 'Your photos', ['product', 'place', 'other']),
                     $n('lines', 'source.text', 0, 1, ['text' => 'The first line, for the first photo
 The second line
 The third line'], 'The lines'),
@@ -160,7 +176,7 @@ The third line'], 'The lines'),
             'talking-portrait' => [
                 'name' => 'Talking portrait (lip sync)', 'category' => 'Voices & lips', 'tagline' => 'A portrait animated, then made to say your script in a voice you pick, lips matching. Consent is ticked on the node.',
                 'graph' => $graph([
-                    $n('portrait', 'source.media', 0, 0, [], 'A portrait (with consent)'),
+                    $n('portrait', 'source.media', 0, 0, [], 'A portrait (with consent)', ['person']),
                     $n('script', 'source.text', 0, 1, ['text' => 'Hi! Our pumpkin latte is back, and before ten it’s two for one.'], 'What they say'),
                     $n('animate', 'video.animate', 1, 0, ['prompt' => 'The person looks at the camera and talks naturally, small head movements, steady camera', 'duration' => 5]),
                     $n('dub', 'people.dub', 2, 0),
@@ -198,13 +214,83 @@ The third line'], 'The lines'),
             'face-swap' => [
                 'name' => 'A face on a video', 'category' => 'Voices & lips', 'tagline' => 'A consenting person’s face on the video, then captions. Consent is ticked on the node.',
                 'graph' => $graph([
-                    $n('face', 'source.media', 0, 0, [], 'The face (with consent)'),
+                    $n('face', 'source.media', 0, 0, [], 'The face (with consent)', ['person']),
                     $n('video', 'source.media', 0, 1, [], 'The video'),
                     $n('swap', 'people.swap', 1, 0),
                     $n('captions', 'video.captions', 2, 0),
                 ], [
                     $e('face', 'image', 'swap', 'face'), $e('video', 'video', 'swap', 'target'), $e('swap', 'video', 'captions', 'video'),
                 ], $out('captions', 'video', null, 3, 0)),
+            ],
+
+            /* ------------------------------------------------------------ Higgsfield */
+            'hf-cinematic-shot' => [
+                'name' => 'Cinematic product shot', 'category' => 'Higgsfield', 'tagline' => 'Your product in a real camera move (a crash zoom, a drone orbit…) with Cinema Studio, its sound made with it, a caption in your voice.',
+                'graph' => $graph([
+                    $n('product', 'source.media', 0, 0, [], 'The product', ['product', 'other']),
+                    $n('brief', 'source.brief', 0, 1),
+                    $n('shot', 'video.cinema', 1, 0, ['prompt' => '<<<image_1>>> {product}, the hero of the shot, {style}', 'camera' => 'crush-zoom', 'genre' => 'drama', 'aspect' => '9:16', 'duration' => 6]),
+                    $n('caption', 'text.write', 1, 1, ['task' => 'caption', 'instructions' => '{offer}. {cta}']),
+                ], [
+                    $e('product', 'image', 'shot', 'reference'), $e('brief', 'brief', 'shot', 'brief'), $e('brief', 'brief', 'caption', 'brief'),
+                ], $out('shot', 'video', 'caption', 2, 0)),
+            ],
+            'hf-character' => [
+                'name' => 'Your character, any scene', 'category' => 'Higgsfield', 'tagline' => 'Train a character once from photos (Soul ID), then picture them anywhere with the same face: a carousel in three scenes.',
+                'graph' => $graph([
+                    $n('photos', 'source.media', 0, 0, [], 'Photos of them (with consent)', ['person']),
+                    $n('brief', 'source.brief', 0, 2),
+                    $n('character', 'people.character', 1, 0),
+                    $n('scene-1', 'image.character', 2, 0, ['prompt' => 'Smiling with {product} in a sunny café, candid, {style}'], 'Scene 1'),
+                    $n('scene-2', 'image.character', 2, 1, ['prompt' => 'Walking down a city street at golden hour, {product} in hand, {style}'], 'Scene 2'),
+                    $n('scene-3', 'image.character', 2, 2, ['prompt' => 'At home on a cosy sofa, relaxed, {product} beside them, {style}'], 'Scene 3'),
+                    $n('caption', 'text.write', 2, 3, ['task' => 'caption', 'instructions' => '{offer}. {cta}']),
+                ], [
+                    $e('photos', 'image', 'character', 'photos'),
+                    $e('character', 'character', 'scene-1', 'character'), $e('character', 'character', 'scene-2', 'character'), $e('character', 'character', 'scene-3', 'character'),
+                    $e('brief', 'brief', 'scene-1', 'brief'), $e('brief', 'brief', 'scene-2', 'brief'), $e('brief', 'brief', 'scene-3', 'brief'), $e('brief', 'brief', 'caption', 'brief'),
+                ], [[$n('where', 'finish.channel', 3, 0), $n('post', 'finish.post', 4, 0)], [
+                    $e('scene-1', 'image', 'where', 'media'), $e('scene-2', 'image', 'where', 'media'), $e('scene-3', 'image', 'where', 'media'), $e('caption', 'text', 'where', 'caption'),
+                    $e('where', 'channel', 'post', 'channel'), $e('where', 'image', 'post', 'media'), $e('where', 'caption', 'post', 'caption'),
+                ]]),
+            ],
+            'hf-trend' => [
+                'name' => 'Ride a trend (copy the moves)', 'category' => 'Higgsfield', 'tagline' => 'The person in your photo does the moves of a trending video (Kling Motion Control), captioned, with a caption that rides the trend.',
+                'graph' => $graph([
+                    $n('who', 'source.media', 0, 0, [], 'Who moves (with consent)', ['person']),
+                    $n('moves', 'source.media', 0, 1, [], 'The moves (a video you may use)'),
+                    $n('brief', 'source.brief', 0, 2),
+                    $n('motion', 'people.motion', 1, 0),
+                    $n('captions', 'video.captions', 2, 0, ['style' => 'bold']),
+                    $n('caption', 'text.write', 1, 2, ['task' => 'caption', 'platform' => 'tiktok', 'length' => 'short', 'instructions' => 'Ride the trend, playful: {offer}']),
+                ], [
+                    $e('who', 'image', 'motion', 'image'), $e('moves', 'video', 'motion', 'video'), $e('motion', 'video', 'captions', 'video'), $e('brief', 'brief', 'caption', 'brief'),
+                ], $out('motion', 'video', 'caption', 3, 0)),
+            ],
+            'hf-ads' => [
+                'name' => 'Ads from a product photo', 'category' => 'Higgsfield', 'tagline' => 'Four finished ads from your brief and product photo (Ads Studio): pick the best, post it with a caption.',
+                'graph' => $graph([
+                    $n('product', 'source.media', 0, 0, [], 'The product', ['product', 'logo', 'other']),
+                    $n('brief', 'source.brief', 0, 1),
+                    $n('ads', 'image.ads', 1, 0, ['count' => 4, 'aspect' => '4:5']),
+                    $n('caption', 'text.write', 1, 1, ['task' => 'caption', 'instructions' => '{offer}. {cta}']),
+                ], [
+                    $e('product', 'image', 'ads', 'product'), $e('brief', 'brief', 'ads', 'brief'), $e('brief', 'brief', 'caption', 'brief'),
+                ], $out('ads', 'image', 'caption', 2, 0)),
+            ],
+            'hf-restyle' => [
+                'name' => 'Restyle a clip', 'category' => 'Higgsfield', 'tagline' => 'Your video in another look (anime, clay, comic…) with Genjutsu, the motion and sound kept, a headline over it.',
+                'graph' => $graph([
+                    $n('clip', 'source.media', 0, 0, [], 'Your clip (4 to 30 s)'),
+                    $n('brief', 'source.brief', 0, 1),
+                    $n('restyle', 'video.restyle', 1, 0),
+                    $n('hook', 'text.write', 1, 1, ['task' => 'hook', 'instructions' => '{offer}']),
+                    $n('text', 'finish.design', 2, 0, ['placement' => 'reel']),
+                    $n('caption', 'text.write', 2, 1, ['task' => 'caption', 'length' => 'short', 'instructions' => '{offer}. {cta}']),
+                ], [
+                    $e('clip', 'video', 'restyle', 'video'), $e('restyle', 'video', 'text', 'media'), $e('hook', 'text', 'text', 'headline'),
+                    $e('brief', 'brief', 'hook', 'brief'), $e('brief', 'brief', 'caption', 'brief'),
+                ], $out('text', 'video', 'caption', 3, 0)),
             ],
 
             /* ------------------------------------------------------------ repurpose */

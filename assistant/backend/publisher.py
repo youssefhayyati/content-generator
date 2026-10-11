@@ -172,6 +172,14 @@ class Publisher(PhoneWork):
                                       f"{platforms.label(platform, placement)}")
         job.run = run
         job.budget = int((fj.get("limits") or {}).get("step_budget") or 40)
+        # Who the post asks to post it: our own agent (direct), the phone's (agent), or the phone's with ours
+        # taking over if it fails (auto). Without ours set up, the phone's agent does it, and says so.
+        job.prefer = post_in.get("driver") if post_in.get("driver") in ("agent", "direct", "auto") else None
+        if job.prefer in ("direct", "auto") and not self.client.driver:
+            note = "our own agent isn't set up here (it needs OLLAMA_CLOUD_API_KEY): the phone's agent posts it"
+            job.steps.append(note)
+            job.prefer = "agent"
+            log.warning("FlowAI run %s: %s", run, note)
         self.runs[run] = None
         folder = self.dir / "runs" / run
         try:
