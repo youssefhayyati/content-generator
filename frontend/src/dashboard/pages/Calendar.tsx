@@ -474,6 +474,18 @@ export function WeekGrid({
   drop?: { type: string; onDrop: (at: Date, value: string) => void }
 }) {
   const scroller = useRef<HTMLDivElement>(null)
+  // The grid below scrolls, and its scrollbar takes width the header doesn't lose: the header gives up
+  // the same amount, so each day's line in the header meets its line in the grid.
+  const [gutter, setGutter] = useState(0)
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const measure = () => setGutter(el.offsetWidth - el.clientWidth)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   const firstColumn = useRef<HTMLDivElement>(null)
   const [colWidth, setColWidth] = useState(120)
   const [ghost, setGhost] = useState<{ day: number; minutes: number } | null>(null)
@@ -530,7 +542,7 @@ export function WeekGrid({
 
   return (
     <div className="hidden md:block">
-      <div className="grid grid-cols-[52px_repeat(7,minmax(0,1fr))] border-b border-line">
+      <div className="grid grid-cols-[52px_repeat(7,minmax(0,1fr))] border-b border-line" style={{ paddingRight: gutter }}>
         <span />
         {days.map((d) => {
           const today = sameDay(d, now)
