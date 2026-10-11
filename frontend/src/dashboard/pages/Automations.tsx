@@ -11,7 +11,7 @@ import { useSession } from '../../lib/session'
 import { fmtDay, fmtRelative, fmtTime, useApi, useInvalidate, WEEKDAYS, type QueueState } from '../data'
 import { NEW_POST } from '../nav'
 import { useToast } from '../toast'
-import { Btn, inputClass, Menu, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
+import { Btn, inputClass, Menu, PageHeader, Panel, Platforms, Skeleton, Stagger, TimeInput } from '../ui'
 
 type Slot = { weekday: number; time: string }
 
@@ -312,7 +312,7 @@ function DayRow({
             commit()
           }}
         >
-          <input type="time" value={value} onChange={(e) => setValue(e.target.value)} autoFocus aria-label={`New time on ${name}`} className={cn(inputClass, 'h-8 w-[104px]')} />
+          <TimeInput value={value} onChange={(e) => setValue(e.target.value)} autoFocus aria-label={`New time on ${name}`} className={cn(inputClass, 'h-8 w-[104px]')} />
           <Btn size="sm" variant="primary" type="submit">
             Add
           </Btn>

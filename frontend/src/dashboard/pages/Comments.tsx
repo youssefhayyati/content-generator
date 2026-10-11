@@ -9,7 +9,7 @@ import { cn } from '../../lib/cn'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Mood, StormGuard } from '../storm/StormGuard'
 import { useToast } from '../toast'
-import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Skeleton, Stagger } from '../ui'
+import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Skeleton, Stagger, Select } from '../ui'
 
 const STATUS: Record<Comment['status'], { label: string; cls: string }> = {
   new: { label: 'New', cls: 'border-white/10 text-muted' },
@@ -238,13 +238,13 @@ function Report({ open, accounts, onClose }: { open: boolean; accounts: Account[
       <div className="space-y-4">
         <label className="block">
           <Label>On account</Label>
-          <select value={accountId || accounts[0]?.id || ''} onChange={(e) => setAccountId(Number(e.target.value))} className={cn(inputClass, 'mt-2')}>
+          <Select value={accountId || accounts[0]?.id || ''} onChange={(e) => setAccountId(Number(e.target.value))} fieldClassName={cn(inputClass, 'mt-2')}>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 @{a.handle} ({a.platform})
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="block">
           <Label>Commenter</Label>

@@ -7,7 +7,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
-import { Btn, inputClass, Label, Modal, Toggle } from '../ui'
+import { Btn, inputClass, Label, Modal, Toggle, Select } from '../ui'
 
 const tone = (p: StormPressure) =>
   !p.enabled ? { name: 'Off', color: 'var(--color-dim)' } : p.tripped ? { name: 'Frozen', color: 'var(--color-fail)' } : p.pressure >= 85 ? { name: 'Stormy', color: 'var(--color-fail)' } : p.pressure >= 45 ? { name: 'Choppy', color: 'var(--color-warn)' } : { name: 'Calm', color: 'var(--color-ok)' }
@@ -182,13 +182,13 @@ function Settings({ p, onClose }: { p: StormPressure | null; onClose: () => void
             </label>
             <label className="block">
               <Label>Comments within</Label>
-              <select value={v.window_minutes} onChange={(e) => setDraft({ ...v, window_minutes: Number(e.target.value) })} className={cn(inputClass, 'mt-2')}>
+              <Select value={v.window_minutes} onChange={(e) => setDraft({ ...v, window_minutes: Number(e.target.value) })} fieldClassName={cn(inputClass, 'mt-2')}>
                 {[15, 30, 60, 120, 240, 720, 1440].map((m) => (
                   <option key={m} value={m}>
                     {m < 60 ? `${m} minutes` : m === 60 ? '1 hour' : `${m / 60} hours`}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           </div>
           <div className="flex justify-end gap-2 border-t border-line pt-4">

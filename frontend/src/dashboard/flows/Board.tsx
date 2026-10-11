@@ -231,7 +231,7 @@ export function Board({
       onPointerDown={onBoardDown}
       onPointerMove={onBoardMove}
       onPointerUp={onBoardUp}
-      className={cn('relative cursor-grab touch-none overflow-hidden bg-ink active:cursor-grabbing', wire && 'cursor-crosshair', className)}
+      className={cn('glass-solid relative cursor-grab touch-none overflow-hidden bg-ink active:cursor-grabbing', wire && 'cursor-crosshair', className)}
       style={{
         backgroundImage: 'radial-gradient(rgb(255 255 255 / 0.065) 1px, transparent 1px)',
         backgroundSize: `${22 * view.zoom}px ${22 * view.zoom}px`,

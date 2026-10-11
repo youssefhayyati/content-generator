@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { Check, ChevronDown, Clapperboard, Image, KeyRound, LoaderCircle, Trash2, Type } from 'lucide-react'
+import { Check, Clapperboard, Image, KeyRound, LoaderCircle, Trash2, Type } from 'lucide-react'
 import { siGithub, siGoogle } from 'simple-icons'
 import { PalettePicker } from '../../components/ui/PalettePicker'
 import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
@@ -14,7 +14,7 @@ import { useSession } from '../../lib/session'
 import { PLATFORM_ORDER, useInvalidate } from '../data'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
-import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Stagger, Toggle } from '../ui'
+import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Stagger, Toggle, Select } from '../ui'
 
 const FORMATS: Array<{ id: PostFormat; label: string; icon: typeof Type }> = [
   { id: 'text', label: 'Text', icon: Type },
@@ -163,16 +163,13 @@ function Profile() {
         </p>
         <div className="mt-4">
           <FieldRow label="Timezone" error={errors.timezone}>
-            <span className="relative block">
-              <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className={cn(inputClass, 'appearance-none pr-9')}>
-                {zones.map((z) => (
-                  <option key={z} value={z} className="bg-panel-3">
-                    {z.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
-            </span>
+            <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="Timezone">
+              {zones.map((z) => (
+                <option key={z} value={z}>
+                  {z.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </Select>
           </FieldRow>
           {timezone !== browserTimezone() && (
             <button type="button" onClick={() => setTimezone(browserTimezone())} className="mt-1.5 text-[11.5px] text-accent-soft hover:underline">

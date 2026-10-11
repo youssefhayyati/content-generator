@@ -10,7 +10,7 @@ import { MediaPicker, MediaThumb } from '../media/Media'
 import { GenerationCard, useGenerations } from '../studio/parts'
 import { messageFor, retryGeneration } from '../studio/run'
 import { useToast } from '../toast'
-import { Btn, EmptyState, FieldError, inputClass, Label, Panel, Skeleton, Toggle } from '../ui'
+import { Btn, EmptyState, FieldError, inputClass, Label, Panel, Skeleton, Toggle, Select } from '../ui'
 import { AccentPicker } from './pickers'
 import { Bars, fmtClock } from './Player'
 import { ReelPreview, type ReelStyle } from './ReelPreview'
@@ -147,14 +147,14 @@ export function ReelMaker({ models }: { models: ModelInfo[] }) {
               </div>
               <label className="block">
                 <Label>For</Label>
-                <select value={account?.id ?? ''} onChange={(e) => chooseAccount((accounts ?? []).find((a) => a.id === Number(e.target.value)) ?? null)} className={cn(inputClass, 'mt-2')}>
+                <Select value={account?.id ?? ''} onChange={(e) => chooseAccount((accounts ?? []).find((a) => a.id === Number(e.target.value)) ?? null)} fieldClassName={cn(inputClass, 'mt-2')}>
                   <option value="">No handle on screen</option>
                   {(accounts ?? []).map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <div>
                 <Label>Accent</Label>

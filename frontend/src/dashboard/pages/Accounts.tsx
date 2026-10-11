@@ -12,7 +12,7 @@ import { Autonomy } from '../accounts/Autonomy'
 import { Voice } from '../accounts/Voice'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
-import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Segmented, Skeleton, Stagger, Toggle } from '../ui'
+import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Segmented, Skeleton, Stagger, Toggle, Select } from '../ui'
 
 /** /dashboard/accounts: where the studio publishes, and how much it may do on its own. */
 export default function Accounts() {
@@ -258,18 +258,18 @@ function AccountFields({ account, devices, onDone }: { account: Account | null; 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
           <Label>Timezone</Label>
-          <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className={cn(inputClass, 'mt-2')}>
+          <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} fieldClassName={cn(inputClass, 'mt-2')}>
             <option value="">Yours ({user.timezone ?? 'UTC'})</option>
             {zones.map((z) => (
               <option key={z} value={z}>
                 {z}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="block">
           <Label>Phone</Label>
-          <select value={deviceId ?? ''} onChange={(e) => setDeviceId(e.target.value ? Number(e.target.value) : null)} className={cn(inputClass, 'mt-2')}>
+          <Select value={deviceId ?? ''} onChange={(e) => setDeviceId(e.target.value ? Number(e.target.value) : null)} fieldClassName={cn(inputClass, 'mt-2')}>
             <option value="">None</option>
             {devices.map((d) => (
               <option key={d.id} value={d.id}>
@@ -277,7 +277,7 @@ function AccountFields({ account, devices, onDone }: { account: Account | null; 
                 {d.driver === 'simulator' ? ' (simulator)' : ''}
               </option>
             ))}
-          </select>
+          </Select>
           <FieldError message={errors.device_id} />
         </label>
       </div>

@@ -445,6 +445,125 @@ body *::-webkit-scrollbar-track:horizontal {
   }
 }
 /* ------------------------------------------------------------------ */
+/* Glass: the studio's surfaces, in the manner of macOS materials.      */
+/* Translucent layers over a soft wash of the palette; whatever floats  */
+/* (menus, pickers, sheets, toasts) blurs what is behind it.            */
+/* ------------------------------------------------------------------ */
+
+/* While the studio is on screen (Shell puts the class on <html>, so sheets and menus portalled to
+   <body> get it too), the surface colours themselves turn translucent: every card, panel and
+   raised thing built from them becomes glass without being told. */
+html.glass-app {
+  --color-panel: rgb(255 255 255 / 0.055);
+  --color-panel-2: color-mix(in oklab, #1a1a20 66%, transparent);
+  --color-panel-3: color-mix(in oklab, #202027 70%, transparent);
+  --glass-blur: blur(28px) saturate(175%);
+}
+
+/* Each pane catches a little light along its top edge. In a layer below the utilities, so a
+   surface that sets its own shadow keeps it. */
+@layer components {
+  html.glass-app .bg-panel {
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.055);
+  }
+}
+
+/* What floats is built from the top surface colour and casts a shadow: it blurs what's under it. */
+html.glass-app :is(.bg-panel-3, .bg-panel-3\/95)[class*='shadow'] {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* A canvas of nodes is no place for see-through cards: lines run behind them, and many blurs
+   under a moving canvas are slow. Inside .glass-solid the surfaces are opaque again. */
+.glass-solid {
+  --color-panel: #0b0b0c;
+  --color-panel-2: #0f0f11;
+  --color-panel-3: #131315;
+}
+html.glass-app .glass-solid :is(.bg-panel-3, .bg-panel-3\/95)[class*='shadow'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* The wash behind the studio: three wide, faint fields of the palette, like a wallpaper seen
+   through dark glass. It gives the translucent surfaces something to carry. */
+@utility glass-ambient {
+  background:
+    radial-gradient(72vw 62vh at 0% 0%, color-mix(in oklab, var(--color-accent) 46%, transparent), transparent 70%),
+    radial-gradient(52vw 52vh at 100% 0%, color-mix(in oklab, var(--color-accent-2) 32%, transparent), transparent 70%),
+    radial-gradient(64vw 62vh at 88% 100%, color-mix(in oklab, var(--color-accent) 28%, transparent), transparent 70%),
+    radial-gradient(46vw 52vh at 6% 100%, color-mix(in oklab, var(--color-accent-soft) 18%, transparent), transparent 70%);
+}
+
+/* Menus, pickers, tooltips, toasts: the thinnest material, strongly blurred, with a hairline of
+   light on its edge and a soft, wide shadow. */
+@utility glass-menu {
+  background-color: color-mix(in oklab, #1e1e24 64%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid rgb(255 255 255 / 0.13);
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.55),
+    0 22px 60px -16px rgb(0 0 0 / 0.72),
+    inset 0 0.5px 0 rgb(255 255 255 / 0.14);
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: #17171b;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Sheets (modals, the search palette): a thicker pane, so what's written on it stays easy to read. */
+@utility glass-sheet {
+  background-color: color-mix(in oklab, #131317 70%, transparent);
+  -webkit-backdrop-filter: blur(40px) saturate(170%);
+  backdrop-filter: blur(40px) saturate(170%);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.6),
+    0 40px 120px -30px rgb(0 0 0 / 0.85),
+    inset 0 0.5px 0 rgb(255 255 255 / 0.12);
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: #0f0f11;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* The sidebar and the bars: chrome that lets the wash, and the page scrolling under it, show through. */
+@utility glass-chrome {
+  background-color: color-mix(in oklab, #0c0c10 38%, transparent);
+  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  backdrop-filter: blur(26px) saturate(170%);
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: #0b0b0c;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* No blur to be had (an old browser), or the reader asked for less transparency: back to solid. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html.glass-app {
+    --color-panel: #0b0b0c;
+    --color-panel-2: #0f0f11;
+    --color-panel-3: #131315;
+  }
+  .glass-menu { background-color: #17171b; }
+  .glass-sheet { background-color: #0f0f11; }
+  .glass-chrome { background-color: #0b0b0c; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  html.glass-app {
+    --color-panel: #0b0b0c;
+    --color-panel-2: #0f0f11;
+    --color-panel-3: #131315;
+    --glass-blur: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Onboarding                                                           */
 /* ------------------------------------------------------------------ */
 

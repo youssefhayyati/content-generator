@@ -3,7 +3,7 @@ import { Eye, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { api, ApiError, type Account, type AccountAutonomy, type AutonomyAction, type PreviewItem } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { useToast } from '../toast'
-import { Btn, inputClass, Label, Modal, Segmented } from '../ui'
+import { Btn, inputClass, Label, Modal, Segmented, Select } from '../ui'
 
 const RULEABLE: { value: AutonomyAction; label: string }[] = [
   { value: 'profile.apply_ai_change', label: 'Apply AI profile changes' },
@@ -204,17 +204,17 @@ function Rules({ data, account, onChanged }: { data: AccountAutonomy; account: A
         ))}
       </ul>
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        <select value={action} onChange={(e) => setAction(e.target.value as AutonomyAction)} className={cn(inputClass, 'h-8 w-auto min-w-52 text-[12px]')}>
+        <Select value={action} onChange={(e) => setAction(e.target.value as AutonomyAction)} className="min-w-52" fieldClassName={cn(inputClass, 'h-8 text-[12px]')}>
           {RULEABLE.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
-        </select>
-        <select value={allow ? '1' : '0'} onChange={(e) => setAllow(e.target.value === '1')} className={cn(inputClass, 'h-8 w-24 text-[12px]')}>
+        </Select>
+        <Select value={allow ? '1' : '0'} onChange={(e) => setAllow(e.target.value === '1')} className="w-24" fieldClassName={cn(inputClass, 'h-8 text-[12px]')}>
           <option value="1">Allow</option>
           <option value="0">Deny</option>
-        </select>
+        </Select>
         <input
           type="number"
           min={1}

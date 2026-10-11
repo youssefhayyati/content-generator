@@ -309,7 +309,7 @@ export function Canvas({
         const p = toBoard(e.clientX, e.clientY)
         onAdd(type, Math.round(p.x - CARD_W / 2), Math.round(p.y - 24))
       }}
-      className={cn('relative cursor-grab touch-none overflow-hidden bg-ink active:cursor-grabbing', wire && 'cursor-crosshair', className)}
+      className={cn('glass-solid relative cursor-grab touch-none overflow-hidden bg-ink active:cursor-grabbing', wire && 'cursor-crosshair', className)}
       style={{
         backgroundImage: 'radial-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1px)',
         backgroundSize: `${22 * view.zoom}px ${22 * view.zoom}px`,

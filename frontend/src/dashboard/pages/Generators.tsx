@@ -18,7 +18,7 @@ import { useToast } from '../toast'
 import { Examples } from '../Examples'
 import { promptOf } from '../../showcase/cases'
 import { useUser } from '../Shell'
-import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../ui'
+import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Panel, Segmented, Skeleton, Stagger, DateInput, TimeInput } from '../ui'
 
 type Tab = 'text' | 'image' | 'video' | 'sound' | 'reels' | 'recipes'
 const TABS: Array<{ value: Tab; label: string }> = [
@@ -476,7 +476,7 @@ function PublishFromLab({ generation, onClose }: { generation: Generation | null
           </div>
           <div className="rounded-lg border border-line p-3">
             <div className="flex items-center justify-between gap-3"><Label>Publishing plan</Label><Segmented id="lab-post-mode" label="Publishing plan" options={[{ value: 'draft', label: 'Save draft' }, { value: 'schedule', label: 'Schedule' }]} value={mode} onChange={setMode} /></div>
-            {mode === 'schedule' && <div className="mt-3 grid grid-cols-2 gap-2"><label><Label>Date</Label><input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={(event) => setDate(event.target.value)} className={cn(inputClass, 'mt-1.5')} /></label><label><Label>Time</Label><input type="time" value={time} onChange={(event) => setTime(event.target.value)} className={cn(inputClass, 'mt-1.5')} /></label></div>}
+            {mode === 'schedule' && <div className="mt-3 grid grid-cols-2 gap-2"><label><Label>Date</Label><DateInput value={date} min={new Date().toISOString().slice(0, 10)} onChange={(event) => setDate(event.target.value)} className={cn(inputClass, 'mt-1.5')} /></label><label><Label>Time</Label><TimeInput value={time} onChange={(event) => setTime(event.target.value)} className={cn(inputClass, 'mt-1.5')} /></label></div>}
           </div>
           <div className="flex justify-end gap-2"><Btn variant="subtle" onClick={onClose}>Cancel</Btn><Btn variant="primary" icon={mode === 'schedule' ? CalendarClock : FileText} onClick={save} loading={saving} disabled={!effectiveCaption.trim() || !platforms.length}>{mode === 'schedule' ? 'Schedule post' : 'Save draft'}</Btn></div>
         </div>

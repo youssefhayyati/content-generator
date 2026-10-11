@@ -10,7 +10,7 @@ import { Dropzone, MediaPicker, MediaThumb, useMediaUpload } from '../media/Medi
 import { GenerationCard, useGenerations } from '../studio/parts'
 import { messageFor, retryGeneration } from '../studio/run'
 import { useToast } from '../toast'
-import { Btn, EmptyState, FieldError, inputClass, Label, Panel, Segmented, Skeleton } from '../ui'
+import { Btn, EmptyState, FieldError, inputClass, Label, Panel, Segmented, Skeleton, Select } from '../ui'
 import { Dictate } from './Dictate'
 import { MoodPicker, VoicePicker } from './pickers'
 import { Player } from './Player'
@@ -83,14 +83,14 @@ export function SoundStudio({ models }: { models: ModelInfo[] }) {
 
 function AccountSelect({ accounts, value, onChange, none = 'No account' }: { accounts: Account[]; value: number | null; onChange: (a: Account | null) => void; none?: string }) {
   return (
-    <select value={value ?? ''} onChange={(e) => onChange(accounts.find((a) => a.id === Number(e.target.value)) ?? null)} className={cn(inputClass, 'mt-2')}>
+    <Select value={value ?? ''} onChange={(e) => onChange(accounts.find((a) => a.id === Number(e.target.value)) ?? null)} fieldClassName={cn(inputClass, 'mt-2')}>
       <option value="">{none}</option>
       {accounts.map((a) => (
         <option key={a.id} value={a.id}>
           {a.label}
         </option>
       ))}
-    </select>
+    </Select>
   )
 }
 

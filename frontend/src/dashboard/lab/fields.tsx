@@ -8,7 +8,7 @@ import { TextOverlay, type TextItem } from './TextOverlay'
 import { LabVoicePicker } from './VoicePicker'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
-import { Btn, Label, Modal, Select, Toggle, inputClass } from '../ui'
+import { Btn, Label, Modal, Select, Toggle, inputClass, DateTimeInput } from '../ui'
 
 /** What a field can know about the graph around its node. */
 export type FieldContext = {
@@ -140,7 +140,7 @@ export function FieldEditor({ field, value, onChange, ctx }: { field: LabField; 
       )
     }
     case 'datetime':
-      return wrap(<input id={id} type="datetime-local" className={inputClass} value={str} onChange={(e) => onChange(e.target.value, true)} />)
+      return wrap(<DateTimeInput id={id} className={inputClass} value={str} onChange={(e) => onChange(e.target.value, true)} />)
     case 'model':
       return wrap(<ModelSelect id={id} list={ctx.catalog.models[field.models ?? 'text'] ?? []} value={str} onChange={(v) => onChange(v || null, true)} />)
     case 'account':

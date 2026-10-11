@@ -9,7 +9,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
-import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Skeleton, Stagger, Toggle } from '../ui'
+import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Skeleton, Stagger, Toggle, Select } from '../ui'
 
 const STATUS: Record<Repost['status'], { label: string; cls: string }> = {
   captured: { label: 'Picked', cls: 'border-white/10 text-muted' },
@@ -295,13 +295,13 @@ function Capture({ open, accounts, onClose }: { open: boolean; accounts: Account
       <div className="space-y-4">
         <label className="block">
           <Label>To Instagram account</Label>
-          <select value={accountId || accounts[0]?.id || ''} onChange={(e) => setAccountId(Number(e.target.value))} className={cn(inputClass, 'mt-2')}>
+          <Select value={accountId || accounts[0]?.id || ''} onChange={(e) => setAccountId(Number(e.target.value))} fieldClassName={cn(inputClass, 'mt-2')}>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 @{a.handle}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="block">
           <Label>X post URL</Label>

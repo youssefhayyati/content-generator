@@ -349,7 +349,7 @@ export function Onboarding() {
       aria-modal="true"
       aria-labelledby="onboarding-title"
       data-lenis-prevent
-      className="fixed inset-0 z-[140] flex flex-col bg-ink text-fg"
+      className="glass-solid fixed inset-0 z-[140] flex flex-col bg-ink text-fg"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ y: '-100%', transition: { duration: 0.9, ease: easeInOut } }}

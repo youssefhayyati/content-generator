@@ -7,7 +7,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { CHAR_LIMIT, PLATFORM_ORDER, useApi, useDebounced } from '../data'
 import { MediaPicker, MediaThumb } from '../media/Media'
-import { FieldError, Label, Panel } from '../ui'
+import { FieldError, Label, Panel, Select } from '../ui'
 
 type Specs = Record<PlatformId, Record<string, { label: string }>>
 
@@ -391,18 +391,19 @@ export function ChecksPanel({
             <div className="flex items-center gap-2">
               <PlatformIcon id={r.platform} className="size-3.5 text-muted" />
               {single && Object.keys(placements).length > 1 ? (
-                <select
+                <Select
                   value={r.placement}
                   onChange={(e) => onPlacement(e.target.value)}
                   aria-label={`${PLATFORMS[r.platform].name} placement`}
-                  className="rounded bg-transparent text-[12.5px] font-medium outline-none [color-scheme:dark]"
+                  className="min-w-0"
+                  fieldClassName="rounded text-[12.5px] font-medium outline-none transition-colors hover:text-accent-soft"
                 >
                   {Object.entries(placements).map(([id, p]) => (
                     <option key={id} value={id}>
                       {PLATFORMS[r.platform].name} {p.label.toLowerCase()}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <span className="text-[12.5px] font-medium">{r.label}</span>
               )}

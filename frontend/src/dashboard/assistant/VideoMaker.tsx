@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Clapperboard, LoaderCircle, Music2, Play, Search, Sparkles, Square } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { Btn, inputClass, Label, Segmented, Skeleton, Toggle } from '../ui'
+import { Btn, inputClass, Label, Segmented, Skeleton, Toggle, Select } from '../ui'
 import { useAssistant, useVoiceState, type Draft, type VideoRecipe, type Voice } from './store'
 import { JobProgress } from './Jobs'
 import { CloneVoice, describe, VoiceRow } from './Voices'
@@ -221,13 +221,13 @@ export function VideoMaker({ d }: { d: Draft }) {
       <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
         <div className="min-w-[12rem] flex-1">
           <Label className="mb-1.5">Music</Label>
-          <select value={form.music} onChange={(e) => set({ music: e.target.value })} aria-label="Music" className={cn(inputClass, 'h-8 px-2 text-[12px]')}>
+          <Select value={form.music} onChange={(e) => set({ music: e.target.value })} aria-label="Music" fieldClassName={cn(inputClass, 'h-8 px-2 text-[12px]')}>
             {[...(a.songs || form.music === 'song' ? [SONG] : []), ...MUSIC].map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <Label className="mb-1.5">Motion</Label>
@@ -398,14 +398,14 @@ function VideoVoice({ draft, lines, voice, made, onChange }: { draft: number; li
                       />
                     </label>
                     <div className="w-[8.75rem] shrink-0">
-                      <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" className={cn(inputClass, 'h-8 px-2 text-[12px]')}>
+                      <Select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" fieldClassName={cn(inputClass, 'h-8 px-2 text-[12px]')}>
                         <option value="">{list?.language && !q.trim() ? `${list.language} (the post’s)` : 'Any language'}</option>
                         {(list?.languages ?? []).map((l) => (
                           <option key={l} value={l}>
                             {l}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </div>
                   </div>
                   <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] leading-snug text-dim">

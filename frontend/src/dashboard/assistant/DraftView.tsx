@@ -33,7 +33,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { fromInputs, toInputs } from '../data'
 import { useUser } from '../Shell'
-import { Avatar, Btn, EmptyState, inputClass, Label, Menu, Segmented } from '../ui'
+import { Avatar, Btn, EmptyState, inputClass, Label, Menu, Segmented, DateInput, TimeInput } from '../ui'
 import { FontPicker } from './Fonts'
 import { History } from './History'
 import { PICTURE_DRAG, ASSET_DRAG, MediaChooser } from './MediaView'
@@ -954,8 +954,8 @@ function SchedulePicker({ d, linked, disabled }: { d: Draft; linked?: Linked; di
           >
             <Label>Publish draft {d.id} on</Label>
             <div className="mt-2 grid grid-cols-[1fr_92px] gap-2">
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={cn(inputClass, 'h-8 px-2 text-[12px]')} />
-              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={cn(inputClass, 'h-8 px-2 text-[12px]')} />
+              <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={cn(inputClass, 'h-8 px-2 text-[12px]')} />
+              <TimeInput value={time} onChange={(e) => setTime(e.target.value)} className={cn(inputClass, 'h-8 px-2 text-[12px]')} />
             </div>
             <p className="mt-2 text-[11px] leading-snug text-dim">
               {linked ? `Another time for “${linked.title}”, next to the campaign’s own.` : 'It’s saved first if needed, then booked for this time.'}

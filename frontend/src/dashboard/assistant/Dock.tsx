@@ -27,7 +27,7 @@ export function AssistantDock() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 12 }}
           transition={{ duration: 0.4, ease }}
-          className="fixed bottom-4 left-4 z-[110] flex items-center gap-1 rounded-full border border-line-2 bg-panel-3/95 p-1 pl-3 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)] backdrop-blur lg:left-[252px]"
+          className="fixed bottom-4 left-4 z-[110] flex items-center gap-1 glass-menu rounded-full p-1 pl-3 lg:left-[252px]"
         >
           <AudioWaveform className={cn('size-3.5 text-accent-soft', busy && 'animate-pulse')} strokeWidth={2} />
           <span className="px-1.5 text-[12px]">{WORDS[voice]}</span>
