@@ -3,6 +3,8 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# The public address, for the link-preview picture (vite.config.ts); empty is fine.
+ARG SITE_URL=
 RUN npm run build
 
 FROM nginx:1.27-alpine

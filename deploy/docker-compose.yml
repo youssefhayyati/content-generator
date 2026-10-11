@@ -9,6 +9,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/web.Dockerfile
+      args:
+        SITE_URL: ${FRONTEND_URL:-}
     ports:
       - "${HTTP_PORT:-8090}:80"
     depends_on:

@@ -29,8 +29,18 @@ const phoneBridge = {
   rewrite: (p: string) => p.replace(/^\/phone-bridge/, ''),
 }
 
+// Link previews (Slack, LinkedIn, X) want the share picture as a full address. The deploy passes
+// its public address as SITE_URL; without one the page keeps the relative path.
+const shareImage = {
+  name: 'flowai-share-image',
+  transformIndexHtml(html: string) {
+    const site = process.env.SITE_URL?.replace(/\/+$/, '')
+    return site ? html.replaceAll('content="/og.jpg"', `content="${site}/og.jpg"`) : html
+  },
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), shareImage],
   server: {
     // 5175 to match SANCTUM_STATEFUL_DOMAINS; 5173/5174 are taken by other local projects.
     port: 5175,
