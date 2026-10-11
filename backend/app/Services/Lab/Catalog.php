@@ -148,7 +148,6 @@ class Catalog
     private static function define(): array
     {
         $aspect = ['key' => 'aspect', 'label' => 'Shape', 'kind' => 'select', 'options' => ['9:16' => '9:16 (vertical)', '4:5' => '4:5 (portrait)', '1:1' => '1:1 (square)', '16:9' => '16:9 (wide)'], 'default' => '4:5'];
-        $consent = ['key' => 'consent', 'label' => 'The person whose face or voice this is agreed to it', 'kind' => 'toggle', 'default' => false, 'help' => 'Only your own face or voice, or someone who agreed (a model, a teammate). Never a public figure, and never to pass off as real.'];
 
         return [
             /* ---------------------------------------------------------------- sources */
@@ -232,7 +231,6 @@ class Catalog
                 'fields' => [
                     ['key' => 'name', 'label' => 'Name', 'kind' => 'text', 'default' => '', 'placeholder' => 'Mia, our barista'],
                     ['key' => 'version', 'label' => 'For pictures like', 'kind' => 'select', 'default' => 'v2', 'options' => ['v2' => 'Social photography (Soul 2)', 'cinema' => 'Film stills (Soul Cinema)', 'v1' => 'Fashion portraits (Soul)']],
-                    [...$consent, 'help' => 'Only your own face, or someone who agreed to be the character (a model, a teammate). Never a public figure. 10 to 20 clear photos of one person, the face visible from a few angles, train best.'],
                 ],
                 'run' => 'manual', 'run_label' => 'Train', 'seconds' => 420, 'model_id' => 'higgsfield/soul-id',
             ],
@@ -261,7 +259,6 @@ class Catalog
                 ],
                 'outputs' => [['name' => 'video', 'label' => 'Video', 'type' => 'video']],
                 'fields' => [
-                    [...$consent, 'help' => 'Only your own picture, or someone who agreed to it. Never a public figure, and never to pass off as real. The moves video should be yours or one you may use.'],
                     ['key' => 'follow', 'label' => 'Framing', 'kind' => 'select', 'default' => 'video', 'options' => ['video' => 'As in the video (moves up to 30 s)', 'image' => 'As in the picture (moves up to 10 s)']],
                     ['key' => 'sound', 'label' => 'Keep the video’s sound', 'kind' => 'toggle', 'default' => true],
                     ['key' => 'model', 'label' => 'Quality', 'kind' => 'model', 'models' => 'motion', 'default' => null],
@@ -525,7 +522,6 @@ class Catalog
                     ['key' => 'script', 'label' => 'Script', 'kind' => 'textarea', 'default' => ''],
                     ['key' => 'voice', 'label' => 'Voice', 'kind' => 'voice', 'default' => null, 'help' => 'Or connect a recording to Voice to clone (one person speaking, 5 to 20 seconds): it reads in that voice.'],
                     ['key' => 'speed', 'label' => 'Pace', 'kind' => 'range', 'default' => 1.0, 'min' => 0.7, 'max' => 1.3, 'step' => 0.05, 'advanced' => true],
-                    [...$consent, 'help' => 'Needed to clone a voice: your own, or someone who agreed. Never a public figure, and never to pass off as real.'],
                 ],
                 'run' => 'auto', 'seconds' => 10,
             ],
@@ -561,7 +557,6 @@ class Catalog
                 ],
                 'outputs' => [['name' => 'image', 'label' => 'Picture', 'type' => 'image'], ['name' => 'video', 'label' => 'Video', 'type' => 'video']],
                 'fields' => [
-                    $consent,
                     ['key' => 'every', 'label' => 'Every face, not only the largest', 'kind' => 'toggle', 'default' => false],
                 ],
                 'run' => 'manual', 'seconds' => 90, 'engine' => true,
@@ -574,7 +569,6 @@ class Catalog
                 ],
                 'outputs' => [['name' => 'video', 'label' => 'Video', 'type' => 'video']],
                 'fields' => [
-                    $consent,
                     ['key' => 'script', 'label' => 'What they say now', 'kind' => 'textarea', 'default' => ''],
                     ['key' => 'voice', 'label' => 'Voice (empty: theirs, cloned from the video)', 'kind' => 'voice', 'default' => null, 'engine' => true],
                 ],

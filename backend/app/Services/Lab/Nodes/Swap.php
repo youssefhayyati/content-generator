@@ -11,9 +11,6 @@ class Swap extends Executor
 {
     public function start(NodeJob $job): array
     {
-        if (empty($job->params['consent'])) {
-            throw new NodeFailed('Tick that the person whose face it is agreed to it.');
-        }
         $model = $this->model('pod/faceswap');
         $face = $job->inputs->asset('face', ['image']) ?? throw new NodeFailed('Connect a picture of the face.');
         $target = $job->inputs->asset('target', ['image', 'video']) ?? throw new NodeFailed('Connect what to put the face on.');

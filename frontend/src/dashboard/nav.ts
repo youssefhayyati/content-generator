@@ -20,6 +20,7 @@ import {
   Shapes,
   Smartphone,
   UsersRound,
+  Wallet,
   Wand2,
   Workflow,
   type LucideIcon,
@@ -108,7 +109,12 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Setup',
-    items: [{ path: '/dashboard/models', label: 'Models', icon: Cpu }, SETTINGS],
+    items: [
+      { path: '/dashboard/models', label: 'Models', icon: Cpu },
+      // What the models cost: billed by providers, and the pod's jobs at its hourly rate.
+      { path: '/dashboard/spending', label: 'Spending', icon: Wallet },
+      SETTINGS,
+    ],
   },
 ]
 

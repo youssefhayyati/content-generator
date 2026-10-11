@@ -11,6 +11,7 @@ use App\Models\Project;
 use App\Models\VideoSource;
 use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Media\HiggsfieldClient;
+use App\Services\Ai\Pricing;
 use App\Services\Intake\Brief;
 use App\Services\Lab\Catalog;
 use App\Services\Lab\Engine;
@@ -86,13 +87,9 @@ class LabController extends Controller
 
     private function price(string $id): ?float
     {
-        [$provider, $name] = explode('/', $id, 2) + [1 => ''];
-        if (in_array($provider, Engine::FREE_PROVIDERS, true)) {
-            return 0.0;
-        }
-        $price = (config("ai.providers.{$provider}.models") ?? [])[$name]['price'] ?? null;
+        [$provider] = explode('/', $id, 2);
 
-        return $price === null ? null : (float) $price;
+        return Pricing::perOutput($provider, $id);
     }
 
     /**
@@ -158,16 +155,14 @@ class LabController extends Controller
     }
 
     /**
-     * A voice cloned from a recording made on the page or a file (audio, or a video's sound), with the
-     * person's agreement. It's one of the ready voices from then on, here and in the assistant.
+     * A voice cloned from a recording made on the page or a file (audio, or a video's sound). It's one of the ready voices from then on, here and in the assistant.
      */
     public function cloneVoice(Request $request, EngineClient $engineClient): JsonResponse
     {
         $data = $request->validate([
             'recording' => ['required', 'file', 'max:51200', 'mimetypes:audio/mpeg,audio/mp4,audio/x-m4a,audio/aac,audio/wav,audio/x-wav,audio/wave,audio/webm,audio/ogg,audio/flac,video/mp4,video/quicktime,video/webm,application/octet-stream'],
             'name' => ['nullable', 'string', 'max:60'],
-            'consent' => ['accepted'],
-        ], ['consent.accepted' => 'Tick that it’s your voice, or that the person agreed.']);
+        ]);
         $file = $data['recording'];
         try {
             $voice = $engineClient->cloneVoice($file->getRealPath(), $file->getClientOriginalName() ?: 'recording.webm', trim($data['name'] ?? '') ?: 'My voice');

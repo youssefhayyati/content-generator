@@ -7,6 +7,7 @@ use App\Enums\PostStatus;
 use App\Models\ActionLog;
 use App\Models\Asset;
 use App\Models\LinkClip;
+use App\Services\Ai\UsageMeter;
 use App\Services\Flows\SafeUrl;
 use App\Services\Media\AssetStore;
 use App\Services\Sound\AudioTools;
@@ -47,7 +48,7 @@ class LinkClipper
         $source = $this->youtube->download($clip->source_url);
         try {
             $targets->each->update(['status' => 'analyzing', 'title' => $source['title']]);
-            $heard = $this->listener->file($source['path'], maxSeconds: YouTubeDownloader::MAX_SOURCE_SECONDS);
+            $heard = app(UsageMeter::class)->within($clip->user, $clip, 'clips:listen', fn () => $this->listener->file($source['path'], maxSeconds: YouTubeDownloader::MAX_SOURCE_SECONDS));
             $wanted = (int) ($clip->settings['seconds'] ?? 30);
             $plans = $this->planner->videos($clip, $heard, $source['duration'], $wanted, $source['title'], $targets->count());
 

@@ -145,9 +145,13 @@ export function downstream(canvas: LabCanvas, id: string): string[] {
 
 export const fmtSeconds = (s: number) => (s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`)
 
-/** "about 5 min, free" / "about 20 s, $0.40" / "about 2 min, cost unknown" */
-export function costLine(e: { seconds: number; cost: number | null } | undefined) {
+/** "$0.40", "<$0.01", "$0": dollars as people read them. */
+export const fmtMoney = (v: number) => (v === 0 ? '$0' : v < 0.01 ? '<$0.01' : `$${v.toFixed(2)}`)
+
+/** "about 5 min, free" / "about 20 s, $0.40" / "about 1 min, ≈ $0.01 of pod time" / "about 2 min, cost unknown" */
+export function costLine(e: { seconds: number; cost: number | null; pod?: number } | undefined) {
   if (!e) return ''
-  const cost = e.cost === null ? 'cost unknown' : e.cost === 0 ? 'free' : `$${e.cost.toFixed(2)}`
+  const pod = e.pod ? `≈ ${fmtMoney(e.pod)} of pod time` : null
+  const cost = e.cost === null ? 'cost unknown' : e.cost === 0 ? (pod ?? 'free') : `$${e.cost.toFixed(2)}${pod ? ` + ${pod}` : ''}`
   return `about ${fmtSeconds(e.seconds)}, ${cost}`
 }

@@ -30,6 +30,7 @@ import Phones from './pages/Phones'
 import Publishing from './pages/Publishing'
 import Reposts from './pages/Reposts'
 import Settings from './pages/Settings'
+import Spending from './pages/Spending'
 import Showcase from './pages/Showcase'
 import Studio from './pages/Studio'
 import { pageLabel } from './nav'
@@ -56,6 +57,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/flows': Flows,
   '/dashboard/analytics': Analytics,
   '/dashboard/models': Models,
+  '/dashboard/spending': Spending,
   '/dashboard/phones': Phones,
   '/dashboard/publishing': Publishing,
   '/dashboard/reposts': Reposts,

@@ -81,8 +81,9 @@ return [
             'url' => env('OLLAMA_CLOUD_URL', 'https://ollama.com/v1'),
             'key' => env('OLLAMA_CLOUD_API_KEY'),
             'suffix' => '',
-            // Effectively free during the cloud preview, big enough for real writing.
-            'local_models' => array_values(array_filter(explode(',', (string) env('OLLAMA_CLOUD_MODELS', 'gpt-oss:120b,gpt-oss:20b')))),
+            // Not free: a plan (Free, Pro, Max) whose usage draws on credits, so Spending prices its models
+            // at their list price per token (prices, below). Name a model here only if it truly costs nothing.
+            'local_models' => array_values(array_filter(explode(',', (string) env('OLLAMA_CLOUD_MODELS', '')))),
         ],
 
         // FlowAI Sound (sound/): voices (Kokoro), listening (Whisper) and the composer, on this
@@ -119,7 +120,8 @@ return [
             'plan' => array_values(array_filter(explode(',', (string) env('HIGGSFIELD_PLAN', 'ideogram-4,wan-2-7-i2v,soul-v2,soul,soul-cinema,grok-image-2,kling-3-pro,seedance-2,hailuo-2-3,cinema-studio-4,soul-id,ads-studio,motion-control-std,motion-control-pro,genjutsu-restyle')))),
             // route: the model's endpoint. image_field: where an input image goes. params: what may be passed through
             // (the request schema, docs.higgsfield.ai; i2v_params when the image-to-video route takes fewer).
-            // price: dollars per output, from your plan, for the usage numbers (null if unknown).
+            // price: dollars per output, or price_per_second for a video's length; null when unknown (Spending says so).
+            // Higgsfield's API starting rates (higgsfield.ai/api, 2026): they rise with resolution and sound.
             // feature: one of Higgsfield's own tools (Cinema Studio, Soul ID, Ads Studio, Motion Control, Restyle),
             // with a Creative Lab node of its own rather than a place in the plain picture and video pickers.
             'models' => [
@@ -133,7 +135,7 @@ return [
                     'purpose' => 'Short clips that bring a still to life'],
                 // Soul makes 1 or 4 pictures a request (batch_size), at 720p unless asked: 1080p for posts.
                 'soul-v2' => ['label' => 'Higgsfield Soul 2', 'kind' => 'image', 'route' => '/higgsfield-ai/soul/v2/standard',
-                    'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size', 'custom_reference_id', 'custom_reference_strength'], 'extra' => ['resolution' => '1080p'], 'price' => null,
+                    'params' => ['aspect_ratio', 'resolution', 'seed', 'batch_size', 'custom_reference_id', 'custom_reference_strength'], 'extra' => ['resolution' => '1080p'], 'price' => 0.0032,
                     'capabilities' => ['aspect_ratios' => ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'], 'resolutions' => ['720p', '1080p'], 'default_resolution' => '1080p', 'max_inputs' => 0, 'seed' => true, 'max_outputs' => 4, 'batch_sizes' => [1, 4]],
                     'purpose' => 'High-end social photography and editorial portraits'],
                 'soul' => ['label' => 'Higgsfield Soul', 'kind' => 'image', 'route' => '/higgsfield-ai/soul/standard',
@@ -151,7 +153,7 @@ return [
                     'purpose' => 'Fast, flexible social visuals with up to ten references'],
                 // The image-to-video routes take their shape from the picture: no aspect_ratio there.
                 'kling-3-pro' => ['label' => 'Kling 3 Pro', 'kind' => 'video', 'route' => '/kling-video/v3.0/pro/text-to-video', 'i2v_route' => '/kling-video/v3.0/pro/image-to-video',
-                    'image_field' => 'image_url', 'end_frame_field' => 'last_image_url', 'audio_field' => 'sound', 'audio_values' => ['on', 'off'], 'params' => ['aspect_ratio', 'duration'], 'i2v_params' => ['duration'], 'price' => null,
+                    'image_field' => 'image_url', 'end_frame_field' => 'last_image_url', 'audio_field' => 'sound', 'audio_values' => ['on', 'off'], 'params' => ['aspect_ratio', 'duration'], 'i2v_params' => ['duration'], 'price_per_second' => 0.112,
                     'capabilities' => ['aspect_ratios' => ['16:9', '9:16', '1:1'], 'durations' => [5, 8, 10, 15], 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true],
                     'purpose' => 'Cinematic text-to-video or first/last-frame animation'],
                 'seedance-2' => ['label' => 'Seedance 2', 'kind' => 'video', 'route' => '/bytedance/seedance-2.0/text-to-video', 'i2v_route' => '/bytedance/seedance-2.0/image-to-video',
@@ -202,7 +204,9 @@ return [
         ],
 
         // The GPU pod's models and the assistant's own drawing, through the assistant service's engine.
-        'pod' => ['reach' => 'Your GPU pod', 'local' => true],
+        // The pod is paid by the hour while it's on, not per job: Spending estimates each job as its
+        // share of that (how long it ran × hourly). Set it to your pod's rate (RunPod A40: about $0.44).
+        'pod' => ['reach' => 'Your GPU pod', 'local' => true, 'hourly' => (float) env('POD_HOURLY_RATE', 0.44)],
         'engine' => ['reach' => 'The assistant service', 'local' => true],
 
         'google' => [
@@ -210,14 +214,15 @@ return [
             'local' => false,
             'url' => env('GOOGLE_GENAI_URL', 'https://generativelanguage.googleapis.com/v1beta'),
             'key' => env('GEMINI_API_KEY'),
+            // Gemini API list prices at 720p (ai.google.dev/pricing): 1080p and 4K cost more.
             'models' => [
                 'gemini-3.1-flash-image' => ['label' => 'Gemini 3.1 Flash Image', 'kind' => 'image', 'price' => null,
                     'capabilities' => ['aspect_ratios' => ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], 'resolutions' => ['1K', '2K', '4K'], 'default_resolution' => '2K', 'max_inputs' => 10, 'input_optional' => true],
                     'purpose' => 'Google’s fast image model for generation and reference-based edits'],
-                'veo-3.1-fast-generate-preview' => ['label' => 'Veo 3.1 Fast', 'kind' => 'video', 'price' => null,
+                'veo-3.1-fast-generate-preview' => ['label' => 'Veo 3.1 Fast', 'kind' => 'video', 'price_per_second' => 0.10,
                     'capabilities' => ['aspect_ratios' => ['9:16', '16:9'], 'durations' => [4, 6, 8], 'resolutions' => ['720p', '1080p', '4k'], 'default_resolution' => '720p', 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true, 'audio_always_on' => true, 'seed' => true],
                     'purpose' => 'Vertical or landscape social video with native audio'],
-                'veo-3.1-generate-preview' => ['label' => 'Veo 3.1', 'kind' => 'video', 'price' => null,
+                'veo-3.1-generate-preview' => ['label' => 'Veo 3.1', 'kind' => 'video', 'price_per_second' => 0.40,
                     'capabilities' => ['aspect_ratios' => ['9:16', '16:9'], 'durations' => [4, 6, 8], 'resolutions' => ['720p', '1080p', '4k'], 'default_resolution' => '720p', 'max_inputs' => 2, 'input_optional' => true, 'end_frame' => true, 'audio' => true, 'audio_always_on' => true, 'seed' => true],
                     'purpose' => 'Highest-quality Google video with native audio'],
             ],
@@ -269,10 +274,21 @@ return [
     | Prices
     |--------------------------------------------------------------------------
     |
-    | Dollars per million tokens, [input, output], for the usage numbers in
-    | Operations and on every run record.
+    | Dollars per million tokens, [input, output], for text models, by model
+    | name. Pictures and videos carry their price on the model above; the pod's
+    | is its hourly rate. App\Services\Ai\Pricing reads all three.
     |
     */
+
+    'prices' => [
+        'claude-opus-5-5' => [4, 20],
+        'claude-opus-5' => [5, 25],
+        'claude-sonnet-5-5' => [2, 10],
+        'claude-haiku-4-5' => [1, 5],
+        // Z.ai's list prices (as reported, 2026-09), on Ollama Cloud or a gateway.
+        'glm-5.3-flash' => [0.15, 0.50],
+        'glm-5.3' => [1.40, 4.40],
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -307,13 +323,6 @@ return [
             'FACESWAP_API_KEY' => env('FACESWAP_API_KEY'),
             'LLM_MODEL' => env('LLM_MODEL'),
         ],
-    ],
-
-    'prices' => [
-        'claude-opus-5-5' => [4, 20],
-        'claude-opus-5' => [5, 25],
-        'claude-sonnet-5-5' => [2, 10],
-        'claude-haiku-4-5' => [1, 5],
     ],
 
 ];

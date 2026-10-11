@@ -76,8 +76,9 @@ export function NodeCard({
   const rows = portRows(kind)
   const note = node.type === 'util.note'
   const runnable = state && state.policy !== 'none'
-  // A run that costs money (or might: the price unknown) asks once more, saying what it costs.
-  const paid = !!state?.estimate && state.estimate.cost !== 0
+  // A run that costs money (or might: the price unknown) asks once more, saying what it costs. Under a
+  // cent (a text call on a cheap model) doesn't: it would ask on every Write.
+  const paid = !!state?.estimate && (state.estimate.cost === null || state.estimate.cost >= 0.01)
   const [confirm, setConfirm] = useState(false)
   useEffect(() => {
     if (!confirm) return

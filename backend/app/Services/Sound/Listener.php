@@ -5,6 +5,8 @@ namespace App\Services\Sound;
 use App\Models\Asset;
 use App\Services\Ai\GenerationFailed;
 use App\Services\Ai\Models\ModelRegistry;
+use App\Services\Ai\Pricing;
+use App\Services\Ai\UsageMeter;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -15,7 +17,7 @@ use Illuminate\Support\Facades\Storage;
  */
 class Listener
 {
-    public function __construct(private readonly SoundClient $sound, private readonly AudioTools $tools, private readonly ModelRegistry $models) {}
+    public function __construct(private readonly SoundClient $sound, private readonly AudioTools $tools, private readonly ModelRegistry $models, private readonly UsageMeter $usage) {}
 
     /** The listening model to use: the one asked for if it can run, else the first that can. */
     public function model(?string $id = null): ?string
@@ -39,14 +41,21 @@ class Listener
         $wav = $this->tools->toListenWav($path, $maxSeconds);
         [$provider, $name] = explode('/', $model, 2);
 
+        $started = microtime(true);
         $result = $provider === 'sound' ? $this->sound->transcribe($wav, $language) : $this->openAi($provider, $name, $wav, $language);
+        // On the pod, what it costs is how long Whisper held the GPU.
+        $ran = microtime(true) - $started;
+        $priced = Pricing::run($provider, $model, 1, 0, $ran);
+        $this->usage->record($provider, $model, 0, 0, $priced['cost'], $priced['billing'], $priced['billing'] === Pricing::ESTIMATED ? $ran : 0);
 
         return [...$result, 'model' => $model];
     }
 
     public function asset(Asset $asset, ?string $language = null): array
     {
-        return $this->file(Storage::disk('local')->path($asset->path), $language);
+        $run = fn () => $this->file(Storage::disk('local')->path($asset->path), $language);
+
+        return $this->usage->attributed() ? $run() : $this->usage->within($asset->user, $asset, 'listen', $run);
     }
 
     /** OpenAI's /audio/transcriptions, which Groq, OpenRouter-style gateways and others speak too. */

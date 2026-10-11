@@ -278,6 +278,26 @@ export type PublishingUsage = {
   outcomes: Partial<Record<'confirmed' | 'failed' | 'uncertain', number>>
 }
 
+/** How a model's cost is known: a provider bills it, the pod's hourly rate estimates it, it's free, or nobody priced it. */
+export type Billing = 'billed' | 'estimated' | 'free' | 'unpriced'
+
+/** GET /spending?days=: what the AI cost over the last 7, 30 or 90 days. */
+export type Spending = {
+  days: number
+  total: number
+  billed: number
+  estimated: number
+  /** The same number of days before these. */
+  previous: number
+  calls: number
+  /** Calls on models with no price set: not in the totals. */
+  unpriced: number
+  pod: { hourly: number; seconds: number; cost: number }
+  daily: Array<{ date: string; billed: number; estimated: number }>
+  models: Array<{ id: string; label: string; where: string; billing: Billing; rate: string; calls: number; cost: number; seconds: number }>
+  uses: Array<{ label: string; cost: number; calls: number }>
+}
+
 /* ------------------------------------------------------------------ */
 /* Autonomy (mode B rules), reposts, comments                          */
 /* ------------------------------------------------------------------ */
@@ -913,7 +933,7 @@ export type LabNodeState = {
   versions?: number
   missing?: string[]
   /** unavailable: why its model can't run now (no key, not tested…), before anyone presses Run. */
-  estimate?: { seconds: number; cost: number | null; model: string | null; unavailable?: string | null }
+  estimate?: { seconds: number; cost: number | null; pod?: number; model: string | null; unavailable?: string | null }
   pinned?: boolean
   post?: LabPost
   source?: LabSource
@@ -929,7 +949,7 @@ export type LabPayload = {
   message?: string
 }
 
-export type LabPlan = { nodes: Array<{ id: string; type: string; label: string; seconds: number; cost: number | null; model: string | null }>; seconds: number; cost: number | null; blocked?: string[] }
+export type LabPlan = { nodes: Array<{ id: string; type: string; label: string; seconds: number; cost: number | null; pod?: number; model: string | null }>; seconds: number; cost: number | null; pod?: number; blocked?: string[] }
 
 export type Page<T> = {
   data: T[]

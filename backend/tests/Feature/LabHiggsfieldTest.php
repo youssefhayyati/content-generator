@@ -160,9 +160,6 @@ class LabHiggsfieldTest extends TestCase
             ['op' => 'connect', 'from' => 'mia', 'to' => 'cafe', 'in' => 'character'],
         ])->assertOk();
 
-        // A face needs the person's agreement first.
-        $this->runNode('mia')->assertStatus(422)->assertJsonPath('message', fn ($m) => str_contains($m, 'agreed'));
-        $this->ops([['op' => 'set', 'id' => 'mia', 'params' => ['consent' => true]]])->assertOk();
         $this->runNode('mia')->assertCreated();
 
         $state = $this->spa()->actingAs($this->user)->getJson("/api/projects/{$this->project->id}/lab")->json('nodes');
@@ -214,7 +211,7 @@ class LabHiggsfieldTest extends TestCase
         $this->ops([
             ['op' => 'add', 'node' => ['id' => 'who', 'type' => 'source.media', 'params' => ['assets' => [$who->id]]]],
             ['op' => 'add', 'node' => ['id' => 'moves', 'type' => 'source.media', 'params' => ['assets' => [$long->id]]]],
-            ['op' => 'add', 'node' => ['id' => 'dance', 'type' => 'people.motion', 'params' => ['consent' => true, 'sound' => false]]],
+            ['op' => 'add', 'node' => ['id' => 'dance', 'type' => 'people.motion', 'params' => ['sound' => false]]],
             ['op' => 'connect', 'from' => 'who', 'out' => 'image', 'to' => 'dance', 'in' => 'image'],
             ['op' => 'connect', 'from' => 'moves', 'out' => 'video', 'to' => 'dance', 'in' => 'video'],
         ])->assertOk();

@@ -80,7 +80,7 @@ $S = [
             ['op' => 'connect', 'from' => 'portrait-made', 'out' => 'image', 'to' => $id('animate'), 'in' => 'image'],
             ['op' => 'remove', 'id' => $id('portrait')],
         ],
-        'set' => ['script' => ['text' => 'Morning! Cold brew season is open at Low Tide. Come by the harbour.'], 'animate' => ['prompt' => 'The woman looks at the camera and talks naturally, small head movements and a smile, steady camera'], 'dub' => ['consent' => true, 'voice' => $V['neighbor']]],
+        'set' => ['script' => ['text' => 'Morning! Cold brew season is open at Low Tide. Come by the harbour.'], 'animate' => ['prompt' => 'The woman looks at the camera and talks naturally, small head movements and a smile, steady camera'], 'dub' => ['voice' => $V['neighbor']]],
         'run' => ['captions'],
     ],
     'voiceover-video' => ['brief' => $B['margins'], 'set' => ['voice' => ['voice' => 'vs:'.$V['explainer']], 'picture' => ['prompt' => 'A wooden table of short paperback novels in a warm independent bookshop at dusk, lamps glowing, moody, vertical. No readable text.']], 'run' => ['reel']],
@@ -143,7 +143,7 @@ $S = [
             ['op' => 'remove', 'ids' => [$id('youtube'), $id('transcript'), $id('moments')]],
             ['op' => 'add', 'node' => ['id' => 'host', 'type' => 'image.generate', 'x' => 80, 'y' => 80, 'label' => 'The host (AI-made, nobody real)', 'params' => ['aspect' => '16:9', 'prompt' => 'Wide shot of a woman podcast host in her forties with grey-streaked hair talking into a large studio microphone at a wooden table, cosy studio with warm lamps and bookshelves behind, she sits right of centre, facing the camera. No text.']]],
             ['op' => 'add', 'node' => ['id' => 'talks', 'type' => 'video.animate', 'x' => 440, 'y' => 80, 'params' => ['prompt' => 'She talks naturally into the microphone, small head movements and hand gestures, steady camera', 'duration' => 5]]],
-            ['op' => 'add', 'node' => ['id' => 'says', 'type' => 'people.dub', 'x' => 800, 'y' => 80, 'label' => 'The episode', 'params' => ['consent' => true, 'voice' => $V['neighbor'], 'script' => 'Most month-end pain is the same ten spreadsheets, copied by hand.']]],
+            ['op' => 'add', 'node' => ['id' => 'says', 'type' => 'people.dub', 'x' => 800, 'y' => 80, 'label' => 'The episode', 'params' => ['voice' => $V['neighbor'], 'script' => 'Most month-end pain is the same ten spreadsheets, copied by hand.']]],
             ['op' => 'connect', 'from' => 'host', 'out' => 'image', 'to' => 'talks', 'in' => 'image'],
             ['op' => 'connect', 'from' => 'talks', 'out' => 'video', 'to' => 'says', 'in' => 'video'],
             ['op' => 'connect', 'from' => 'says', 'out' => 'video', 'to' => $id('cut'), 'in' => 'video'],
@@ -170,14 +170,14 @@ $S = [
 
 // Phase two: made from another example's video, once it's done.
 $S2 = [
-    'dub-language' => ['media_made' => ['video' => ['talking-portrait', 'dub']], 'set' => ['dub' => ['consent' => true], 'captions' => ['style' => 'clean']], 'run' => ['captions']],
+    'dub-language' => ['media_made' => ['video' => ['talking-portrait', 'dub']], 'set' => ['captions' => ['style' => 'clean']], 'run' => ['captions']],
     'face-swap' => [
         'ops' => fn ($id) => [
             ['op' => 'add', 'node' => ['id' => 'face-made', 'type' => 'image.generate', 'x' => 80, 'y' => 460, 'label' => 'The face (AI-made, nobody real)', 'params' => ['aspect' => '4:5', 'prompt' => 'Portrait photo of a woman in her thirties with long straight auburn hair and freckles, looking at the camera with a calm smile, soft window light, plain background. No text.']]],
             ['op' => 'connect', 'from' => 'face-made', 'out' => 'image', 'to' => $id('swap'), 'in' => 'face'],
             ['op' => 'remove', 'id' => $id('face')],
         ],
-        'media_made' => ['video' => ['talking-portrait', 'dub']], 'set' => ['swap' => ['consent' => true]], 'run' => ['captions'],
+        'media_made' => ['video' => ['talking-portrait', 'dub']], 'run' => ['captions'],
     ],
 ];
 

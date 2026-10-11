@@ -45,6 +45,7 @@ use App\Http\Controllers\RepostController;
 use App\Http\Controllers\SocialAccountController;
 use App\Http\Controllers\SoundController;
 use App\Http\Controllers\SpecController;
+use App\Http\Controllers\SpendingController;
 use App\Http\Controllers\StormGuardController;
 use App\Http\Controllers\TrendController;
 use App\Http\Controllers\WritingController;
@@ -146,6 +147,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // The studio: models, generators, projects and recipes.
     Route::get('models', [ModelController::class, 'index']);
     Route::get('models/evals', [ModelController::class, 'evals']);
+    // What the AI cost: billed by providers, and the pod's jobs at its hourly rate.
+    Route::get('spending', SpendingController::class);
     Route::post('models/evals', [ModelController::class, 'runEvals'])->middleware(['verified', 'throttle:ai']);
     Route::post('models/test/{provider}', [ModelController::class, 'test'])->middleware('throttle:10,1');
     Route::get('generations', [GenerationController::class, 'index']);

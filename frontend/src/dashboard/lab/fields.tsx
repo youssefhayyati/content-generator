@@ -6,6 +6,7 @@ import { cn } from '../../lib/cn'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
 import { TextOverlay, type TextItem } from './TextOverlay'
 import { LabVoicePicker } from './VoicePicker'
+import { fmtMoney } from './look'
 import { MediaPicker, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
 import { Btn, Label, Modal, Select, Toggle, inputClass, DateTimeInput, ColorInput } from '../ui'
@@ -257,7 +258,7 @@ function ModelSelect({ id, list, value, onChange }: { id: string; list: LabCatal
         <option value="">Best available{picked ? ` (${picked.label})` : ''}</option>
         {list.map((m) => (
           <option key={m.id} value={m.id} disabled={!m.available}>
-            {m.label} · {m.price === 0 ? (m.provider === 'pod' ? 'free on your pod' : 'free') : m.price ? `$${m.price.toFixed(2)}` : m.reach}
+            {m.label} · {m.price === 0 ? (m.provider === 'pod' ? 'free on your pod' : 'free') : m.price ? fmtMoney(m.price) : m.reach}
             {!m.available ? ' (unavailable)' : ''}
           </option>
         ))}

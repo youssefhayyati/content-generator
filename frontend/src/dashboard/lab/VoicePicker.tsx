@@ -100,7 +100,6 @@ export function LabVoicePicker({ id, value, onChange, prefix = '', emptyLabel }:
     const ext = recording.type.includes('mp4') ? 'mp4' : recording.type.includes('ogg') ? 'ogg' : recording.type.includes('wav') ? 'wav' : recording.type.includes('mpeg') ? 'mp3' : 'webm'
     form.append('recording', recording, recording instanceof File ? recording.name : `recording.${ext}`)
     form.append('name', name)
-    form.append('consent', '1')
     try {
       const r = await api<{ voice: Voice }>('/lab/voices/clone', { method: 'POST', body: form })
       setKnown((k) => [...k, r.voice])

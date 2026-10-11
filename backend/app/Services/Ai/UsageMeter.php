@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Records what each model call cost. Callers say who it's for and what it's part of with
- * `within()`; the generators report tokens, and the price comes from config/ai.php.
+ * `within()`; the generators report tokens, and Pricing says what that cost.
  */
 class UsageMeter
 {
@@ -52,8 +52,14 @@ class UsageMeter
         [$this->user, $this->context, $this->purpose] = array_pop($this->stack) ?? [null, null, null];
     }
 
-    public function record(string $provider, string $model, int $inputTokens, int $outputTokens, ?float $cost = null): AiUsage
+    /**
+     * One call. Text calls give their tokens and are priced from them; media runs give what they cost
+     * and how it's known (App\Services\Ai\Pricing::run), and pod jobs how long they held the GPU.
+     */
+    public function record(string $provider, string $model, int $inputTokens, int $outputTokens, ?float $cost = null, ?string $billing = null, float $seconds = 0): AiUsage
     {
+        $priced = $cost === null ? Pricing::tokens($provider, $model, $inputTokens, $outputTokens) : ['cost' => $cost, 'billing' => $billing ?? Pricing::BILLED];
+
         return AiUsage::create([
             'user_id' => $this->user?->id,
             'provider' => $provider,
@@ -61,17 +67,17 @@ class UsageMeter
             'purpose' => $this->purpose,
             'input_tokens' => $inputTokens,
             'output_tokens' => $outputTokens,
-            'cost' => $cost ?? self::price($model, $inputTokens, $outputTokens),
+            'cost' => $priced['cost'],
+            'billing' => $priced['billing'],
+            'seconds' => (int) round($seconds),
             'context_type' => $this->context?->getMorphClass(),
             'context_id' => $this->context?->getKey(),
         ]);
     }
 
-    /** Dollars, at the per-million-token prices in config/ai.php (0 for models without one). */
-    public static function price(string $model, int $inputTokens, int $outputTokens): float
+    /** Whether a caller has already said who the calls are for. */
+    public function attributed(): bool
     {
-        [$in, $out] = config("ai.prices.{$model}", [0, 0]);
-
-        return round(($inputTokens * $in + $outputTokens * $out) / 1_000_000, 6);
+        return $this->user !== null;
     }
 }
