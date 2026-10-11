@@ -537,7 +537,7 @@ class Catalog
                 ],
                 'outputs' => [['name' => 'audio', 'label' => 'Track', 'type' => 'audio']],
                 'fields' => [
-                    ['key' => 'source', 'label' => 'Made by', 'kind' => 'select', 'default' => 'song', 'options' => ['song' => 'A song written to a description (ACE-Step, on the pod)', 'composer' => 'FlowAI Sound’s composer (a mood; needs the local sound service)']],
+                    ['key' => 'source', 'label' => 'Made by', 'kind' => 'select', 'default' => 'song', 'options' => ['song' => 'A song written to a description (ACE-Step, on the pod)', 'composer' => 'One of six moods (ACE-Step on the pod, or the local composer when it runs)']],
                     ['key' => 'mood', 'label' => 'Mood', 'kind' => 'select', 'default' => 'golden-hour', 'options' => ['golden-hour' => 'Golden hour · warm lo-fi', 'linen' => 'Linen · airy ambient', 'atelier' => 'Atelier · bright acoustic', 'pulse' => 'Pulse · upbeat house', 'night-drive' => 'Night drive · synthwave', 'bloom' => 'Bloom · dreamy, cinematic'], 'show' => ['source' => ['composer']]],
                     ['key' => 'description', 'label' => 'The song', 'kind' => 'text', 'default' => '', 'placeholder' => 'upbeat acoustic pop, ukulele, hand claps, 110 bpm', 'show' => ['source' => ['song']]],
                     ['key' => 'seconds', 'label' => 'Seconds (empty: as long as the video)', 'kind' => 'number', 'default' => 30, 'min' => 5, 'max' => 180],

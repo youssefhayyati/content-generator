@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\AssistantController;
+use App\Jobs\RunGeneration;
 use App\Models\Account;
 use App\Models\Asset;
 use App\Models\Device;
@@ -20,6 +21,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -452,6 +454,29 @@ class LabTest extends TestCase
         $this->assertSame('vs:abc', $recording->fresh()->meta['voice_clone']);
         $this->spa()->actingAs($this->user)->postJson("/api/projects/{$this->project->id}/lab/nodes/voice/run")->assertCreated();
         $this->assertCount(1, Http::recorded(fn ($r) => $r->url() === 'https://vs.example/profiles' && $r->method() === 'POST'));
+    }
+
+    public function test_music_in_a_mood_is_written_on_the_pod_when_the_local_composer_is_off(): void
+    {
+        config(['ai.engine.url' => 'http://engine.test', 'ai.engine.key' => 'k', 'ai.providers.sound.url' => null]);
+        Http::fake([
+            'engine.test/engine/catalog' => Http::response(['workflows' => [], 'services' => ['music' => 'ok']]),
+        ]);
+        Queue::fake([RunGeneration::class]);
+        $this->ops([
+            ['op' => 'add', 'node' => ['id' => 'mood', 'type' => 'audio.music', 'params' => ['source' => 'composer', 'mood' => 'night-drive', 'seconds' => 20]]],
+            ['op' => 'add', 'node' => ['id' => 'spooky', 'type' => 'audio.music', 'params' => ['source' => 'composer', 'description' => 'Eerie halloween ambient, music box', 'seconds' => 20]]],
+        ])->assertOk();
+
+        foreach (['mood', 'spooky'] as $node) {
+            $this->spa()->actingAs($this->user)->postJson("/api/projects/{$this->project->id}/lab/nodes/{$node}/run")->assertCreated();
+            $this->assertNull(NodeRun::where('node_id', $node)->latest('id')->first()->error);
+        }
+        $songs = $this->user->generations()->orderBy('id')->get();
+        $this->assertSame(['pod/acestep', 'pod/acestep'], $songs->pluck('model')->all());
+        $this->assertSame(['song', 'song'], $songs->pluck('kind')->all());
+        $this->assertStringContainsString('synthwave', $songs[0]->prompt);
+        $this->assertSame('Eerie halloween ambient, music box', $songs[1]->prompt);
     }
 
     public function test_voices_are_listed_heard_set_up_and_cloned_through_the_engine(): void
