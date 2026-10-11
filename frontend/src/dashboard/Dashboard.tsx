@@ -14,6 +14,7 @@ import Assistant from './pages/Assistant'
 import Automations from './pages/Automations'
 import Calendar from './pages/Calendar'
 import Campaigns from './pages/Campaigns'
+import Clips from './pages/Clips'
 import Comments from './pages/Comments'
 import Create from './pages/Create'
 import Flows from './pages/Flows'
@@ -44,6 +45,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/assistant': Assistant,
   '/dashboard/studio': Studio,
   '/dashboard/generate': Generators,
+  '/dashboard/clips': Clips,
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
   '/dashboard/showcase': Showcase,

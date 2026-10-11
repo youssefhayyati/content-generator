@@ -24,6 +24,7 @@ import { useToast } from '../toast'
 import { MediaLibrary } from '../media/Media'
 import { NEW_POST } from '../nav'
 import { Inspiration } from '../media/Inspiration'
+import { ClipsGallery } from '../media/ClipsGallery'
 import { Btn, EmptyState, Menu, Modal, PageHeader, Platforms, Segmented, Skeleton, StateBadge, Stagger, inputClass } from '../ui'
 
 const TABS: Array<{ value: PostStatus | ''; label: string }> = [
@@ -43,9 +44,10 @@ export default function Library() {
   const invalidate = useInvalidate()
   const toast = useToast()
 
-  const [view, setView] = useState<'posts' | 'media' | 'inspiration'>(() => {
+  const [view, setView] = useState<'inspiration' | 'posts' | 'clips' | 'media'>(() => {
     const params = new URLSearchParams(search)
-    return params.get('view') === 'media' ? 'media' : params.get('view') === 'posts' || params.has('status') ? 'posts' : 'inspiration'
+    const v = params.get('view')
+    return v === 'media' || v === 'clips' || v === 'posts' ? v : params.has('status') ? 'posts' : 'inspiration'
   })
   const [status, setStatus] = useState<PostStatus | ''>(() => (new URLSearchParams(search).get('status') as PostStatus) ?? '')
   const [platform, setPlatform] = useState<PlatformId | ''>('')
@@ -105,7 +107,13 @@ export default function Library() {
             Everything you’ve <Serif>made.</Serif>
           </>
         }
-        sub={view === 'media' ? 'Photos and videos: uploaded, generated, and ready to use in posts.' : 'Every draft, scheduled post and published piece, in one place.'}
+        sub={
+          view === 'media'
+            ? 'Photos and videos: uploaded, generated, and ready to use in posts.'
+            : view === 'clips'
+              ? 'Every highlight made from a link, ready to watch, download or post.'
+              : 'Every draft, scheduled post and published piece, in one place.'
+        }
         actions={
           <>
             <Segmented
@@ -114,6 +122,7 @@ export default function Library() {
               options={[
                 { value: 'inspiration', label: 'Inspiration' },
                 { value: 'posts', label: 'Posts' },
+                { value: 'clips', label: 'Highlights' },
                 { value: 'media', label: 'Assets' },
               ]}
               value={view}
@@ -129,7 +138,11 @@ export default function Library() {
         }
       />
 
-      {view === 'inspiration' ? <Stagger i={0} className="mt-8"><Inspiration /></Stagger> : view === 'media' ? (
+      {view === 'inspiration' ? <Stagger i={0} className="mt-8"><Inspiration /></Stagger> : view === 'clips' ? (
+        <Stagger i={0} className="mt-10">
+          <ClipsGallery />
+        </Stagger>
+      ) : view === 'media' ? (
         <Stagger i={0} className="mt-10">
           <MediaLibrary />
         </Stagger>

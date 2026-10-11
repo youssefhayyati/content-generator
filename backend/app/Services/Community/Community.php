@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Services\Ai\Models\ModelRegistry;
 
 /**
- * The community agents: adapt an X post into an Instagram caption (area 02), and triage
+ * The community agents: adapt a post between X and Instagram (area 02), and triage
  * comments — reply, ignore, or send to a human (area 11). Both write in the account's voice.
  */
 class Community
@@ -29,21 +29,28 @@ class Community
     }
 
     /**
-     * X → Instagram: the same post, native to the account. The credit line is added by the
-     * model class (Repost::creditedCaption), never by the AI, so attribution can't be lost.
+     * X → Instagram or Instagram → X: the same post, native to the account. The credit line is
+     * added by the model class (Repost::body), never by the AI, so attribution can't be lost.
      *
      * @return array{caption: string, hashtags: list<string>}
      */
     public function adapt(Repost $repost): array
     {
         $account = $repost->account;
+        $from = $repost->sourceLabel();
+        $media = $repost->assets()->countBy('kind')->map(fn (int $n, string $kind) => "{$n} {$kind}".($n > 1 ? 's' : ''))->implode(', ');
+        [$role, $ask, $maxTags] = $account->platform->value === 'x'
+            ? ['You adapt Instagram posts for X. Same idea, native to X: one sharp post, the hook first, no caption padding or hashtag walls.',
+                'Write the post (max 200 characters — a credit line is added separately, keep room for it) and 0-2 hashtags, only if they help.', 2]
+            : ["You adapt posts from {$from} for Instagram. Same idea, native to the account and the format: a caption people read, not a tweet pasted elsewhere.",
+                'Write the caption (max 150 words, no credit line — it is added separately) and 5-12 hashtags.', 15];
         [$ai, $model] = $this->ai();
         $reply = $ai->json(
             $model,
-            $this->voiceSystem($account, 'You adapt posts from X for Instagram. Same idea, native to the account and the format: a caption people read, not a tweet pasted elsewhere.'),
-            "Turn this X post by @{$repost->author} into an Instagram caption for @{$account->handle}.\n\n"
-                ."X post:\n{$repost->source_text}\n\n"
-                .'Write the caption (max 150 words, no credit line — it is added separately) and 5-12 hashtags.',
+            $this->voiceSystem($account, $role),
+            "Turn this {$from} post by @{$repost->author} into a {$account->platform->label()} post for @{$account->handle}.\n\n"
+                ."{$from} post".($media ? " (with {$media}, reposted with it)" : '').":\n".(trim($repost->source_text) ?: '(no caption)')."\n\n"
+                .$ask,
             [
                 'type' => 'object',
                 'properties' => [
@@ -58,7 +65,7 @@ class Community
         return [
             'caption' => trim((string) ($reply['caption'] ?? '')),
             'hashtags' => collect($reply['hashtags'] ?? [])->filter(fn ($t) => is_string($t) && trim($t) !== '')
-                ->map(fn (string $t) => ltrim(trim($t), '#'))->take(15)->values()->all(),
+                ->map(fn (string $t) => str_replace(' ', '', ltrim(trim($t), '#')))->take($maxTags)->values()->all(),
         ];
     }
 

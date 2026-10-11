@@ -1,5 +1,6 @@
 import {
   AudioWaveform,
+  Clapperboard,
   CalendarClock,
   CalendarDays,
   Cpu,
@@ -74,6 +75,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
       // One entry, two views: the canvas of nodes, and the one-off generators as its quick tools.
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2, also: [GENERATORS] },
+      { path: '/dashboard/clips', label: 'Highlights', icon: Clapperboard },
       { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
     ],
   },

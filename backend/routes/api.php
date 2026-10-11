@@ -29,6 +29,7 @@ use App\Http\Controllers\InboxNoteController;
 use App\Http\Controllers\InspirationController;
 use App\Http\Controllers\InvestigationController;
 use App\Http\Controllers\LabController;
+use App\Http\Controllers\LinkClipController;
 use App\Http\Controllers\LiveController;
 use App\Http\Controllers\ModelController;
 use App\Http\Controllers\OnboardingController;
@@ -90,6 +91,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // The voice assistant's session: a token it works with as this user (drafts only).
     Route::post('assistant/session', [AssistantController::class, 'session']);
 
+    // Turn a YouTube video or article link into a captioned vertical draft.
+    Route::get('clips', [LinkClipController::class, 'index']);
+    Route::post('clips', [LinkClipController::class, 'store'])->middleware(['verified', 'throttle:ai']);
+    Route::get('clips/{clip}', [LinkClipController::class, 'show']);
+    Route::post('clips/{clip}/retry', [LinkClipController::class, 'retry'])->middleware(['verified', 'throttle:ai']);
+    Route::delete('clips/{clip}', [LinkClipController::class, 'destroy']);
+
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);
     Route::get('analytics', AnalyticsController::class);
@@ -108,10 +116,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Where posts go: accounts, and the phones that publish to them.
     Route::apiResource('accounts', AccountController::class);
+    Route::get('devices/scan', [DeviceController::class, 'scan']);
     Route::apiResource('devices', DeviceController::class)->except('show');
     Route::post('devices/{device}/pause', [DeviceController::class, 'pause']);
     Route::post('devices/{device}/resume', [DeviceController::class, 'resume']);
     Route::get('devices/{device}/screenshot', [DeviceController::class, 'screenshot']);
+    Route::get('devices/{device}/live', [DeviceController::class, 'live']);
+    Route::post('devices/{device}/control', [DeviceController::class, 'control']);
+    Route::post('devices/{device}/stream', [DeviceController::class, 'stream']);
 
     // The publishing engine: the records, the stop button, the operator's recovery moves,
     // and the token the automation service signs its calls with.
@@ -220,6 +232,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Repost from X to Instagram: pick, record permission, adapt, credit, schedule.
     Route::get('reposts', [RepostController::class, 'index']);
     Route::post('reposts', [RepostController::class, 'store']);
+    Route::post('reposts/{repost}/fetch', [RepostController::class, 'fetch'])->middleware('throttle:20,1');
     Route::post('reposts/{repost}/permission', [RepostController::class, 'permission']);
     Route::post('reposts/{repost}/schedule', [RepostController::class, 'schedule']);
     Route::delete('reposts/{repost}', [RepostController::class, 'destroy']);

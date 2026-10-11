@@ -42,4 +42,11 @@ return [
     // profile rolls a die; tests rig it with SimulatorPhone::rig().
     'simulator' => ['flaky_failure_rate' => 0.5],
 
+    // "Scan for phones" asks the adb server on the machine the phones are plugged
+    // into. From inside Docker Desktop that machine is host.docker.internal.
+    'adb' => [
+        'host' => env('ADB_SERVER_HOST', 'host.docker.internal'),
+        'port' => (int) env('ADB_SERVER_PORT', 5037),
+    ],
+
 ];

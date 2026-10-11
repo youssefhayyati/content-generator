@@ -1,0 +1,9 @@
+{
+  "name": "flowai-phone-bridge",
+  "private": true,
+  "type": "module",
+  "description": "Live phone screens for the Phones page: scrcpy video to the browser, touches back.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

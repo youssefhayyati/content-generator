@@ -134,6 +134,13 @@ look — *Bold* (big words that light up), *Editorial* (a magazine page you read
 *Pulse* (an audiogram) — previewed live in a phone frame, then rendered with ffmpeg at
 1080 × 1920 with the music stepping aside whenever the voice speaks.
 
+**Clip from link** (`/dashboard/clips`) turns a public YouTube video or readable article into one
+to eight captioned 1080 × 1920 TikTok or Instagram Reel drafts. It downloads and analyzes the
+source once, then selects distinct 15–60 second video moments or writes several factual article
+angles. Processing stays in the background, every source URL remains attached for review, and the
+form requires confirmation that you have permission to republish it. No cloud API key is required:
+ffmpeg, yt-dlp, FlowAI Sound, and the local model do the work.
+
 Each account has a **sound** (voice, pace, signature music, reel accent; Accounts → Voice →
 Sound). Flows use it in three new steps — *Read it aloud*, *Compose music*, *Make a reel* — and
 the *Talking reel* recipe ties them together; a reel made in a run comes along when the post is
@@ -220,6 +227,15 @@ FLOWAI_URL=http://<studio>:8002 AGENT_TOKEN=… DEVICE_REF=<serial> DRIVER=adb .
 
 (On a remote VM, run the agent on the laptop the phone plugs into and tunnel the API:
 `ssh -L 8002:127.0.0.1:8002 <server>`.)
+
+**Scan and drive by hand.** With the phone plugged in (USB debugging on) and `adb start-server`
+running on the machine, *Phones → Scan for phones* lists it and adds it in one click. **Live**
+shows its screen and lets you touch, swipe, scroll and type into it. The live video comes from the
+`phone-bridge` service: run `docker compose up -d phone-bridge`. It uses scrcpy's server (bundled
+as `phone-bridge/scrcpy-server-v4.1`), runs at up to 60 fps, and sends touches straight to the
+phone. Without the bridge, the view falls back to screenshots, about one a second. The controls
+are locked while a publishing run is driving the phone. Both reach the host's adb server at
+`host.docker.internal:5037`.
 
 ## Real models
 

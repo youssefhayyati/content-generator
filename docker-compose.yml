@@ -115,6 +115,23 @@ services:
       - api
     restart: unless-stopped
 
+  # Live phone screens for the Phones page (phone-bridge/server.js): scrcpy's H.264 video from a
+  # phone plugged into this machine, and touches back, through the host's adb server. The Vite
+  # proxy serves it at /phone-bridge/. It checks the API's signed tickets with APP_KEY, read
+  # from backend/.env. On :8006 (8004 is music's, 8005 lipsync's).
+  phone-bridge:
+    image: node:22-alpine
+    working_dir: /app
+    command: node server.js
+    volumes:
+      - ./phone-bridge:/app:ro
+      - ./backend:/laravel:ro
+    environment:
+      ADB_SERVER_HOST: host.docker.internal
+    ports:
+      - "127.0.0.1:${PHONE_BRIDGE_PORT:-8006}:8004"
+    restart: unless-stopped
+
   # Songs for the assistant's videos: ACE-Step 1.5 (MIT), written from a description of the music
   # ("upbeat acoustic pop, ukulele, hand claps, 112 bpm"). It runs on the RunPod pod (runpod/music, port
   # 8003; MUSIC_URL and MUSIC_API_KEY in .env). This is the same service on this machine's GPU:

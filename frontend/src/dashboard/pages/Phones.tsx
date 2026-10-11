@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Bot, CirclePause, CirclePlay, Copy, Eye, EyeOff, KeyRound, Plus, RefreshCw, Smartphone, Trash2 } from 'lucide-react'
+import { Bot, Check, CirclePause, CirclePlay, Copy, Eye, EyeOff, KeyRound, MonitorSmartphone, Plus, RefreshCw, ScanSearch, Smartphone, Trash2 } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type Device, type PublishingRun } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { count, fmtRelative, useApi, useInvalidate } from '../data'
+import { PhoneLive } from '../phones/PhoneLive'
 import { useToast } from '../toast'
 import { Btn, EmptyState, FieldError, inputClass, Label, Modal, PageHeader, Segmented, Skeleton, Stagger } from '../ui'
 
@@ -14,6 +15,27 @@ export default function Phones() {
   const { data: devices, loading } = useApi<Device[]>('/devices')
   const { data: runs } = useApi<PublishingRun[]>('/publishing/runs')
   const [editing, setEditing] = useState<Device | 'new' | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [watching, setWatching] = useState<number | null>(null)
+  const watched = devices?.find((d) => d.id === watching) ?? null
+
+  // Which real phones are plugged in right now (serial → adb state); null when adb can't be asked.
+  const [plugged, setPlugged] = useState<Record<string, string> | null>(null)
+  const hasReal = devices?.some((d) => d.driver === 'http') ?? false
+  useEffect(() => {
+    if (!hasReal) return
+    let alive = true
+    const check = () =>
+      api<Scan>('/devices/scan')
+        .then((s) => alive && setPlugged(s.available ? Object.fromEntries(s.phones.map((p) => [p.serial, p.state])) : null))
+        .catch(() => {})
+    void check()
+    const t = window.setInterval(check, 10000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [hasReal])
   const invalidate = useInvalidate()
 
   // While a phone is working, keep its live strip moving.
@@ -34,9 +56,14 @@ export default function Phones() {
         }
         sub="One job runs on a phone at a time. The built-in simulator needs nothing else; real phones are driven by the automation service below."
         actions={
-          <Btn variant="primary" icon={Plus} onClick={() => setEditing('new')}>
-            Add a phone
-          </Btn>
+          <div className="flex gap-2">
+            <Btn icon={ScanSearch} onClick={() => setScanning(true)}>
+              Scan for phones
+            </Btn>
+            <Btn variant="primary" icon={Plus} onClick={() => setEditing('new')}>
+              Add a phone
+            </Btn>
+          </div>
         }
       />
 
@@ -53,15 +80,28 @@ export default function Phones() {
             title="No phones yet"
             body="Add the simulator to see the whole publishing loop run, or register a phone the automation service drives."
             action={
-              <Btn variant="primary" icon={Plus} onClick={() => setEditing('new')}>
-                Add the first one
-              </Btn>
+              <div className="flex gap-2">
+                <Btn icon={ScanSearch} onClick={() => setScanning(true)}>
+                  Scan for phones
+                </Btn>
+                <Btn variant="primary" icon={Plus} onClick={() => setEditing('new')}>
+                  Add the first one
+                </Btn>
+              </div>
             }
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {devices?.map((d, i) => (
-              <PhoneCard key={d.id} device={d} i={i} run={runs?.find((r) => r.id === d.booked_run_id && r.outcome === 'running')} onEdit={() => setEditing(d)} />
+              <PhoneCard
+                key={d.id}
+                device={d}
+                i={i}
+                run={runs?.find((r) => r.id === d.booked_run_id && r.outcome === 'running')}
+                onEdit={() => setEditing(d)}
+                onWatch={() => setWatching(d.id)}
+                connection={d.driver === 'http' && plugged ? (plugged[d.ref ?? ''] ?? 'missing') : undefined}
+              />
             ))}
           </div>
         )}
@@ -70,6 +110,126 @@ export default function Phones() {
       <AutomationService />
 
       <PhoneForm open={editing !== null} device={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+      <Modal open={scanning} onClose={() => setScanning(false)} title="Phones on this machine" className="max-w-lg">
+        {scanning && (
+          <PhoneScan
+            onWatch={(id) => {
+              setScanning(false)
+              setWatching(id)
+            }}
+          />
+        )}
+      </Modal>
+      <Modal open={watched !== null} onClose={() => setWatching(null)} title={watched ? `${watched.name} · live` : ''} className="max-w-3xl!">
+        {watched && <PhoneLive device={watched} />}
+      </Modal>
+    </div>
+  )
+}
+
+type ScannedPhone = {
+  serial: string
+  state: 'device' | 'unauthorized' | 'offline' | string
+  name: string
+  android: string | null
+  device_id: number | null
+}
+
+type Scan = { available: boolean; error: string | null; phones: ScannedPhone[] }
+
+/** Asks the adb server which phones are plugged in, and registers the new ones in one click. */
+function PhoneScan({ onWatch }: { onWatch: (deviceId: number) => void }) {
+  const toast = useToast()
+  const invalidate = useInvalidate()
+  const [scan, setScan] = useState<Scan | null>(null)
+  const [scanning, setScanning] = useState(true)
+  const [adding, setAdding] = useState<string | null>(null)
+
+  const run = async () => {
+    setScanning(true)
+    try {
+      setScan(await api<Scan>('/devices/scan'))
+    } catch (e) {
+      setScan({ available: false, error: e instanceof Error ? e.message : 'The scan failed.', phones: [] })
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  useEffect(() => {
+    void run()
+  }, [])
+
+  const add = async (p: ScannedPhone) => {
+    setAdding(p.serial)
+    try {
+      const d = await api<Device>('/devices', { method: 'POST', body: { name: p.name, driver: 'http', ref: p.serial } })
+      setScan((s) => s && { ...s, phones: s.phones.map((x) => (x.serial === p.serial ? { ...x, device_id: d.id } : x)) })
+      invalidate()
+      toast(`“${p.name}” added.`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t add the phone.', 'error')
+    } finally {
+      setAdding(null)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {!scan ? (
+        <Skeleton className="h-16 rounded-lg" />
+      ) : !scan.available ? (
+        <p className="rounded-lg border border-fail/30 bg-fail/[0.06] px-3 py-2.5 text-[12.5px] leading-snug">{scan.error}</p>
+      ) : scan.phones.length === 0 ? (
+        <p className="rounded-lg border border-line px-3 py-2.5 text-[12.5px] leading-snug text-dim">
+          No phone found. Plug one in by USB with USB debugging on (Settings → Developer options), or pair one over Wi-Fi with{' '}
+          <span className="font-mono text-[11.5px]">adb connect IP:PORT</span>, then scan again.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line rounded-lg border border-line">
+          {scan.phones.map((p) => (
+            <li key={p.serial} className="flex items-center gap-3 px-3 py-2.5">
+              <Smartphone className="size-4 shrink-0 text-dim" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium">{p.name}</p>
+                <p className="truncate font-mono text-[10.5px] text-dim">
+                  {p.serial}
+                  {p.android ? ` · Android ${p.android}` : ''}
+                </p>
+                {p.state === 'unauthorized' && <p className="mt-0.5 text-[11.5px] text-warn">Allow USB debugging on the phone's screen, then scan again.</p>}
+                {p.state === 'offline' && <p className="mt-0.5 text-[11.5px] text-warn">Offline: unplug and replug it, then scan again.</p>}
+              </div>
+              {p.device_id ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="flex items-center gap-1 font-mono text-[10.5px] text-ok">
+                    <Check className="size-3" strokeWidth={2} />
+                    Added
+                  </span>
+                  {p.state === 'device' && (
+                    <Btn size="sm" variant="subtle" icon={MonitorSmartphone} onClick={() => onWatch(p.device_id!)}>
+                      Live
+                    </Btn>
+                  )}
+                </div>
+              ) : (
+                <Btn size="sm" variant="primary" icon={Plus} loading={adding === p.serial} disabled={p.state !== 'device' || adding !== null} onClick={() => add(p)}>
+                  Add
+                </Btn>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="text-[11.5px] text-dim">
+        Added phones are driven by the automation service: run it with <span className="font-mono text-[11px]">DEVICE_REF=&lt;serial&gt; DRIVER=adb</span>.
+      </p>
+
+      <div className="flex justify-end border-t border-line pt-4">
+        <Btn icon={RefreshCw} loading={scanning} onClick={run}>
+          Scan again
+        </Btn>
+      </div>
     </div>
   )
 }
@@ -82,11 +242,49 @@ const STATUS: Record<string, { dot: string; label: string }> = {
   error: { dot: 'bg-fail', label: 'Error' },
 }
 
-function PhoneCard({ device: d, i, run, onEdit }: { device: Device; i: number; run?: PublishingRun; onEdit: () => void }) {
+/**
+ * `connection` is what adb says about a real phone right now: device (plugged in and ready),
+ * unauthorized, offline, or missing; undefined when unknown (a simulator, or no adb server).
+ */
+function PhoneCard({
+  device: d,
+  i,
+  run,
+  onEdit,
+  onWatch,
+  connection,
+}: {
+  device: Device
+  i: number
+  run?: PublishingRun
+  onEdit: () => void
+  onWatch: () => void
+  connection?: string
+}) {
   const toast = useToast()
   const invalidate = useInvalidate()
   const [acting, setActing] = useState(false)
-  const status = STATUS[d.status] ?? STATUS.offline
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const busy = d.booked_run_id !== null
+  // A running or paused phone says so first; otherwise an unplugged one says that.
+  const status =
+    d.status !== 'busy' && d.status !== 'paused' && connection && connection !== 'device'
+      ? { dot: 'bg-fail', label: connection === 'unauthorized' ? 'Allow USB debugging' : connection === 'offline' ? 'Not answering' : 'Not connected' }
+      : (STATUS[d.status] ?? STATUS.offline)
+
+  const remove = async () => {
+    setDeleting(true)
+    try {
+      await api(`/devices/${d.id}`, { method: 'DELETE' })
+      invalidate()
+      toast(`“${d.name}” removed.`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Couldn’t remove it.', 'error')
+      setDeleting(false)
+      setConfirming(false)
+    }
+  }
 
   const togglePause = async () => {
     setActing(true)
@@ -124,6 +322,16 @@ function PhoneCard({ device: d, i, run, onEdit }: { device: Device; i: number; r
           <span className={cn('size-1.5 rounded-full', status.dot)} />
           {status.label}
         </span>
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          disabled={busy}
+          aria-label={`Delete “${d.name}”`}
+          title={busy ? 'It’s running a job. Stop it first.' : 'Delete this phone'}
+          className="-mr-1.5 -mt-1 grid size-7 shrink-0 place-items-center rounded-md text-dim hover:bg-fail/10 hover:text-fail disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-dim"
+        >
+          <Trash2 className="size-3.5" strokeWidth={1.75} />
+        </button>
       </div>
 
       {run && (
@@ -141,14 +349,41 @@ function PhoneCard({ device: d, i, run, onEdit }: { device: Device; i: number; r
 
       {d.screenshot_url && <Screen url={d.screenshot_url} name={d.name} />}
 
-      <div className="mt-auto flex items-center justify-between border-t border-line px-4 py-2.5">
+      {confirming && (
+        <div className="mt-auto border-t border-fail/25 bg-fail/[0.05] px-4 py-3">
+          <p className="text-[12px] leading-snug text-muted">
+            Delete “{d.name}”?{' '}
+            {d.accounts.length > 0
+              ? `${d.accounts.map((a) => `@${a.handle}`).join(', ')} will have no phone to post from until you link another. `
+              : ''}
+            Past runs keep their records.
+          </p>
+          <div className="mt-2 flex justify-end gap-2">
+            <Btn size="sm" variant="subtle" onClick={() => setConfirming(false)} disabled={deleting}>
+              Keep
+            </Btn>
+            <Btn size="sm" variant="danger" icon={Trash2} loading={deleting} onClick={remove}>
+              Delete
+            </Btn>
+          </div>
+        </div>
+      )}
+
+      <div className={cn('flex items-center justify-between border-t border-line px-4 py-2.5', !confirming && 'mt-auto')}>
         <span className="truncate font-mono text-[10.5px] text-dim">
           {d.accounts.length > 0 ? d.accounts.map((a) => `@${a.handle}`).join(', ') : 'No accounts'}
           {d.last_seen_at ? ` · seen ${fmtRelative(d.last_seen_at)}` : ''}
         </span>
-        <Btn size="sm" variant={d.paused ? 'ghost' : 'subtle'} icon={d.paused ? CirclePlay : CirclePause} loading={acting} onClick={togglePause}>
-          {d.paused ? 'Resume' : 'Pause'}
-        </Btn>
+        <div className="flex shrink-0 gap-1.5">
+          {d.driver === 'http' && (
+            <Btn size="sm" variant="subtle" icon={MonitorSmartphone} onClick={onWatch}>
+              Live
+            </Btn>
+          )}
+          <Btn size="sm" variant={d.paused ? 'ghost' : 'subtle'} icon={d.paused ? CirclePlay : CirclePause} loading={acting} onClick={togglePause}>
+            {d.paused ? 'Resume' : 'Pause'}
+          </Btn>
+        </div>
       </div>
     </motion.article>
   )

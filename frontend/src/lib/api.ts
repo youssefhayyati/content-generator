@@ -106,6 +106,29 @@ export type AssetSound = {
 
 export type TimedWord = { text: string; start: number; end: number }
 
+export type LinkClip = {
+  id: number
+  batch_id: string | null
+  batch_index: number
+  batch_total: number
+  source_url: string
+  source_type: 'youtube' | 'article'
+  status: 'queued' | 'downloading' | 'reading' | 'analyzing' | 'writing' | 'rendering' | 'ready' | 'failed'
+  title: string | null
+  platform: 'instagram' | 'tiktok'
+  seconds: number
+  progress: number
+  start: number | null
+  end: number | null
+  reason: string | null
+  caption: string | null
+  asset: Asset | null
+  post_id: number | null
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
 /** GET /assets/{id}/words */
 export type AssetWords = {
   words: TimedWord[]
@@ -289,17 +312,24 @@ export type AccountAutonomy = {
 
 export type PreviewItem = { kind: AutonomyAction; label: string; verdict: string }
 
-/** An X post picked for reuse on Instagram. */
+/** A post picked on X or Instagram for reuse on the other. */
 export type Repost = {
   id: number
+  source_platform: 'x' | 'instagram'
   source_url: string
   author: string
   source_text: string
+  /** The source's photos and video, saved to the library. */
+  media: Array<{ id: number; kind: 'image' | 'video' | 'audio'; url: string; poster_url: string | null }>
   permission: 'pending' | 'allowed' | 'denied'
   permission_note: string | null
-  status: 'captured' | 'adapted' | 'scheduled' | 'dropped'
+  status: 'fetching' | 'failed' | 'captured' | 'adapted' | 'scheduled' | 'dropped'
+  /** Why the source couldn't be read. */
+  error: string | null
   caption: string | null
   caption_with_credit: string | null
+  /** What will post: caption, credit and hashtags, within the target's limit. */
+  body: string | null
   hashtags: string[]
   attribution: boolean
   post_id: number | null
@@ -996,6 +1026,12 @@ export async function api<T = unknown>(path: string, options: Options = {}): Pro
   const res = await send(path, options)
   if (res.status === 204) return undefined as T
   return (await res.json().catch(() => null)) as T
+}
+
+/** GET a binary reply (an image, a file) with its headers; failures throw like `api()`. */
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<{ blob: Blob; headers: Headers }> {
+  const res = await send(path, { signal })
+  return { blob: await res.blob(), headers: res.headers }
 }
 
 /**
