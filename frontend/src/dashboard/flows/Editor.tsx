@@ -7,7 +7,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
-import { Btn, Label, Menu, Toggle } from '../ui'
+import { Btn, Label, Menu, Skeleton, Toggle } from '../ui'
 import { Board } from './Board'
 import { defaults, Inspector } from './Inspector'
 import { COLUMN, GROUP_HUE, hueOf, iconOf, NODE_H, NODE_W, ROW, uid } from './look'
@@ -20,7 +20,8 @@ const STEP_MS = 420
 /**
  * One flow, on its canvas. The palette adds steps (joined to the selected one), the panel on
  * the right edits the selected step or shows the runs, and Run tries the flow with real data
- * while the canvas lights up step by step.
+ * while the canvas lights up step by step. Watching a run, the palette steps aside: nothing
+ * can be added to a replay, and the canvas takes its room.
  */
 export function FlowEditor({ id, runParam, born }: { id: number; runParam: number | null; born: boolean }) {
   const { navigate } = useRouter()
@@ -213,15 +214,19 @@ export function FlowEditor({ id, runParam, born }: { id: number; runParam: numbe
     navigate('/dashboard/flows')
   }
 
-  if (!flow || !graph || !catalog) return <div className="skeleton h-[70dvh] rounded-xl" />
+  if (!flow || !graph || !catalog) return <Skeleton className="-mt-2 h-[70dvh] rounded-xl lg:h-[calc(100dvh-112px)]" />
 
   const node = graph.nodes.find((n) => n.id === selected) ?? null
   const groups = Object.entries(catalog.groups).filter(([g]) => g !== 'trigger') as Array<[keyof typeof GROUP_HUE, string]>
+  // A run is on the canvas, or on its way there.
+  const watching = runId !== null
 
   return (
-    <div className="-mx-4 -mt-8 md:-mx-6 md:-mt-10">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-panel/80 px-4 py-2.5 backdrop-blur md:px-6">
+    // One pane, like the Lab's canvas. From lg up it fills the window to the bottom gutter and
+    // the page itself doesn't scroll; below that the three parts stack and the page does.
+    <div className="-mx-4 -mt-2 flex flex-col overflow-hidden rounded-xl border border-line bg-panel md:mx-0 lg:-mb-[72px] lg:h-[calc(100dvh-112px)]">
+      {/* Bar */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3 py-2">
         <Btn variant="subtle" size="sm" icon={ArrowLeft} onClick={() => navigate('/dashboard/flows')} aria-label="All flows" />
         <input
           value={name}
@@ -248,39 +253,41 @@ export function FlowEditor({ id, runParam, born }: { id: number; runParam: numbe
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:h-[calc(100dvh-7.6rem)] lg:grid-cols-[208px_minmax(0,1fr)_340px]">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Palette */}
-        <aside className="flex gap-4 overflow-x-auto border-b border-line px-4 py-3 lg:block lg:space-y-5 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:px-3 lg:py-4" data-lenis-prevent>
-          {groups.map(([group, label]) => (
-            <div key={group} className="shrink-0">
-              <Label className="px-1" >
-                <span style={{ color: GROUP_HUE[group] }}>{label}</span>
-              </Label>
-              <div className="mt-1.5 flex gap-1 lg:block lg:space-y-0.5">
-                {Object.entries(catalog.nodes)
-                  .filter(([, k]) => k.group === group)
-                  .map(([type, k]) => {
-                    const Icon = iconOf(type)
-                    return (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => add(type)}
-                        title={k.detail}
-                        className="group flex w-max items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-white/[0.05] hover:text-fg lg:w-full"
-                      >
-                        <Icon className="size-3.5 shrink-0" style={{ color: hueOf(type) }} strokeWidth={1.75} />
-                        <span className="truncate">{k.label}</span>
-                      </button>
-                    )
-                  })}
+        {!watching && (
+          <aside className="flex shrink-0 gap-4 overflow-x-auto border-b border-line px-4 py-3 lg:block lg:w-[208px] lg:space-y-5 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:px-3 lg:py-4" data-lenis-prevent>
+            {groups.map(([group, label]) => (
+              <div key={group} className="shrink-0">
+                <Label className="px-1" >
+                  <span style={{ color: GROUP_HUE[group] }}>{label}</span>
+                </Label>
+                <div className="mt-1.5 flex gap-1 lg:block lg:space-y-0.5">
+                  {Object.entries(catalog.nodes)
+                    .filter(([, k]) => k.group === group)
+                    .map(([type, k]) => {
+                      const Icon = iconOf(type)
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => add(type)}
+                          title={k.detail}
+                          className="group flex w-max items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] text-muted transition-colors hover:bg-white/[0.05] hover:text-fg lg:w-full"
+                        >
+                          <Icon className="size-3.5 shrink-0" style={{ color: hueOf(type) }} strokeWidth={1.75} />
+                          <span className="truncate">{k.label}</span>
+                        </button>
+                      )
+                    })}
+                </div>
               </div>
-            </div>
-          ))}
-          <p className="hidden px-1 text-[11px] leading-snug text-dim lg:block">
-            Select a step first and the new one joins it, below. Drag from a dot on a card’s bottom edge to draw a line.
-          </p>
-        </aside>
+            ))}
+            <p className="hidden px-1 text-[11px] leading-snug text-dim lg:block">
+              Select a step first and the new one joins it, below. Drag from a dot on a card’s bottom edge to draw a line.
+            </p>
+          </aside>
+        )}
 
         {/* Canvas */}
         <Board
@@ -297,51 +304,61 @@ export function FlowEditor({ id, runParam, born }: { id: number; runParam: numbe
           replay={run ? { run, shown } : null}
           fitKey={run ? `run-${run.id}` : 'edit'}
           born={born}
-          className="h-[62dvh] lg:h-full"
+          className="h-[62dvh] lg:h-auto lg:min-w-0 lg:flex-1"
         />
 
         {/* Side panel */}
-        <aside className="overflow-y-auto border-t border-line px-4 py-4 lg:border-l lg:border-t-0 lg:px-5" data-lenis-prevent>
-          <AnimatePresence mode="wait" initial={false}>
-            {node && !run ? (
-              <motion.div key={`node-${node.id}`} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease }}>
-                <Inspector
-                  node={node}
-                  graph={graph}
-                  catalog={catalog}
-                  accounts={accounts ?? []}
-                  onChange={(patch) => change((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === node.id ? { ...n, ...patch } : n)) }))}
-                  onRemove={() => remove(node.id)}
-                />
-              </motion.div>
-            ) : run ? (
-              <motion.div key={`run-${run.id}`} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease }}>
-                <div className="mb-4 flex items-center justify-between gap-2">
-                  <button type="button" onClick={() => setRunId(null)} className="flex items-center gap-1.5 text-[12px] text-dim transition-colors hover:text-fg">
-                    <ArrowLeft className="size-3.5" /> Back to editing
-                  </button>
-                  {shown >= run.trail.length && !['running'].includes(run.status) && (
-                    <button type="button" onClick={() => setShown(0)} className="flex items-center gap-1.5 text-[12px] text-dim transition-colors hover:text-fg">
-                      <RotateCcw className="size-3.5" /> Replay
-                    </button>
+        <aside className="flex min-h-0 shrink-0 flex-col border-t border-line lg:w-[340px] lg:border-l lg:border-t-0">
+          {watching && (
+            <div className="flex items-center justify-between gap-2 border-b border-line px-2 py-1.5">
+              <Btn size="sm" variant="subtle" icon={ArrowLeft} onClick={() => setRunId(null)}>
+                Back to editing
+              </Btn>
+              {run && shown >= run.trail.length && run.status !== 'running' && (
+                <Btn size="sm" variant="subtle" icon={RotateCcw} onClick={() => setShown(0)}>
+                  Replay
+                </Btn>
+              )}
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 lg:px-5" data-lenis-prevent>
+            <AnimatePresence mode="wait" initial={false}>
+              {node && !watching ? (
+                <motion.div key={`node-${node.id}`} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease }}>
+                  <Inspector
+                    node={node}
+                    graph={graph}
+                    catalog={catalog}
+                    accounts={accounts ?? []}
+                    onChange={(patch) => change((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === node.id ? { ...n, ...patch } : n)) }))}
+                    onRemove={() => remove(node.id)}
+                  />
+                </motion.div>
+              ) : watching && !run ? (
+                <motion.div key="run-loading" exit={{ opacity: 0 }} className="space-y-3">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-32 w-full rounded-lg" />
+                </motion.div>
+              ) : run ? (
+                <motion.div key={`run-${run.id}`} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease }}>
+                  <RunDetail run={run} catalog={catalog} shown={shown} onChange={(r) => setRun(r)} />
+                  {run.status === 'approval' || run.status === 'running' ? null : (
+                    <RunsBlock flow={flow} runId={runId} onSelect={(r) => setRunId(r)} />
                   )}
-                </div>
-                <RunDetail run={run} catalog={catalog} shown={shown} onChange={(r) => setRun(r)} />
-                {run.status === 'approval' || run.status === 'running' ? null : (
+                </motion.div>
+              ) : (
+                <motion.div key="flow" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease }}>
+                  {flow.description && <p className="mb-4 text-[13px] leading-snug text-muted">{flow.description}</p>}
+                  {flow.problem && <p className="mb-4 rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[12px] text-warn">The trigger had a problem: {flow.problem}</p>}
+                  <p className="mb-5 text-[12px] leading-snug text-dim">
+                    Click a step to change it. Nothing goes on the calendar unless you approve it in the run, so an “Ask me first” sits in front of every post.
+                  </p>
                   <RunsBlock flow={flow} runId={runId} onSelect={(r) => setRunId(r)} />
-                )}
-              </motion.div>
-            ) : (
-              <motion.div key="flow" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease }}>
-                {flow.description && <p className="mb-4 text-[13px] leading-snug text-muted">{flow.description}</p>}
-                {flow.problem && <p className="mb-4 rounded-lg border border-warn/25 bg-warn/[0.06] px-3 py-2 text-[12px] text-warn">The trigger had a problem: {flow.problem}</p>}
-                <p className="mb-5 text-[12px] leading-snug text-dim">
-                  Click a step to change it. Nothing goes on the calendar unless you approve it in the run, so an “Ask me first” sits in front of every post.
-                </p>
-                <RunsBlock flow={flow} runId={runId} onSelect={(r) => setRunId(r)} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </aside>
       </div>
     </div>

@@ -11,6 +11,7 @@ import { cn } from '../../lib/cn'
 import { useCursorChoice } from '../../lib/cursor'
 import { useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
+import { useWash, WASH_DEFAULT } from '../../lib/wash'
 import { PLATFORM_ORDER, useInvalidate } from '../data'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
@@ -275,10 +276,26 @@ function Defaults() {
 
 function Appearance() {
   const [cursor, setCursor] = useCursorChoice()
+  const [wash, setWash] = useWash()
   return (
-    <Section title="Appearance" body="The palette and the cursor, for the studio and the site. Both change right away and are remembered on this device.">
+    <Section title="Appearance" body="The palette, the colour at the edges and the cursor. They change right away and are remembered on this device.">
       <PalettePicker />
-      <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
+      <div className="mt-4 rounded-lg border border-line px-3 py-2.5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[13px] font-medium">Colour at the edges</p>
+            <p className="text-[11.5px] text-dim">How strongly the palette glows around the edges of the studio, behind the glass. At 0% the background is plain.</p>
+          </div>
+          <span className="shrink-0 font-mono text-[12px] tabular-nums text-muted">{wash}%</span>
+        </div>
+        <div className="mt-2.5 flex items-center gap-3">
+          <input type="range" min={0} max={100} step={5} value={wash} onChange={(e) => setWash(Number(e.target.value))} aria-label="Colour at the edges" className="w-full accent-[var(--color-accent)]" />
+          <Btn size="sm" variant="subtle" disabled={wash === WASH_DEFAULT} onClick={() => setWash(null)}>
+            Reset
+          </Btn>
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
         <div>
           <p className="text-[13px] font-medium">Custom cursor</p>
           <p className="text-[11.5px] text-dim">A crisper pointer in the palette's colour, here and on the site. Turn it off to use your system cursor.</p>

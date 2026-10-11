@@ -258,7 +258,7 @@ function Detail({ investigation: inv, onClose }: { investigation: Investigation;
         {inv.report && (
           <section>
             <Label>Report</Label>
-            <div className="mt-2 max-h-80 overflow-y-auto rounded-lg border border-line bg-white/[0.02] px-4 py-3" data-lenis-prevent>
+            <div className="mt-2 rounded-lg border border-line bg-white/[0.02] px-4 py-3">
               <KitMarkdown text={inv.report} />
             </div>
           </section>

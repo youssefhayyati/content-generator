@@ -9,7 +9,8 @@ import { fmtRelative, useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
 import { Btn, inputClass, Label, Modal, Toggle, Select } from '../ui'
 
-const tone = (p: StormPressure) =>
+/** The word and colour for an account's weather. The Live page says it the same way. */
+export const tone = (p: Pick<StormPressure, 'enabled' | 'tripped' | 'pressure'>) =>
   !p.enabled ? { name: 'Off', color: 'var(--color-dim)' } : p.tripped ? { name: 'Frozen', color: 'var(--color-fail)' } : p.pressure >= 85 ? { name: 'Stormy', color: 'var(--color-fail)' } : p.pressure >= 45 ? { name: 'Choppy', color: 'var(--color-warn)' } : { name: 'Calm', color: 'var(--color-ok)' }
 
 /**

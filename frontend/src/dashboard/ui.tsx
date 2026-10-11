@@ -27,6 +27,7 @@ export function Panel({
   children,
   className,
   bodyClassName,
+  flush,
 }: {
   title?: ReactNode
   sub?: ReactNode
@@ -34,6 +35,8 @@ export function Panel({
   children: ReactNode
   className?: string
   bodyClassName?: string
+  /** No padding around the body: for a list whose rows run edge to edge and pad themselves. */
+  flush?: boolean
 }) {
   return (
     <section className={cn('min-w-0 rounded-xl border border-line bg-panel', className)}>
@@ -46,7 +49,7 @@ export function Panel({
           {actions && <div className="flex max-w-full shrink-0 items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={cn('p-4 md:p-5', bodyClassName)}>{children}</div>
+      <div className={cn(flush ? 'mt-4' : 'p-4 md:p-5', bodyClassName)}>{children}</div>
     </section>
   )
 }
@@ -394,7 +397,7 @@ export function Modal({
   className?: string
   /** Nearly the whole page, for looking at a picture or a video: lay it out with Viewer. */
   full?: boolean
-  /** A wide sheet that scrolls inside, for browsing a set of things. */
+  /** A wide sheet, for browsing a set of things. */
   wide?: boolean
 }) {
   useEffect(() => {
@@ -420,13 +423,14 @@ export function Modal({
             aria-modal="true"
             aria-label={typeof title === 'string' ? title : undefined}
             data-lenis-prevent
+            // Never taller than the window: the title stays put and the body scrolls under it.
             className={cn(
-              'glass-sheet relative w-full overflow-hidden rounded-2xl',
+              'glass-sheet relative flex w-full flex-col overflow-hidden rounded-2xl',
               full
-                ? 'flex h-[calc(100dvh-2rem)] flex-col md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]'
-                : wide
-                  ? 'flex max-h-[calc(100dvh-2rem)] max-w-5xl flex-col md:max-h-[calc(100dvh-3rem)]'
-                  : 'max-w-md',
+                ? 'h-[calc(100dvh-2rem)] md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]'
+                : // cn() only joins, and the stylesheet's order decides between two max-w-*: a width the
+                  // caller asked for has to be the only one here.
+                  cn('max-h-[calc(100dvh-2rem)] md:max-h-[calc(100dvh-3rem)]', !/\bmax-w-/.test(className ?? '') && (wide ? 'max-w-5xl' : 'max-w-md')),
               className,
             )}
             initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -434,13 +438,13 @@ export function Modal({
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.35, ease }}
           >
-            <div className="flex items-center justify-between border-b border-white/10 px-5 py-3.5">
-              <p className="text-[13.5px] font-medium">{title}</p>
-              <button type="button" onClick={onClose} aria-label="Close" className="text-dim transition-colors hover:text-fg">
+            <div className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 px-5 py-3.5">
+              <p className="min-w-0 truncate text-[13.5px] font-medium">{title}</p>
+              <button type="button" onClick={onClose} aria-label="Close" className="shrink-0 text-dim transition-colors hover:text-fg">
                 <X className="size-4" />
               </button>
             </div>
-            <div className={cn('p-5', (full || wide) && 'min-h-0 flex-1 overflow-y-auto')}>{children}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
           </motion.div>
         </motion.div>
       )}

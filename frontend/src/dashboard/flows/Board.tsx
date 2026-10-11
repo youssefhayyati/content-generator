@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Check, CircleDashed, Hourglass, LoaderCircle, Maximize2, Minus, Plus, X } from 'lucide-react'
 import type { Account, FlowCatalog, FlowGraph, FlowNode, FlowPort, FlowRun, TrailEntry } from '../../lib/api'
 import { ease } from '../../lib/motion'
@@ -11,11 +11,17 @@ export type Replay = { run: FlowRun; shown: number }
 
 const edgeKey = (e: { from: string; to: string; port: string }) => `${e.from}>${e.port}>${e.to}`
 
+/** The smallest the board makes a flow by itself: any smaller and a card's words can't be read. */
+const READABLE = 0.8
+/** What a replay writes beside a card: its width, and the gap before it. */
+const BUBBLE = 248
+
 /**
  * The flow canvas. Drag the background to pan, scroll to move, ⌘/Ctrl + scroll to zoom. In
  * edit mode cards drag, and a line is drawn from a port (the dots on a card's right edge) to
  * another card. With a run attached it becomes a replay: the steps the run took light up in
- * order, current travels along the lines it took, and the step working right now glows.
+ * order, current travels along the lines it took, and the step working right now glows. A flow
+ * too tall to read whole starts at its top, and the board follows the replay down it.
  */
 export function Board({
   graph,
@@ -46,6 +52,12 @@ export function Board({
 }) {
   const board = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ x: 40, y: 40, zoom: 1 })
+  // While the board moves by itself, it glides there.
+  const [glide, setGlide] = useState(false)
+  const landing = useRef(0)
+  const still = useReducedMotion()
+  // You moved the board during this replay: it stops following until the next one.
+  const hands = useRef(false)
   const [edge, setEdge] = useState<string | null>(null)
   const [wire, setWire] = useState<{ from: string; port: FlowPort; x: number; y: number } | null>(null)
   const ports = useCallback((type: string): FlowPort[] => catalog.nodes[type]?.ports ?? ['next'], [catalog])
@@ -61,18 +73,27 @@ export function Board({
   const aside = useRef(false)
   aside.current = !!replay
 
-  const fit = useCallback(() => {
-    const r = board.current?.getBoundingClientRect()
+  /** The flow's corners on the board, with the room around it. */
+  const bounds = useCallback(() => {
     const nodes = latest.current.nodes
-    if (!r || !nodes.length) return
-    const minX = Math.min(...nodes.map((n) => n.x)) - 40
-    const minY = Math.min(...nodes.map((n) => n.y)) - 40
-    const maxX = Math.max(...nodes.map((n) => n.x + NODE_W)) + (aside.current ? 270 : 40)
-    // Room under the last row for the port labels.
-    const maxY = Math.max(...nodes.map((n) => n.y + NODE_H)) + 56
-    const zoom = Math.min(1, Math.max(0.35, Math.min(r.width / (maxX - minX), r.height / (maxY - minY))))
-    setView({ zoom, x: (r.width - (maxX - minX) * zoom) / 2 - minX * zoom, y: Math.max(16, (r.height - (maxY - minY) * zoom) / 2) - minY * zoom })
+    return {
+      minX: Math.min(...nodes.map((n) => n.x)) - 40,
+      minY: Math.min(...nodes.map((n) => n.y)) - 40,
+      maxX: Math.max(...nodes.map((n) => n.x + NODE_W)) + (aside.current ? BUBBLE + 22 : 40),
+      // Room under the last row for the port labels.
+      maxY: Math.max(...nodes.map((n) => n.y + NODE_H)) + 56,
+    }
   }, [])
+
+  // By itself the board only goes as small as can be read, and starts a bigger flow at its top
+  // left corner. Asked for the whole flow (the button), it shows all of it, however small.
+  const fit = useCallback((whole = false) => {
+    const r = board.current?.getBoundingClientRect()
+    if (!r || !latest.current.nodes.length) return
+    const { minX, minY, maxX, maxY } = bounds()
+    const zoom = Math.min(1, Math.max(whole ? 0.3 : READABLE, Math.min(r.width / (maxX - minX), r.height / (maxY - minY))))
+    setView({ zoom, x: Math.max(16, (r.width - (maxX - minX) * zoom) / 2) - minX * zoom, y: Math.max(16, (r.height - (maxY - minY) * zoom) / 2) - minY * zoom })
+  }, [bounds])
 
   // Fit when first shown, when asked to (fitKey), and when the board changes size.
   useLayoutEffect(() => {
@@ -99,6 +120,8 @@ export function Board({
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      hands.current = true
+      setGlide(false)
       setView((v) => {
         if (e.ctrlKey || e.metaKey) {
           const r = el.getBoundingClientRect()
@@ -114,7 +137,8 @@ export function Board({
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  const zoomBy = (f: number) =>
+  const zoomBy = (f: number) => {
+    hands.current = true
     setView((v) => {
       const r = board.current?.getBoundingClientRect()
       const cx = (r?.width ?? 800) / 2
@@ -122,6 +146,7 @@ export function Board({
       const zoom = Math.min(1.8, Math.max(0.3, v.zoom * f))
       return { zoom, x: cx - ((cx - v.x) * zoom) / v.zoom, y: cy - ((cy - v.y) * zoom) / v.zoom }
     })
+  }
 
   const toBoard = (clientX: number, clientY: number) => {
     const r = board.current!.getBoundingClientRect()
@@ -133,6 +158,8 @@ export function Board({
     if (e.target !== e.currentTarget) return
     onSelect(null)
     setEdge(null)
+    hands.current = true
+    setGlide(false)
     pan.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -201,6 +228,48 @@ export function Board({
     return { last, lit, working, feeding, newest: replay.shown - 1, caughtUp }
   }, [replay, graph.edges])
 
+  // The step the replay is at: the one working, or the one that just lit.
+  const at = trace ? (trace.working ?? replay?.run.trail[trace.newest]?.node ?? null) : null
+  const rewound = !!replay && replay.shown === 0
+  const viewNow = useRef(view)
+  viewNow.current = view
+
+  // A replay from its start has the board again, wherever it was left.
+  useEffect(() => {
+    if (rewound) hands.current = false
+  }, [rewound, replay?.run.id])
+
+  // Keep the step the replay is at on the board, with what it says beside it.
+  useEffect(() => {
+    const r = board.current?.getBoundingClientRect()
+    const n = at ? latest.current.nodes.find((x) => x.id === at) : null
+    if (!r || !n || hands.current) return
+    const v = viewNow.current
+    const b = bounds()
+    let { x, y } = v
+    const top = n.y * v.zoom + v.y
+    const bottom = (n.y + NODE_H) * v.zoom + v.y
+    if (top < 20 || bottom > r.height - 64) {
+      // A third of the way down, so the steps after it show too; never past either end of the flow.
+      const first = 16 - b.minY * v.zoom
+      const last = r.height - 16 - b.maxY * v.zoom
+      y = last >= first ? first : Math.min(first, Math.max(last, r.height * 0.3 - n.y * v.zoom))
+    }
+    const right = (n.x + NODE_W + BUBBLE) * v.zoom + x
+    if (right > r.width - 16) x -= right - (r.width - 16)
+    if (n.x * v.zoom + x < 16) x = 16 - n.x * v.zoom
+    if (Math.abs(x - v.x) < 1 && Math.abs(y - v.y) < 1) return
+    setGlide(!still)
+    setView({ ...v, x, y })
+    // On a timer of its own: the next step mustn't cancel this one's landing.
+    window.clearTimeout(landing.current)
+    landing.current = window.setTimeout(() => setGlide(false), 600)
+    // Only when the replay moves on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at])
+
+  useEffect(() => () => window.clearTimeout(landing.current), [])
+
   /* -------------------------------------------------------------- */
 
   const depth = useMemo(() => {
@@ -236,9 +305,13 @@ export function Board({
         backgroundImage: 'radial-gradient(rgb(255 255 255 / 0.065) 1px, transparent 1px)',
         backgroundSize: `${22 * view.zoom}px ${22 * view.zoom}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
+        transition: glide ? 'background-position 0.55s var(--ease-quint)' : undefined,
       }}
     >
-      <div className="pointer-events-none absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
+      <div
+        className="pointer-events-none absolute left-0 top-0 origin-top-left"
+        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, transition: glide ? 'transform 0.55s var(--ease-quint)' : undefined }}
+      >
         {/* Lines */}
         <svg className="absolute left-0 top-0 overflow-visible" width="1" height="1" aria-hidden>
           <defs>
@@ -380,7 +453,15 @@ export function Board({
         <button type="button" onClick={() => zoomBy(1.2)} aria-label="Zoom in" className="grid size-7 place-items-center rounded-md text-dim hover:bg-white/[0.06] hover:text-fg">
           <Plus className="size-3.5" />
         </button>
-        <button type="button" onClick={fit} aria-label="Fit the flow" className="grid size-7 place-items-center rounded-md text-dim hover:bg-white/[0.06] hover:text-fg">
+        <button
+          type="button"
+          onClick={() => {
+            hands.current = true
+            fit(true)
+          }}
+          aria-label="Show the whole flow"
+          title="Show the whole flow"
+          className="grid size-7 place-items-center rounded-md text-dim hover:bg-white/[0.06] hover:text-fg">
           <Maximize2 className="size-3.5" />
         </button>
       </div>
