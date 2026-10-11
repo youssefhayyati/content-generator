@@ -13,7 +13,7 @@ import { hueOf } from '../flows/look'
 import { RunStatus } from '../flows/Runs'
 import { tone } from '../storm/StormGuard'
 import { useToast } from '../toast'
-import { Btn, CountUp, EmptyState, PageHeader, Panel, Skeleton, Stagger } from '../ui'
+import { Btn, CountUp, DrawnCheck, EmptyState, PageHeader, Panel, Skeleton, Stagger } from '../ui'
 import { STATUS as PHONE_STATUS } from './Phones'
 
 type BoardStatus = 'on_time' | 'boarding' | 'publishing' | 'live' | 'checking' | 'needs_you' | 'held' | 'waiting' | 'delayed' | 'by_hand' | 'due' | 'draft'
@@ -296,9 +296,53 @@ function GoingOut({ rows, timezone, paused }: { rows: Live['departures']; timezo
 }
 
 /** The phones: each one's last screen, what it's doing, and its light. */
+/** How long a phone's row stays lit after it finishes a run. */
+const JUST_MS = 9000
+
+/**
+ * The phones that finished a run since the page has been watching, and how it ended: a run that
+ * ends while you look lights its row (posted, or didn't post) for a few seconds. Runs that ended
+ * before the page opened are history and stay quiet.
+ */
+function useJustFinished(phones: Live['phones']) {
+  const seen = useRef<Map<number, string | null> | null>(null)
+  // One timer per lit row. They outlive the polls (every few seconds, each a new list), so
+  // they're only cleared when the page goes away.
+  const timers = useRef(new Map<number, number>())
+  const [just, setJust] = useState<Record<number, string>>({})
+
+  useEffect(() => {
+    const first = seen.current === null
+    const before = seen.current ?? new Map<number, string | null>()
+    seen.current = new Map(phones.map((p) => [p.id, p.last?.ended_at ?? null]))
+    if (first) return
+    for (const p of phones) {
+      if (p.run || !p.last?.ended_at || p.last.ended_at === before.get(p.id)) continue
+      const status = p.last.status
+      setJust((j) => ({ ...j, [p.id]: status }))
+      window.clearTimeout(timers.current.get(p.id))
+      timers.current.set(
+        p.id,
+        window.setTimeout(() => {
+          timers.current.delete(p.id)
+          setJust(({ [p.id]: _, ...rest }) => rest)
+        }, JUST_MS),
+      )
+    }
+  }, [phones])
+
+  useEffect(() => {
+    const all = timers.current
+    return () => all.forEach((t) => window.clearTimeout(t))
+  }, [])
+
+  return just
+}
+
 function Phones({ phones }: { phones: Live['phones'] }) {
   const { navigate } = useRouter()
   const working = phones.filter((p) => p.run).length
+  const just = useJustFinished(phones)
   return (
     <Panel
       title="Phones"
@@ -318,8 +362,21 @@ function Phones({ phones }: { phones: Live['phones'] }) {
             const status = PHONE_STATUS[p.run ? 'busy' : p.status] ?? PHONE_STATUS.offline
             const step = p.run?.steps[p.run.steps.length - 1]
             const handles = p.accounts.map((a) => `@${a.handle}`).join(', ')
+            const ended = just[p.id]
             return (
-              <li key={p.id} className={ROW}>
+              <li key={p.id} className={cn(ROW, 'relative isolate')}>
+                <AnimatePresence>
+                  {ended && (
+                    <motion.span
+                      aria-hidden
+                      className={cn('absolute inset-0 -z-10', ended === 'confirmed' ? 'bg-ok/[0.07]' : 'bg-fail/[0.06]')}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: [0, 1, 0.55] }}
+                      exit={{ opacity: 0, transition: { duration: 1.2 } }}
+                      transition={{ duration: 1.4, ease }}
+                    />
+                  )}
+                </AnimatePresence>
                 <Screen url={p.screenshot_url} name={p.name} busy={!!p.run} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13.5px] font-medium">{p.name}</span>
@@ -330,10 +387,26 @@ function Phones({ phones }: { phones: Live['phones'] }) {
                     <span className="mt-0.5 block truncate font-mono text-[10.5px] text-accent-soft">{step ? `${step.action} · ${step.ok ? 'ok' : 'failed'}` : 'Starting…'}</span>
                   )}
                 </span>
-                <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
-                  <span className={cn('size-1.5 rounded-full', status.dot)} />
-                  {status.label}
-                </span>
+                {ended ? (
+                  <motion.span
+                    role="status"
+                    initial={{ opacity: 0, x: 6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.4, ease }}
+                    className={cn(
+                      'flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                      ended === 'confirmed' ? 'border-ok/35 text-ok' : ended === 'failed' ? 'border-fail/35 text-fail' : 'border-warn/35 text-warn',
+                    )}
+                  >
+                    {ended === 'confirmed' && <DrawnCheck className="size-3.5" />}
+                    {ended === 'confirmed' ? 'Posted, proof in' : ended === 'failed' ? 'Didn’t post' : 'Posted, unconfirmed'}
+                  </motion.span>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
+                    <span className={cn('size-1.5 rounded-full', status.dot)} />
+                    {status.label}
+                  </span>
+                )}
               </li>
             )
           })}

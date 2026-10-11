@@ -95,23 +95,52 @@ const sizes = {
 const variants = {
   primary:
     'bg-fg text-ink hover:bg-white hover:shadow-[0_0_0_5px_color-mix(in_oklab,var(--color-accent)_22%,transparent),0_10px_40px_-10px_color-mix(in_oklab,var(--color-accent)_60%,transparent)]',
-  ghost: 'text-fg border border-line-2 hover:border-white/30 hover:bg-white/[0.04]',
+  // Under a mouse the ghost fills from where the pointer came in (Fill, below); its label turns to ink.
+  ghost: 'text-fg border border-line-2 hover:border-white/30 hover:bg-white/[0.04] [@media(pointer:fine)]:hover:border-fg [@media(pointer:fine)]:hover:bg-transparent [@media(pointer:fine)]:hover:text-ink',
+}
+
+/**
+ * Where the pointer crossed into the button, and out of it again: a circle of the label's colour
+ * grows from the entry point to fill the button, and on leaving shrinks back toward the exit, so
+ * the fill follows the hand in and out. Mouse only; keyboard focus gets the plain hover.
+ */
+function useFill() {
+  const ref = useRef<HTMLAnchorElement>(null)
+  const place = (e: PointerEvent<HTMLAnchorElement>) => {
+    if (e.pointerType !== 'mouse' || !ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    ref.current.style.setProperty('--fx', `${e.clientX - r.left}px`)
+    ref.current.style.setProperty('--fy', `${e.clientY - r.top}px`)
+  }
+  return { ref, onPointerEnter: place, onPointerLeave: place }
+}
+
+function Fill() {
+  return (
+    <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden overflow-hidden rounded-[inherit] [@media(pointer:fine)]:block">
+      <span className="absolute left-[var(--fx,50%)] top-[var(--fy,50%)] aspect-square w-[240%] -translate-x-1/2 -translate-y-1/2 scale-0 rounded-full bg-fg transition-transform duration-[650ms] ease-[cubic-bezier(0.33,1,0.68,1)] group-hover:scale-100" />
+    </span>
+  )
 }
 
 export function Button({ href, children, variant = 'primary', size = 'md', arrow, className }: ButtonProps) {
   const onClick = useLinkClick(href)
+  const fill = useFill()
+  const ghost = variant === 'ghost'
   return (
     <Magnetic>
       <a
         href={href}
         onClick={onClick}
+        {...(ghost ? fill : {})}
         className={cn(
-          'group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-[-0.01em] transition-[background-color,box-shadow,border-color,scale] duration-300 active:scale-[0.96] active:duration-100',
+          'group relative isolate inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-[-0.01em] transition-[background-color,box-shadow,border-color,color,scale] duration-300 active:scale-[0.96] active:duration-100',
           sizes[size],
           variants[variant],
           className,
         )}
       >
+        {ghost && <Fill />}
         <RollText>{children}</RollText>
         {arrow && (
           <ArrowRight

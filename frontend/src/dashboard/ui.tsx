@@ -374,6 +374,24 @@ export const develop = (e: SyntheticEvent<HTMLImageElement>) => {
   e.currentTarget.dataset.ready = ''
 }
 
+/** A tick that draws itself: the ring first, then the check. Colour and size from className. */
+export function DrawnCheck({ className, delay = 0 }: { className?: string; delay?: number }) {
+  return (
+    <svg viewBox="0 0 16 16" className={className} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <motion.circle
+        cx="8"
+        cy="8"
+        r="6.6"
+        initial={{ pathLength: 0, rotate: -90 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 0.5, ease, delay }}
+        style={{ transformOrigin: 'center' }}
+      />
+      <motion.path d="M5.3 8.2 7.2 10l3.5-3.9" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.32, ease, delay: delay + 0.32 }} />
+    </svg>
+  )
+}
+
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 /**

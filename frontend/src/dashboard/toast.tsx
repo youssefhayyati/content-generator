@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useRef, useState, type ReactNod
 import { AnimatePresence, motion } from 'framer-motion'
 import { CircleAlert, X } from 'lucide-react'
 import { ease } from '../lib/motion'
+import { DrawnCheck } from './ui'
 
 type Toast = { id: number; tone: 'success' | 'error'; text: ReactNode }
 type Push = (text: ReactNode, tone?: Toast['tone']) => void
@@ -41,7 +42,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               transition={{ duration: 0.4, ease }}
               className="group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden glass-menu rounded-[12px] py-3 pl-4 pr-9 text-[13px]"
             >
-              {t.tone === 'error' ? <CircleAlert className="mt-px size-4 shrink-0 text-fail" strokeWidth={1.75} /> : <DrawnCheck />}
+              {t.tone === 'error' ? <CircleAlert className="mt-px size-4 shrink-0 text-fail" strokeWidth={1.75} /> : <DrawnCheck className="mt-px size-4 shrink-0 text-ok" />}
               <span className="leading-snug text-fg">{t.text}</span>
               <button
                 type="button"
@@ -67,23 +68,5 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         </AnimatePresence>
       </div>
     </ToastContext.Provider>
-  )
-}
-
-/** A tick that draws itself: the ring first, then the check. */
-function DrawnCheck() {
-  return (
-    <svg viewBox="0 0 16 16" className="mt-px size-4 shrink-0 text-ok" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <motion.circle
-        cx="8"
-        cy="8"
-        r="6.6"
-        initial={{ pathLength: 0, rotate: -90 }}
-        animate={{ pathLength: 1 }}
-        transition={{ duration: 0.5, ease }}
-        style={{ transformOrigin: 'center' }}
-      />
-      <motion.path d="M5.3 8.2 7.2 10l3.5-3.9" initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.32, ease, delay: 0.32 }} />
-    </svg>
   )
 }

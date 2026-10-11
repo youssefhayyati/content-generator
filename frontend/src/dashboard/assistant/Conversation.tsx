@@ -144,7 +144,10 @@ function VoiceBar() {
             {voice === 'thinking' && <LoaderCircle className="size-3.5 animate-spin text-accent-soft" />}
           </motion.p>
         </AnimatePresence>
-        <p className="mt-0.5 truncate text-[11.5px] text-dim">{a.conn === 'offline' ? 'Start it with: docker compose --profile assistant up -d' : hint}</p>
+        {/* Offline, the line says so in plain words; whoever runs the server finds how to start it on hover. */}
+        <p className="mt-0.5 truncate text-[11.5px] text-dim" title={a.conn === 'offline' ? 'Start it with: docker compose --profile assistant up -d' : undefined}>
+          {a.conn === 'offline' ? 'Not running on this server yet. The rest of the studio works without it.' : hint}
+        </p>
       </div>
       <span ref={bars} aria-hidden className="hidden h-7 items-center gap-[3px] sm:flex">
         {Array.from({ length: 9 }, (_, i) => (
