@@ -52,7 +52,7 @@ import { AssetModal, fmtSeconds } from '../media/Media'
 import { NEW_POST } from '../nav'
 import { useOverview, useUser, workspaceName } from '../Shell'
 import { tone } from '../storm/StormGuard'
-import { Btn, CountUp, EmptyState, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
+import { Btn, CountUp, develop, EmptyState, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
 
 /**
  * /dashboard: the studio's front page. It opens on the work itself (the newest pictures and
@@ -130,7 +130,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function Img({ src, className, fallback }: { src: string; className?: string; fallback: ReactNode }) {
   const [broken, setBroken] = useState(false)
   useEffect(() => setBroken(false), [src])
-  return broken ? <>{fallback}</> : <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} className={className} />
+  return broken ? <>{fallback}</> : <img src={src} alt="" loading="lazy" onLoad={develop} onError={() => setBroken(true)} className={cn('develop', className)} />
 }
 
 /** The composer, opened with a time already picked. */

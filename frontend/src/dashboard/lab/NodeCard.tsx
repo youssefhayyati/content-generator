@@ -6,6 +6,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { PlatformIcon } from '../../components/ui/PlatformIcon'
 import { CARD_W, HEAD_H, NOTE_W, PORT_HUE, ROW_H, costLine, fits, hueOf, iconOf, portRows } from './look'
+import { develop } from '../ui'
 
 type Wire = { from: string; out: string; type: LabPortType }
 
@@ -390,7 +391,7 @@ function Preview({ node, state, assets }: { node: LabNode; state: LabNodeState |
     parts.push(
       <div key="img" className={cn('grid gap-1', images.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
         {images.slice(0, 4).map((a) => (
-          <img key={a.id} src={a.url} alt={a.name ?? ''} loading="lazy" className={cn('w-full rounded-md bg-black/30', images.length > 1 ? 'aspect-square object-cover' : 'max-h-64 object-contain')} />
+          <img key={a.id} src={a.url} alt={a.name ?? ''} loading="lazy" onLoad={develop} className={cn('develop w-full rounded-md bg-black/30', images.length > 1 ? 'aspect-square object-cover' : 'max-h-64 object-contain')} />
         ))}
       </div>,
     )

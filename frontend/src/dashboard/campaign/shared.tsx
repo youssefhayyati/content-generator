@@ -139,6 +139,7 @@ export function AgentTimeline({ steps, working }: { steps: AgentStepInfo[]; work
             </span>
             <p className="flex items-baseline gap-2 text-[12.5px]">
               <span className="font-medium">{A.label}</span>
+              <StepTime step={s} />
               {s.cost > 0 && <span className="font-mono text-[10px] text-dim">${s.cost.toFixed(3)}</span>}
             </p>
             <p className={cn('mt-0.5 text-[12px] leading-snug', s.status === 'failed' ? 'text-fail' : 'text-dim', s.status === 'running' && 'text-shimmer')}>
@@ -157,6 +158,31 @@ export function AgentTimeline({ steps, working }: { steps: AgentStepInfo[]; work
       )}
     </ol>
   )
+}
+
+/**
+ * How long a turn took, or for the one working now, how long it has been at it, ticking
+ * (00:07). Nothing when the times weren't recorded.
+ */
+function StepTime({ step }: { step: AgentStepInfo }) {
+  const running = step.status === 'running'
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!running) return
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [running])
+  if (!step.started_at) return null
+  const start = new Date(step.started_at).getTime()
+  const end = running ? now : step.finished_at ? new Date(step.finished_at).getTime() : null
+  if (end === null) return null
+  const sec = Math.max(0, Math.round((end - start) / 1000))
+  const text = running
+    ? `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
+    : sec < 60
+      ? `${sec} s`
+      : `${Math.floor(sec / 60)} min ${sec % 60} s`
+  return <span className={cn('font-mono text-[10px] tabular-nums', running ? 'text-accent-soft' : 'text-dim')}>{text}</span>
 }
 
 export function AccountChips({ ids, accounts, className }: { ids: number[]; accounts: Account[]; className?: string }) {

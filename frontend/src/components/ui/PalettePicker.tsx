@@ -12,13 +12,16 @@ import { ease } from '../../lib/motion'
 export type Swatch = { ink: string; card: string; fg: string; accent: string; soft: string }
 
 export const PALETTES: Array<{ id: string; name: string; mood: string; swatch: Swatch }> = [
-  { id: 'indigo', name: 'Indigo', mood: 'Classic AI-tool violet blue', swatch: { ink: '#050505', card: '#101010', fg: '#f5f4f0', accent: '#6366f1', soft: '#a5b4fc' } },
+  { id: 'indigo', name: 'Indigo', mood: 'Classic AI-tool violet blue', swatch: { ink: '#050505', card: '#101010', fg: '#f5f4f0', accent: '#6062f1', soft: '#a5b4fc' } },
   { id: 'acid', name: 'Acid', mood: 'Electric lime on black, loud and editorial', swatch: { ink: '#070707', card: '#121211', fg: '#f2f1ea', accent: '#c6f432', soft: '#e1fb8f' } },
   { id: 'ember', name: 'Ember', mood: 'Warm black, signal orange, cream type', swatch: { ink: '#0b0908', card: '#161210', fg: '#f4ede3', accent: '#ff5b1f', soft: '#ffb38a' } },
   { id: 'cobalt', name: 'Cobalt', mood: 'Deep navy, electric blue, crisp and techy', swatch: { ink: '#04060c', card: '#0d111b', fg: '#eef2fb', accent: '#2f6bff', soft: '#8fb3ff' } },
   { id: 'mint', name: 'Mint', mood: 'Green-black with fresh mint, calm automation', swatch: { ink: '#050807', card: '#0f1513', fg: '#eef5f1', accent: '#2ee6a6', soft: '#94f5d0' } },
   { id: 'coral', name: 'Coral', mood: 'Social, friendly, creator energy', swatch: { ink: '#0a0708', card: '#171113', fg: '#f7eeec', accent: '#ff5f57', soft: '#ffb0a8' } },
   { id: 'gold', name: 'Gold', mood: 'Quiet luxury, premium agency feel', swatch: { ink: '#080706', card: '#15120e', fg: '#f3eee4', accent: '#e3b34c', soft: '#f2d9a0' } },
+  { id: 'bloom', name: 'Bloom', mood: 'Plum black, petal pink, a violet second', swatch: { ink: '#0c080c', card: '#181117', fg: '#f8eef6', accent: '#f6a6f0', soft: '#fbd3f7' } },
+  { id: 'glacier', name: 'Glacier', mood: 'Arctic night with pale ice blue, cool and clear', swatch: { ink: '#03090c', card: '#0b161b', fg: '#ecf6f7', accent: '#8fe0ec', soft: '#c3e8ee' } },
+  { id: 'bone', name: 'Bone', mood: 'Warm charcoal and unbleached cream, print-shop calm', swatch: { ink: '#0e0d0b', card: '#1a1814', fg: '#f0eee9', accent: '#e3d6bd', soft: '#efe7d6' } },
   { id: 'mono', name: 'Mono', mood: 'Pure black and white, gallery minimal', swatch: { ink: '#000000', card: '#0e0e0e', fg: '#f5f5f5', accent: '#f5f5f5', soft: '#d4d4d4' } },
 ]
 

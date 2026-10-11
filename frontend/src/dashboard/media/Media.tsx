@@ -8,7 +8,7 @@ import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Player } from '../sound/Player'
 import { useToast } from '../toast'
-import { Btn, EmptyState, Modal, Segmented, Skeleton, Viewer, viewerMedia } from '../ui'
+import { Btn, develop, EmptyState, Modal, Segmented, Skeleton, Viewer, viewerMedia } from '../ui'
 
 export const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm']
 export const AUDIO_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/webm', 'audio/ogg', 'audio/flac', 'audio/x-flac']
@@ -36,7 +36,7 @@ export function MediaThumb({ asset, className, children }: { asset: Asset; class
   return (
     <span className={cn('relative block aspect-square overflow-hidden rounded-md bg-white/[0.04]', className)}>
       {asset.poster_url ? (
-        <img src={asset.poster_url} alt={asset.name ?? ''} loading="lazy" className="size-full object-cover" />
+        <img src={asset.poster_url} alt={asset.name ?? ''} loading="lazy" onLoad={develop} className="develop size-full object-cover" />
       ) : (
         <span className="grid size-full place-items-center text-dim">
           {asset.kind === 'audio' ? <AudioLines className="size-5" strokeWidth={1.5} /> : <Film className="size-5" strokeWidth={1.5} />}

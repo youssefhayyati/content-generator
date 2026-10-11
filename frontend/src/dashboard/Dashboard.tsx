@@ -117,14 +117,16 @@ function Pages() {
   // The composer remounts per post, and Flows per flow, so switching between them starts clean.
   const key = path === '/dashboard/create' ? path + search : path === '/dashboard/flows' ? path + (new URLSearchParams(search).get('id') ?? '') : path
 
+  // Quick on purpose: the old page steps aside in a tenth of a second and the new one is readable
+  // almost at once, so moving around the studio feels immediate rather than staged.
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={key}
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8, transition: { duration: 0.18 } }}
-        transition={{ duration: 0.45, ease }}
+        exit={{ opacity: 0, y: -4, transition: { duration: 0.1 } }}
+        transition={{ duration: 0.32, ease }}
       >
         <Page />
       </motion.div>

@@ -10,7 +10,9 @@
   --color-fg: #f5f4f0;
   --color-muted: #a1a1aa;
   --color-dim: #6b6b73;
-  --color-accent: #6366f1;
+  /* #6062f1 rather than Tailwind's #6366f1: the same indigo to the eye, and white type set on it
+     clears 4.5:1 (4.65), where #6366f1 fell just short. */
+  --color-accent: #6062f1;
   --color-accent-2: #8b5cf6;
   --color-accent-soft: #a5b4fc;
   --color-bone: #ecebe6;
@@ -168,6 +170,28 @@ html[data-palette='gold'] {
   --color-fg: #f3eee4; --color-muted: #ada593; --color-dim: #766e5e; --color-bone: #ede6d6;
   --color-accent: #e3b34c; --color-accent-2: #f0d58c; --color-accent-soft: #f2d9a0;
   --color-accent-glow: #fbefd2; --color-on-accent: #1a1205; --color-plan: #e9c46f;
+}
+/* A pastel, a pale and a neutral accent. Type set on them is dark, and clears 10:1 on all three. */
+html[data-palette='bloom'] {
+  --color-ink: #0c080c; --color-ink-2: #110c11; --color-card: #181117; --color-card-2: #1e161d;
+  --color-panel: #130d12; --color-panel-2: #181117; --color-panel-3: #1d151c;
+  --color-fg: #f8eef6; --color-muted: #b9a6b5; --color-dim: #7d6a79; --color-bone: #f3e6f0;
+  --color-accent: #f6a6f0; --color-accent-2: #c08bff; --color-accent-soft: #fbd3f7;
+  --color-accent-glow: #fde9fb; --color-on-accent: #1d0a1b; --color-plan: #d9a8ff;
+}
+html[data-palette='glacier'] {
+  --color-ink: #03090c; --color-ink-2: #060e12; --color-card: #0b161b; --color-card-2: #101d23;
+  --color-panel: #081216; --color-panel-2: #0b161b; --color-panel-3: #0f1c22;
+  --color-fg: #ecf6f7; --color-muted: #9db1b5; --color-dim: #63777c; --color-bone: #e4f0f2;
+  --color-accent: #8fe0ec; --color-accent-2: #5aa9e6; --color-accent-soft: #c3e8ee;
+  --color-accent-glow: #e3f7fa; --color-on-accent: #03161a; --color-plan: #7cc4ee;
+}
+html[data-palette='bone'] {
+  --color-ink: #0e0d0b; --color-ink-2: #13120f; --color-card: #1a1814; --color-card-2: #201e19;
+  --color-panel: #151310; --color-panel-2: #1a1814; --color-panel-3: #1f1d18;
+  --color-fg: #f0eee9; --color-muted: #aba597; --color-dim: #75705f; --color-bone: #ebe7dd;
+  --color-accent: #e3d6bd; --color-accent-2: #b5a07e; --color-accent-soft: #efe7d6;
+  --color-accent-glow: #f8f3e8; --color-on-accent: #16120b; --color-plan: #d8c7a3;
 }
 html[data-palette='mono'] {
   --color-ink: #000000; --color-ink-2: #070707; --color-card: #0e0e0e; --color-card-2: #141414;
@@ -700,42 +724,20 @@ html.glass-app .glass-solid :is(.bg-panel-3, .bg-panel-3\/95)[class*='shadow'] {
   }
 }
 
-/* Cards that answer the pointer: a clickable card (a link or button built as a rounded panel)
-   catches a soft light where the pointer is, and its rim brightens nearest to it. Shell tells the
-   hovered card where (--mx, --my). White, not the accent, and only under a mouse. In the layer
-   below the utilities, so a card's own positioning still wins over the `relative` it needs. */
-@layer components {
-  @media (hover: hover) and (pointer: fine) {
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking) {
-      position: relative;
-      isolation: isolate;
-    }
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::before,
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: -1;
-      border-radius: inherit;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.4s var(--ease-quint);
-    }
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::before {
-      background: radial-gradient(480px circle at var(--mx, 50%) var(--my, 50%), rgb(255 255 255 / 0.06), transparent 45%);
-    }
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)::after {
-      z-index: 1;
-      padding: 1px;
-      background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgb(255 255 255 / 0.36), transparent 70%);
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-    }
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking):hover::before,
-    html.glass-app :is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking):hover::after {
-      opacity: 1;
-    }
+/* A picture that develops as it arrives (onLoad={develop} sets data-ready): from a soft, washed-out
+   blur to itself, like a print in the tray. Before it arrives there is nothing to draw anyway. */
+html.glass-app img.develop[data-ready] {
+  animation: develop 0.9s var(--ease-expo) both;
+}
+@keyframes develop {
+  from {
+    filter: blur(14px) saturate(0.45) brightness(1.12);
+    transform: scale(1.03);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.glass-app img.develop[data-ready] {
+    animation: none;
   }
 }
 

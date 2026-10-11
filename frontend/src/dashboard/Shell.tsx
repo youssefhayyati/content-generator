@@ -16,6 +16,7 @@ import {
   ChevronsUpDown,
   Clock,
   CornerDownLeft,
+  Keyboard,
   LogOut,
   Mail,
   Menu as MenuIcon,
@@ -43,6 +44,7 @@ import { covers, NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, VIEWS, type Nav
 import { useToast } from './toast'
 import { Avatar, Kbd, Menu, Platforms, StateBadge } from './ui'
 import { ConfirmHost } from './confirm'
+import { Shortcuts } from './Shortcuts'
 import { Tips } from './Tips'
 
 export { pageLabel }
@@ -82,15 +84,13 @@ function remember(key: string, value: unknown) {
 
 /* ------------------------------------------------------------------ */
 
-/** The cards that answer the pointer: clickable ones, as index.css selects them. */
-const SPOT_CARD = ":is(a, button, [role='button'], .cursor-pointer).rounded-xl.bg-panel:not(.flow-thinking)"
-
 export function Shell({ children }: { children: ReactNode }) {
   const user = useUser()
   const overview = useApi<Overview>('/overview')
   const { path, navigate } = useRouter()
   const [drawer, setDrawer] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [keys, setKeys] = useState(false)
   const [rail, setRail] = useState(() => remembered('flowai.sidebar.rail', false))
 
   useEffect(() => remember('flowai.sidebar.rail', rail), [rail])
@@ -131,7 +131,8 @@ export function Shell({ children }: { children: ReactNode }) {
     return () => window.clearInterval(t)
   }, [setOverview, toast, navigate])
 
-  // ⌘K / Ctrl+K opens the palette; N starts a post and [ folds the sidebar when you're not typing somewhere.
+  // ⌘K / Ctrl+K opens the palette; N starts a post, [ folds the sidebar and ? lists all of these,
+  // when you're not typing somewhere.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -147,6 +148,9 @@ export function Shell({ children }: { children: ReactNode }) {
       } else if (e.key === '[') {
         e.preventDefault()
         setRail((r) => !r)
+      } else if (e.key === '?') {
+        e.preventDefault()
+        setKeys((k) => !k)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -160,21 +164,6 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.add('glass-app')
     return () => document.documentElement.classList.remove('glass-app')
-  }, [])
-
-  // Cards you can click catch the light where the pointer is (index.css, "Cards that answer the
-  // pointer"): the hovered one is told where, in its own coordinates.
-  useEffect(() => {
-    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return
-    const onMove = (e: PointerEvent) => {
-      const el = (e.target as Element | null)?.closest?.<HTMLElement>(SPOT_CARD)
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      el.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`)
-      el.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`)
-    }
-    document.addEventListener('pointermove', onMove, { passive: true })
-    return () => document.removeEventListener('pointermove', onMove)
   }, [])
 
   // A picture whose file is missing shows the browser's broken-image text. Anywhere in the studio
@@ -236,7 +225,8 @@ export function Shell({ children }: { children: ReactNode }) {
           <main className="mx-auto w-full max-w-[1680px] px-4 pb-24 pt-8 md:px-6 md:pt-10">{children}</main>
         </div>
 
-        <CommandPalette open={palette} onClose={() => setPalette(false)} />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} onShortcuts={() => setKeys(true)} />
+        <Shortcuts open={keys} onClose={() => setKeys(false)} />
       </div>
     </OverviewContext.Provider>
   )
@@ -664,7 +654,7 @@ function VerifyBanner({ email }: { email: string }) {
 /** A place to go (`to`), or something to do on the spot (`run`). */
 type Result = { key: string; label: string; hint?: ReactNode; icon: LucideIcon; to?: string; run?: () => void }
 
-function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CommandPalette({ open, onClose, onShortcuts }: { open: boolean; onClose: () => void; onShortcuts: () => void }) {
   const { navigate } = useRouter()
   const lenis = useLenis()
   const [q, setQ] = useState('')
@@ -700,6 +690,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
     { key: 'new', label: 'New post', icon: Plus, to: NEW_POST, hint: <Kbd>N</Kbd> },
     ...NAV.map((n) => ({ key: n.path, label: n.label, icon: n.icon, to: n.path })),
     ...VIEWS.map((v) => ({ key: v.path, label: v.label, icon: v.icon, to: v.path })),
+    { key: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard, run: onShortcuts, hint: <Kbd>?</Kbd> },
   ].filter((r) => !needle || r.label.toLowerCase().includes(needle))
   const found: Result[] = posts.map((p) => ({
     key: `post-${p.id}`,

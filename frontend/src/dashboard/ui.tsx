@@ -5,10 +5,11 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
+  type SyntheticEvent,
   type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { animate, AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
 import { Hourglass, LoaderCircle, X, type LucideIcon } from 'lucide-react'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
@@ -355,8 +356,7 @@ export function EmptyState({
       transition={{ duration: 0.6, ease }}
       className={cn('flex flex-col items-center px-6 py-14 text-center', className)}
     >
-      <span className="relative grid size-12 place-items-center rounded-xl border border-line-2 text-muted">
-        <span aria-hidden className="absolute inset-0 animate-ping rounded-xl border border-accent/20 [animation-duration:2.4s]" />
+      <span className="glass-control grid size-12 place-items-center rounded-xl border border-line-2 text-muted">
         <Icon className="size-5" strokeWidth={1.5} />
       </span>
       <p className="mt-5 text-[15px] font-medium tracking-[-0.01em]">{title}</p>
@@ -366,35 +366,53 @@ export function EmptyState({
   )
 }
 
-/** A number that counts up to its value the first time it's seen. */
+/**
+ * onLoad for a picture with the `develop` class: once it has arrived it develops, from a soft,
+ * washed-out blur to itself, like a print in the tray (index.css). Until then nothing is drawn.
+ */
+export const develop = (e: SyntheticEvent<HTMLImageElement>) => {
+  e.currentTarget.dataset.ready = ''
+}
+
+const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+/**
+ * A number whose digits roll into place, each on its own reel: the first time it's seen it rolls
+ * up from zero, and after that a change rolls only the digits that changed (a live count ticking
+ * over). Figures are one width, so nothing shuffles sideways as they turn.
+ */
 export function CountUp({ value, className }: { value: number; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null)
   const inView = useInView(ref, { once: true })
-  const reduce = useReducedMotion()
-  const from = useRef(0)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el || !inView) return
-    if (reduce) {
-      el.textContent = value.toLocaleString()
-      return
-    }
-    const controls = animate(from.current, value, {
-      duration: 1.1,
-      ease,
-      onUpdate: (v) => {
-        el.textContent = Math.round(v).toLocaleString()
-      },
-    })
-    from.current = value
-    return () => controls.stop()
-  }, [value, inView, reduce])
-
-  // Figures of one width, so the number doesn't shuffle sideways as it counts.
+  const chars = [...(inView ? value : 0).toLocaleString()]
   return (
     <span ref={ref} className={cn('tabular-nums', className)}>
-      0
+      <span className="sr-only">{value.toLocaleString()}</span>
+      {/* Keyed from the right, so a number that grows a digit keeps the others on their reels. */}
+      <span aria-hidden className="inline-flex">
+        {chars.map((c, i) =>
+          /\d/.test(c) ? <Reel key={chars.length - i} digit={Number(c)} /> : <span key={`${chars.length - i}${c}`}>{c}</span>,
+        )}
+      </span>
+    </span>
+  )
+}
+
+function Reel({ digit }: { digit: number }) {
+  const reduce = useReducedMotion()
+  return (
+    <span className="relative overflow-hidden">
+      <span className="invisible">0</span>
+      <motion.span
+        className="absolute inset-x-0 top-0 flex flex-col"
+        initial={false}
+        animate={{ y: `${-digit * 10}%` }}
+        transition={reduce ? { duration: 0 } : { duration: 0.85, ease }}
+      >
+        {DIGITS.map((d) => (
+          <span key={d}>{d}</span>
+        ))}
+      </motion.span>
     </span>
   )
 }
