@@ -8,7 +8,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { fmtDay, fmtTime } from '../data'
 import { useToast } from '../toast'
-import { Btn, FieldError, inputClass, Label, Panel, Skeleton } from '../ui'
+import { Btn, FieldError, inputClass, Label, Panel, Skeleton, DateInput, DateTimeInput } from '../ui'
 import { FORMAT_ICON, Pill } from './shared'
 
 type Proposed = { variant_id: number; item_id: number; account_id: number; at: string }
@@ -144,8 +144,7 @@ export function ScheduleTab({
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <Label>From</Label>
-              <input
-                type="date"
+              <DateInput
                 value={from}
                 onChange={(e) => {
                   setFrom(e.target.value)
@@ -156,8 +155,7 @@ export function ScheduleTab({
             </label>
             <label className="block">
               <Label>To</Label>
-              <input
-                type="date"
+              <DateInput
                 value={to}
                 onChange={(e) => {
                   setTo(e.target.value)
@@ -337,7 +335,7 @@ function Booked({
                 <div className="mt-2 flex flex-wrap items-end gap-2">
                   <label className="block min-w-[200px] flex-1">
                     <Label>Also post at</Label>
-                    <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} className={cn(inputClass, 'mt-2')} />
+                    <DateTimeInput value={at} onChange={(e) => setAt(e.target.value)} className={cn(inputClass, 'mt-2')} />
                   </label>
                   <Btn variant="primary" icon={Check} loading={saving} disabled={!at} onClick={() => addTime(variant.id)}>
                     Book it

@@ -106,6 +106,10 @@ def _wav(data: bytes) -> np.ndarray:
     return audio
 
 
+# Words for a language that its name in languages() doesn't have
+LANGUAGE_WORDS = {"darija": "moroccan", "dialect": "", "language": "", "any": "", "the": ""}
+
+
 class VoiceStudioTTS:
     """Same interface as tts.TTSEngine: synthesize(text, voice) -> 24 kHz float32 audio, and the
     voice calls below (all blocking: called in a thread)."""
@@ -118,6 +122,7 @@ class VoiceStudioTTS:
                                  headers={"Authorization": f"Bearer {api_key}"} if api_key else None)
         self.speed, self.model = speed, model
         self._catalog: list[dict] | None = None
+        self._languages: list[str] | None = None
         self._catalog_lock = threading.Lock()
         self._wanted, self._default_voice = voice, None
         t0 = time.perf_counter()
@@ -163,19 +168,23 @@ class VoiceStudioTTS:
         return {"id": "default", "name": "VoiceStudio default", "description": "A different voice each sentence",
                 "language": "", "archetype": None}
 
-    def _speech(self, text: str, voice: str, seconds: float | None = None) -> np.ndarray:
+    def _speech(self, text: str, voice: str, seconds: float | None = None, language: str = "") -> np.ndarray:
         body = {"model": self.model, "input": text, "voice": voice, "speed": self.speed, "response_format": "pcm"}
+        if language:  # without it OmniVoice guesses from the text: Darija comes out as standard Arabic
+            body["language"] = language
         if seconds:
             body["duration"] = round(seconds, 2)
         r = self.http.post("/v1/audio/speech", json=body, **({"timeout": 300} if seconds else {}))
         _ok(r)
         return np.frombuffer(r.content, dtype="<i2").astype(np.float32) / 32768.0
 
-    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None) -> np.ndarray:
-        """seconds: how long the speech should last (a dub fits its video), else its natural length."""
+    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None,
+                   language: str = "") -> np.ndarray:
+        """seconds: how long the speech should last (a dub fits its video), else its natural length.
+        language: one of languages(), the one the text is in (default: guessed from it)."""
         for attempt in (1, 2):
             try:
-                return self._speech(text, voice or self.default["id"], seconds)
+                return self._speech(text, voice or self.default["id"], seconds, language)
             except httpx.HTTPError as exc:
                 log.warning("VoiceStudio speech failed (attempt %d): %s", attempt, exc)
         return np.zeros(0, dtype=np.float32)  # the words still show on screen
@@ -207,6 +216,31 @@ class VoiceStudioTTS:
         found.sort(key=lambda v: not v["featured"])
         languages = sorted({v["language"] for v in voices if v["language"]}, key=lambda x: (x != "English", x))
         return found[:CATALOG_SHOWN], len(found), languages
+
+    def languages(self) -> list[str]:
+        """The languages the model speaks, in any voice ("moroccan arabic", "french", ...): 600 and more."""
+        with self._catalog_lock:
+            if self._languages is None:
+                engines = _ok(self.http.get("/engines/tts")).json()["backends"]
+                found = next((e for e in engines if e["id"] == self.model), {})
+                self._languages = found.get("supported_language_names") or []
+            return self._languages
+
+    def language(self, wanted: str) -> str:
+        """The language asked for ("Moroccan Darija", "French") as the model names it ("moroccan arabic").
+        Raises ValueError naming the close ones when it isn't one."""
+        names = self.languages()
+        said = wanted.strip().lower()
+        if said in names:
+            return said
+        words = list(dict.fromkeys(w for w in (LANGUAGE_WORDS.get(w, w) for w in re.findall(r"\w+", said)) if w))
+        if f"standard {' '.join(words)}" in names:  # "Arabic" is standard arabic
+            return f"standard {' '.join(words)}"
+        fits = [n for n in names if words and all(w in n.split() for w in words)]
+        if fits:
+            return min(fits, key=len)  # "egyptian" is egyptian arabic, not eastern egyptian bedawi arabic
+        close = [n for n in names if any(w in n.split() for w in words)]
+        raise ValueError(f"the voices don't speak “{wanted}”" + (f"; close ones: {', '.join(close[:20])}" if close else ""))
 
     def _load_catalog(self) -> list[dict]:
         with self._catalog_lock:  # it doesn't change while the server runs: read it once

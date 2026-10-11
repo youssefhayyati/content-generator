@@ -24,13 +24,13 @@ import {
   Workflow,
   type LucideIcon,
 } from 'lucide-react'
-import { PLATFORMS, PlatformIcon } from '../../components/ui/PlatformIcon'
+import { PlatformIcon } from '../../components/ui/PlatformIcon'
 import { Serif } from '../../components/ui/Reveal'
-import type { Asset, Page, Post } from '../../lib/api'
+import type { Account, Asset, Page, Post, StormPressure } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
-import { BarList, HEAT, StatTile } from '../charts'
+import { HEAT } from '../charts'
 import {
   addDays,
   firstName,
@@ -39,7 +39,6 @@ import {
   fmtRelative,
   fmtTime,
   greeting,
-  PLATFORM_ORDER,
   postState,
   sameDay,
   startOfWeek,
@@ -51,12 +50,24 @@ import {
 } from '../data'
 import { AssetModal, fmtSeconds } from '../media/Media'
 import { NEW_POST } from '../nav'
-import { useOverview, useUser } from '../Shell'
+import { useOverview, useUser, workspaceName } from '../Shell'
+import { tone } from '../storm/StormGuard'
 import { Btn, CountUp, EmptyState, PageHeader, Panel, Platforms, Skeleton, Stagger } from '../ui'
 
+/**
+ * /dashboard: the studio's front page. It opens on the work itself (the newest pictures and
+ * video, and a few sentences on where things stand), then what's coming this week, the
+ * accounts the studio speaks for, and what's left on the desk.
+ */
 export default function Overview() {
-  const user = useUser()
   const { data } = useOverview()
+  if (data && data.counts.total > 0) return <Board overview={data} />
+  return <FirstRun overview={data} />
+}
+
+/** Before the first post: the plain greeting, and the three steps to get going. */
+function FirstRun({ overview: data }: { overview: OverviewData | null }) {
+  const user = useUser()
   const { navigate } = useRouter()
 
   return (
@@ -80,9 +91,7 @@ export default function Overview() {
         }
       />
 
-      <div className="mt-10">
-        {!data ? <Loading /> : data.counts.total === 0 ? <GettingStarted overview={data} /> : <Board overview={data} />}
-      </div>
+      <div className="mt-10">{!data ? <Loading /> : <GettingStarted overview={data} />}</div>
     </div>
   )
 }
@@ -160,17 +169,16 @@ function Summary({ overview }: { overview: OverviewData }) {
 /* ------------------------------------------------------------------ */
 
 function Board({ overview }: { overview: OverviewData }) {
-  // One 90-day fetch feeds the trend tiles (last 30 vs the 30 before) and the activity grid.
+  // One 90-day fetch feeds the masthead's numbers (last 30 days against the 30 before) and the activity grid.
   const { data: analytics } = useApi<Analytics>('/analytics', { range: 90 })
   const recent = useApi<Page<Post>>('/posts', { status: 'published', per_page: 4 }).data?.data ?? null
+  const { data: accounts } = useApi<Account[]>('/accounts')
 
   return (
     <div className="space-y-4">
-      <Attention overview={overview} />
+      <Masthead overview={overview} analytics={analytics} accounts={accounts} />
 
-      <Stagger i={0}>
-        <Trends overview={overview} analytics={analytics} />
-      </Stagger>
+      <Attention overview={overview} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <Stagger i={1} className="min-w-0">
@@ -183,25 +191,363 @@ function Board({ overview }: { overview: OverviewData }) {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Stagger i={3} className="min-w-0">
-          <StudioWall />
+          <Brands overview={overview} accounts={accounts} />
         </Stagger>
         <Stagger i={4} className="min-w-0">
           <Activity analytics={analytics} />
         </Stagger>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <Stagger i={5} className="min-w-0">
-          <Drafts overview={overview} />
-        </Stagger>
+      {/* With nothing on the desk the masthead already says so: what went out takes the row. */}
+      <div className={cn('grid grid-cols-1 gap-4', overview.drafts.length > 0 && 'lg:grid-cols-2')}>
+        {overview.drafts.length > 0 && (
+          <Stagger i={5} className="min-w-0">
+            <Drafts overview={overview} />
+          </Stagger>
+        )}
         <Stagger i={6} className="min-w-0">
           <RecentlyPublished posts={recent} />
         </Stagger>
-        <Stagger i={7} className="min-w-0 lg:col-span-2 xl:col-span-1">
-          <WherePanel overview={overview} />
-        </Stagger>
       </div>
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* The masthead: the studio's name, where things stand, the newest work  */
+/* ------------------------------------------------------------------ */
+
+const kicker = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+
+/** The name the studio speaks under: the one its accounts share, else the workspace's. */
+function brandOf(accounts: Account[] | null, fallback: string) {
+  const names = (accounts ?? []).map((a) => a.name?.trim()).filter((n): n is string => !!n)
+  if (!names.length) return fallback
+  const counts = new Map<string, number>()
+  names.forEach((n) => counts.set(n, (counts.get(n) ?? 0) + 1))
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+}
+
+/** Published, planned and created over the last 30 days, and the 30 before. */
+function month(analytics: Analytics | null) {
+  if (!analytics) return null
+  const days = analytics.days
+  const n = days.length
+  const sum = (from: number, to: number, k: 'created' | 'scheduled' | 'published') => days.slice(Math.max(0, from), to).reduce((s, d) => s + d[k], 0)
+  return {
+    published: sum(n - 30, n, 'published'),
+    publishedBefore: sum(n - 60, n - 30, 'published'),
+    planned: sum(n - 30, n, 'scheduled'),
+    created: sum(n - 30, n, 'created'),
+    active: days.filter((d) => d.published > 0).length,
+  }
+}
+
+const Em = ({ children }: { children: ReactNode }) => <span className="text-fg">{children}</span>
+
+/** A few sentences on where the studio stands, the way a colleague would say it. */
+function Story({ overview, analytics }: { overview: OverviewData; analytics: Analytics | null }) {
+  const now = useNow()
+  const m = month(analytics)
+  const next = overview.upcoming.find((p) => p.scheduled_at)
+  const waiting = overview.automation?.waiting_on_you ?? 0
+  const flows = overview.automation?.flows_on ?? 0
+  const lines: ReactNode[] = []
+
+  if (m) {
+    const diff = m.published - m.publishedBefore
+    lines.push(
+      m.published > 0 ? (
+        <>
+          <Em>{plural(m.published, 'post')} went out</Em> in the last 30 days
+          {diff > 0 ? `, ${diff} more than the month before` : diff < 0 ? `, ${-diff} fewer than the month before` : ''}.
+        </>
+      ) : (
+        'Nothing has gone out in the last 30 days.'
+      ),
+    )
+  }
+  if (next?.scheduled_at) {
+    lines.push(
+      <>
+        Next up is <Em>“{titleOf(next)}”</Em>, {countdown(next.scheduled_at, now)}.
+      </>,
+    )
+  } else if (overview.next_slot) {
+    lines.push(
+      <>
+        Nothing is scheduled; your next open posting time is <Em>{fmtDay(overview.next_slot)} at {fmtTime(overview.next_slot)}</Em>.
+      </>,
+    )
+  } else {
+    lines.push('Nothing is scheduled yet.')
+  }
+  if (waiting > 0) lines.push(<><Em>{waiting === 1 ? 'One post is' : `${waiting} posts are`} waiting for your yes</Em> in the Inbox.</>)
+  else if (overview.counts.draft > 0) lines.push(`${plural(overview.counts.draft, 'draft')} ${overview.counts.draft === 1 ? 'is' : 'are'} on the desk.`)
+  if (flows > 0) lines.push(`${flows === 1 ? 'One flow is' : `${flows} flows are`} working for you.`)
+
+  return (
+    <motion.p
+      className="mt-5 max-w-[52ch] text-[15.5px] leading-[1.55] text-muted"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.7, delay: 0.3 }}
+    >
+      {lines.map((l, i) => (
+        <span key={i}>
+          {i > 0 && ' '}
+          {l}
+        </span>
+      ))}
+    </motion.p>
+  )
+}
+
+function Masthead({ overview, analytics, accounts }: { overview: OverviewData; analytics: Analytics | null; accounts: Account[] | null }) {
+  const user = useUser()
+  const { navigate } = useRouter()
+  const { data: assets } = useApi<Page<Asset>>('/assets')
+  const [open, setOpen] = useState<Asset | null>(null)
+  const visual = (assets?.data ?? []).filter((a) => a.kind !== 'audio' && a.poster_url)
+  const shown = visual.slice(0, 5)
+  const rest = (assets?.meta.total ?? 0) - shown.length
+  const m = month(analytics)
+  const backdrop = shown[0]?.poster_url ?? null
+
+  const figures: Array<{ label: string; value: number | null; note?: ReactNode }> = [
+    {
+      label: 'Published · 30 days',
+      value: m?.published ?? null,
+      note: m && m.published !== m.publishedBefore && (
+        <span className={m.published > m.publishedBefore ? 'text-ok' : 'text-dim'}>
+          {m.published > m.publishedBefore ? '+' : '−'}
+          {Math.abs(m.published - m.publishedBefore)}
+        </span>
+      ),
+    },
+    { label: 'Planned · 30 days', value: m?.planned ?? null },
+    { label: 'Drafts on the desk', value: overview.counts.draft },
+    { label: 'Days with a post · 13 weeks', value: m?.active ?? null },
+  ]
+
+  return (
+    <section className="relative isolate overflow-hidden rounded-2xl border border-line bg-panel">
+      {/* The newest picture, out of focus, lends the masthead its colour; the palette fills in without one. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        {backdrop && <Img src={backdrop} fallback={null} className="absolute inset-0 size-full scale-125 object-cover opacity-40 blur-[70px] saturate-150" />}
+        <div className="absolute inset-0 bg-[radial-gradient(70%_90%_at_100%_0%,color-mix(in_oklab,var(--color-accent)_22%,transparent),transparent_70%)]" />
+        <div className="absolute inset-0 bg-gradient-to-r from-ink/80 via-ink/45 to-transparent" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-8 p-6 md:p-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-10">
+        <div className="flex min-w-0 flex-col">
+          <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted">
+            {kicker.format(new Date())} <span className="mx-1.5 text-dim">/</span> {brandOf(accounts, workspaceName(user))}
+          </p>
+          <h1 className="mt-4 overflow-hidden pb-[0.1em] text-[clamp(2.1rem,3.8vw,3.25rem)] font-medium leading-[1] tracking-[-0.045em]">
+            <motion.span className="block" initial={{ y: '105%' }} animate={{ y: '0%' }} transition={{ duration: 0.9, ease, delay: 0.05 }}>
+              {greeting()}, <Serif>{firstName(user.name)}.</Serif>
+            </motion.span>
+          </h1>
+          <Story overview={overview} analytics={analytics} />
+          <div className="mt-7 flex flex-wrap gap-2">
+            <Btn variant="primary" icon={Plus} onClick={() => navigate(NEW_POST)}>
+              New post
+            </Btn>
+            <Btn icon={CalendarDays} onClick={() => navigate('/dashboard/calendar')}>
+              Calendar
+            </Btn>
+          </div>
+        </div>
+
+        <Collage shown={shown} rest={rest} loading={!assets} onOpen={setOpen} />
+      </div>
+
+      <dl className="grid grid-cols-2 border-t border-line sm:grid-cols-4">
+        {figures.map((f, i) => (
+          <div key={f.label} className={cn('px-6 py-4 md:px-8', i > 0 && 'sm:border-l sm:border-line', i % 2 === 1 && 'border-l border-line', i > 1 && 'border-t border-line sm:border-t-0')}>
+            <dt className="truncate text-[11.5px] text-dim">{f.label}</dt>
+            <dd className="mt-1 flex items-baseline gap-2">
+              {f.value === null ? <Skeleton className="h-6 w-10" /> : <CountUp value={f.value} className="text-[24px] font-semibold leading-none tracking-[-0.03em]" />}
+              {f.note && <span className="text-[11.5px] font-medium tabular-nums">{f.note}</span>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <AssetModal asset={open} onClose={() => setOpen(null)} />
+    </section>
+  )
+}
+
+/** The newest five pictures and videos: one large, four beside it, the last one opening the rest. */
+function Collage({ shown, rest, loading, onOpen }: { shown: Asset[]; rest: number; loading: boolean; onOpen: (a: Asset) => void }) {
+  const { navigate } = useRouter()
+  if (loading) {
+    return (
+      <div className="grid h-[260px] grid-cols-4 grid-rows-2 gap-2 md:h-[300px]">
+        <Skeleton className="col-span-2 row-span-2 rounded-lg" />
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="rounded-lg" />
+        ))}
+      </div>
+    )
+  }
+  if (!shown.length) {
+    return (
+      <button
+        type="button"
+        onClick={() => navigate('/dashboard/studio')}
+        className="group grid h-[260px] place-items-center rounded-xl border border-dashed border-line-2 text-center transition-colors hover:border-white/30 md:h-[300px]"
+      >
+        <span>
+          <Wand2 className="mx-auto size-5 text-muted" strokeWidth={1.5} />
+          <span className="mt-3 block text-[14px] font-medium">Your work shows here</span>
+          <span className="mt-1 block text-[12.5px] text-dim">Make a picture or a reel in the Creative Lab.</span>
+        </span>
+      </button>
+    )
+  }
+  return (
+    <div className="grid h-[260px] grid-cols-4 grid-rows-2 gap-2 md:h-[300px]">
+      {shown.map((a, i) => (
+        <div key={a.id} className={cn('relative min-h-0', i === 0 && 'col-span-2 row-span-2', shown.length < 3 && i > 0 && 'col-span-2')}>
+          <WallTile asset={a} i={i} onOpen={() => onOpen(a)} className="size-full" />
+          {i === shown.length - 1 && rest > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/library?view=media')}
+              className="absolute inset-0 grid place-items-center rounded-lg bg-black/55 text-white backdrop-blur-[2px] transition-colors hover:bg-black/45"
+            >
+              <span className="text-center">
+                <span className="block text-[17px] font-semibold tracking-[-0.02em]">+{rest}</span>
+                <span className="block text-[11px] text-white/75">All media</span>
+              </span>
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* The accounts the studio speaks for                                  */
+/* ------------------------------------------------------------------ */
+
+function Brands({ overview, accounts }: { overview: OverviewData; accounts: Account[] | null }) {
+  const { navigate } = useRouter()
+  const { data: weather } = useApi<StormPressure[]>('/storm-guard')
+  const posts = useApi<Page<Post>>('/posts', { per_page: 60 }).data?.data ?? null
+  const list = (accounts ?? []).slice(0, 4)
+
+  return (
+    <section className="h-full">
+      <header className="flex items-end justify-between gap-4 px-1 pb-3">
+        <div>
+          <h2 className="text-[13.5px] font-medium">Your accounts</h2>
+          <p className="mt-0.5 text-[11.5px] text-dim">Who the studio speaks for, what each said last, and the mood in its comments</p>
+        </div>
+        <LinkButton onClick={() => navigate('/dashboard/accounts')}>{(accounts?.length ?? 0) > 4 ? `All ${accounts!.length}` : 'Accounts'}</LinkButton>
+      </header>
+      {!accounts ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {[0, 1].map((i) => (
+            <Skeleton key={i} className="h-[196px] rounded-xl" />
+          ))}
+        </div>
+      ) : list.length === 0 ? (
+        <div className="rounded-xl border border-line bg-panel">
+          <EmptyState icon={Sparkles} title="No accounts yet" body="Add the accounts you post for, with their voice and topics, and the studio writes like them." className="py-10" action={<Btn variant="primary" onClick={() => navigate('/dashboard/accounts')}>Add an account</Btn>} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {list.map((a, i) => (
+            <BrandCard
+              key={a.id}
+              account={a}
+              i={i}
+              posts={posts?.filter((p) => p.account?.id === a.id) ?? null}
+              next={overview.upcoming.find((p) => p.account?.id === a.id && p.scheduled_at) ?? null}
+              weather={weather?.find((w) => w.account_id === a.id) ?? null}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function BrandCard({ account: a, i, posts, next, weather }: { account: Account; i: number; posts: Post[] | null; next: Post | null; weather: StormPressure | null }) {
+  const { navigate } = useRouter()
+  const t = weather ? tone(weather) : null
+  // Pictures first: they say the most about an account at a glance.
+  const shown = posts ? [...posts].sort((x, y) => Number(!!coverOf(y)) - Number(!!coverOf(x))).slice(0, 3) : null
+  const topics = a.profile?.topics?.trim()
+
+  return (
+    <motion.button
+      type="button"
+      onClick={() => navigate('/dashboard/accounts')}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease, delay: 0.2 + i * 0.05 }}
+      className="group flex min-w-0 flex-col rounded-xl border border-line bg-panel p-4 text-left transition-colors hover:border-line-2"
+    >
+      <span className="flex w-full items-center gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-line-2 bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-fg">
+          <PlatformIcon id={a.platform} className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13.5px] font-medium">{a.name?.trim() || `@${a.handle}`}</span>
+          <span className="block truncate text-[11.5px] text-dim">
+            @{a.handle} · {plural(a.posts_count ?? 0, 'post')}
+          </span>
+        </span>
+        {t && (
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium" style={{ color: t.color, borderColor: `color-mix(in oklab, ${t.color} 35%, transparent)` }}>
+            <span className="size-1.5 rounded-full" style={{ background: t.color }} />
+            {t.name}
+          </span>
+        )}
+      </span>
+
+      <span className="mt-3.5 grid grid-cols-3 gap-1.5">
+        {!shown
+          ? [0, 1, 2].map((k) => <Skeleton key={k} className="aspect-square rounded-md" />)
+          : shown.length === 0
+            ? <span className="col-span-3 grid h-[72px] place-items-center rounded-md border border-dashed border-line text-[11.5px] text-dim">Nothing posted yet</span>
+            : shown.map((p) => <BrandThumb key={p.id} post={p} />)}
+      </span>
+
+      <span className="mt-3 block truncate text-[11.5px] text-dim">
+        {next?.scheduled_at ? (
+          <>
+            Next <span className="text-muted">{fmtDay(next.scheduled_at)} · {fmtTime(next.scheduled_at)}</span>
+          </>
+        ) : topics ? (
+          <>Writes about {topics}</>
+        ) : a.automation && a.device ? (
+          <>Posted by {a.device.name}</>
+        ) : (
+          'Nothing scheduled'
+        )}
+      </span>
+    </motion.button>
+  )
+}
+
+/** A post at a glance, square: its picture, or its first words set in the serif. */
+function BrandThumb({ post }: { post: Post }) {
+  const cover = coverOf(post)
+  const words = (
+    <span className="flex size-full items-end overflow-hidden rounded-md border border-line bg-white/[0.03] p-2">
+      <span className="line-clamp-3 font-serif text-[13px] italic leading-[1.15] text-fg/85">{titleOf(post)}</span>
+    </span>
+  )
+  return (
+    <span className="block aspect-square overflow-hidden rounded-md">
+      {cover ? <Img src={cover} fallback={words} className="size-full object-cover transition-transform duration-700 ease-expo group-hover:scale-[1.03]" /> : words}
+    </span>
   )
 }
 
@@ -322,47 +668,6 @@ function Attention({ overview }: { overview: OverviewData }) {
         })}
       </div>
     </Stagger>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* Trends: the last 30 days against the 30 before                       */
-/* ------------------------------------------------------------------ */
-
-type Measure = 'created' | 'scheduled' | 'published'
-
-function Trends({ overview, analytics }: { overview: OverviewData; analytics: Analytics | null }) {
-  if (!analytics) {
-    return (
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="bg-panel p-5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="mt-4 h-8 w-14" />
-            <Skeleton className="mt-4 h-3 w-32" />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  const days = analytics.days
-  const n = days.length
-  const sum = (from: number, to: number, k: Measure) => days.slice(Math.max(0, from), to).reduce((s, d) => s + d[k], 0)
-  // Twelve weekly totals for the sparkline, oldest first; the last point is this week.
-  const weekly = (k: Measure) => Array.from({ length: 12 }, (_, w) => sum(n - 84 + w * 7, n - 84 + (w + 1) * 7, k))
-  const tile = (label: string, k: Measure) => {
-    const now = sum(n - 30, n, k)
-    return <StatTile label={label} value={<CountUp value={now} />} delta={now - sum(n - 60, n - 30, k)} trend={weekly(k)} period="previous 30 days" />
-  }
-
-  return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-4">
-      {tile('Published, last 30 days', 'published')}
-      {tile('Planned, last 30 days', 'scheduled')}
-      {tile('Created, last 30 days', 'created')}
-      <StatTile label="Drafts waiting" value={<CountUp value={overview.counts.draft} />} />
-    </div>
   )
 }
 
@@ -643,78 +948,10 @@ function WeekCard({ post }: { post: Post }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* From the studio: the newest pictures and video                       */
+/* A picture or a video from the studio, playing under the pointer      */
 /* ------------------------------------------------------------------ */
 
-function StudioWall() {
-  const { navigate } = useRouter()
-  const { data } = useApi<Page<Asset>>('/assets')
-  const [open, setOpen] = useState<Asset | null>(null)
-  const visual = (data?.data ?? []).filter((a) => a.kind !== 'audio')
-  const shown = visual.slice(0, 8)
-  const rest = (data?.meta.total ?? 0) - shown.length
-
-  return (
-    <Panel
-      className="h-full"
-      title="From the studio"
-      sub="Your newest images and video"
-      actions={
-        <>
-          <LinkButton onClick={() => navigate('/dashboard/studio')}>Creative Lab</LinkButton>
-          <LinkButton onClick={() => navigate('/dashboard/library?view=media')}>All media</LinkButton>
-        </>
-      }
-    >
-      {!data ? (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          <Skeleton className="col-span-2 row-span-2 aspect-square" />
-          {Array.from({ length: 7 }, (_, i) => (
-            <Skeleton key={i} className="aspect-square" />
-          ))}
-        </div>
-      ) : shown.length === 0 ? (
-        <EmptyState
-          icon={Wand2}
-          title="No media yet"
-          body="Generate images and video in the Creative Lab, or upload your own. They’ll show up here."
-          action={
-            <Btn variant="primary" icon={Wand2} onClick={() => navigate('/dashboard/studio')}>
-              Open the Creative Lab
-            </Btn>
-          }
-          className="py-10"
-        />
-      ) : (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          {shown.map((a, i) => (
-            <WallTile key={a.id} asset={a} big={i === 0} i={i} onOpen={() => setOpen(a)} />
-          ))}
-          <button
-            type="button"
-            onClick={() => navigate(rest > 0 ? '/dashboard/library?view=media' : '/dashboard/studio')}
-            className="group flex aspect-square flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-line-2 text-muted transition-colors hover:border-white/30 hover:text-fg"
-          >
-            {rest > 0 ? (
-              <>
-                <span className="text-[18px] font-semibold tracking-[-0.02em] text-fg">+{rest}</span>
-                <span className="text-[11px]">View all</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="size-4" strokeWidth={1.75} />
-                <span className="text-[11px]">Generate</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
-      <AssetModal asset={open} onClose={() => setOpen(null)} />
-    </Panel>
-  )
-}
-
-function WallTile({ asset, big, i, onOpen }: { asset: Asset; big: boolean; i: number; onOpen: () => void }) {
+function WallTile({ asset, i, onOpen, className }: { asset: Asset; i: number; onOpen: () => void; className?: string }) {
   const [hover, setHover] = useState(false)
   const label = asset.name ?? (asset.kind === 'video' ? 'Video' : 'Image')
   return (
@@ -727,7 +964,7 @@ function WallTile({ asset, big, i, onOpen }: { asset: Asset; big: boolean; i: nu
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.5, ease, delay: 0.25 + i * 0.04 }}
-      className={cn('group relative aspect-square overflow-hidden rounded-lg bg-white/[0.04]', big && 'col-span-2 row-span-2')}
+      className={cn('group relative min-h-0 overflow-hidden rounded-lg bg-white/[0.04]', className)}
     >
       {asset.poster_url ? (
         <Img
@@ -875,29 +1112,6 @@ function Activity({ analytics }: { analytics: Analytics | null }) {
   )
 }
 
-function WherePanel({ overview }: { overview: OverviewData }) {
-  const rows = PLATFORM_ORDER.filter((id) => overview.platforms[id])
-    .map((id) => ({
-      key: id,
-      name: PLATFORMS[id].name,
-      label: (
-        <>
-          <PlatformIcon id={id} className="size-3.5 shrink-0 text-fg" />
-          <span className="truncate">{PLATFORMS[id].name}</span>
-        </>
-      ),
-      value: overview.platforms[id] ?? 0,
-    }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5)
-
-  return (
-    <Panel className="h-full" title="Where you post" sub="Posts per platform, all time">
-      {rows.length ? <BarList caption="Posts per platform" rows={rows} /> : <p className="py-6 text-center text-[13px] text-dim">No posts yet.</p>}
-    </Panel>
-  )
-}
-
 /* ------------------------------------------------------------------ */
 /* Drafts and what just went out                                        */
 /* ------------------------------------------------------------------ */
@@ -1012,7 +1226,7 @@ function GettingStarted({ overview }: { overview: OverviewData }) {
       icon: PenLine,
       title: 'Write your first post',
       body: 'One idea, shaped for every platform you pick.',
-      action: 'Open Creative Lab',
+      action: 'Open the composer',
       to: NEW_POST,
       done: overview.counts.total > 0,
     },

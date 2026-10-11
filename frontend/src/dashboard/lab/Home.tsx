@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type Ref } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
 import { motion } from 'framer-motion'
 import { useLenis } from 'lenis/react'
 import { ArrowLeft, ArrowRight, ArrowUpRight, FolderKanban, Megaphone, MessageCircleQuestion, Plus, Sparkles, SquareDashed, Trash2, X } from 'lucide-react'
@@ -8,12 +8,14 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useQueryParam, useRouter } from '../../lib/router'
 import { Conversation } from '../assistant/Conversation'
+import { assistantUrl } from '../assistant/link'
 import { useAssistant } from '../assistant/store'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
 import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger } from '../ui'
 import { TemplateBrowser, TemplateSheet, TemplateStrip } from './Gallery'
+import { confirm } from '../confirm'
 
 const studio = (project: number) => `/dashboard/studio?project=${project}`
 
@@ -23,7 +25,7 @@ const studio = (project: number) => `/dashboard/studio?project=${project}`
  * them from the start, for whoever would rather say what they want and let it make the project and
  * build the nodes.
  */
-export function LabHome() {
+export function LabHome({ actions }: { actions?: ReactNode }) {
   const { navigate } = useRouter()
   const toast = useToast()
   const a = useAssistant()
@@ -70,6 +72,7 @@ export function LabHome() {
           </>
         }
         sub="Every project is a canvas of nodes: the brief, your logo and photos, the models that write, draw, film, voice and score, and where it’s posted. Answer a few questions to set the campaign, or tell the assistant what you want."
+        actions={actions}
       />
 
       <div className="mt-10 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -103,6 +106,7 @@ export function LabHome() {
             <Label className="mb-3">Projects</Label>
             <LabProjects />
           </Stagger>
+          <MadeAsDrafts />
         </div>
         <Stagger i={1} className="xl:sticky xl:top-6">
           <AssistantPanel ref={panel} />
@@ -218,6 +222,63 @@ export function useLeftLab() {
     [],
   )
 }
+
+/**
+ * What the assistant made as drafts (the old-school way), beside the projects: each conversation with its
+ * posts and where they stand, a click from its drafts and their review.
+ */
+function MadeAsDrafts() {
+  const a = useAssistant()
+  const { navigate } = useRouter()
+  useEffect(() => {
+    if (a.conn === 'online') a.refreshConversations()
+  }, [a.conn])
+  const list = a.conversations.filter((c) => c.drafts > 0 && c.mode !== 'canvas')
+  if (!list.length) return null
+  const open = (id: string, draft?: number) => {
+    a.openConversation(id, draft)
+    navigate('/dashboard/assistant')
+  }
+  return (
+    <Stagger i={1}>
+      <Label className="mb-3">Made as drafts</Label>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+        {list.map((c) => (
+          <div key={c.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-panel p-4 transition-colors hover:border-line-2">
+            <button type="button" onClick={() => open(c.id)} className="group flex items-start justify-between gap-3 text-left">
+              <span className="truncate text-[14px] font-medium">{c.title}</span>
+              <ArrowUpRight className="size-4 shrink-0 text-dim transition-transform duration-300 group-hover:rotate-45 group-hover:text-fg" strokeWidth={1.75} />
+            </button>
+            {!!c.posts?.length && (
+              // Every draft, a click from it on screen; the row scrolls sideways when there are many
+              <div className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
+                {c.posts.map((p) => (
+                  <button
+                    key={p.draft}
+                    type="button"
+                    onClick={() => open(c.id, p.draft)}
+                    title={`${p.what}${p.title ? ` · ${p.title}` : ''} · ${p.status}`}
+                    className="relative h-14 w-11 shrink-0 overflow-hidden rounded-md bg-black/40 outline-none ring-accent/60 transition-opacity hover:opacity-80 focus-visible:ring-2"
+                  >
+                    {p.thumb && (p.thumb.kind === 'video' ? <video src={assistantUrl(p.thumb.url)} muted playsInline preload="metadata" className="size-full object-cover" /> : <img src={assistantUrl(p.thumb.url)} alt="" className="size-full object-cover" />)}
+                    {LIVE.has(p.status) && <span className="absolute bottom-1 right-1 size-1.5 rounded-full bg-ok" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <span className="mt-3 font-mono text-[10.5px] text-dim">
+              {c.drafts} post{c.drafts === 1 ? '' : 's'}
+              {c.scheduled ? ` · ${c.scheduled} scheduled` : ''} · {fmtRelative(c.updated)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Stagger>
+  )
+}
+
+/** A draft's post that is booked or out (conversations.py, Conversation._posts). */
+const LIVE = new Set(['scheduled', 'publishing', 'submitted', 'published'])
 
 /** A campaign you have, on a new canvas with its brief and photos. */
 function PickCampaign({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -340,7 +401,7 @@ export function LabProjects() {
             <button
               type="button"
               onClick={async () => {
-                if (!window.confirm(`Delete “${p.name}”? What it made stays in the gallery.`)) return
+                if (!(await confirm({ title: `Delete “${p.name}”?`, body: 'What it made stays in the gallery.', action: 'Delete', danger: true }))) return
                 await api(`/projects/${p.id}`, { method: 'DELETE' }).catch(() => toast('It couldn’t be deleted.'))
                 invalidate()
               }}

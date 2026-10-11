@@ -16,17 +16,23 @@ those, nothing older.
    "Maybe later", "Cancel" or the X.
 3. Tap the round blue "+" button at the bottom right. If it opens a small menu (Go Live, Spaces, Photos,
    Post), tap "Post" (the pen icon).
-4. In the "What's happening?" box, type the text exactly as given below, the way it says (a long one in
-   pieces, one type action each). Never press enter. Ignore any suggestion list that pops up while typing; do not
-   add, fix or translate anything.
+
+Never press back while composing: in X, back closes the post and asks "Save post?" (Save / Delete). If that
+dialog shows anyway, tap "Cancel" to stay in the post; never "Save" (it leaves the post unsent as a draft).
+
+4. Add the media first, before any text (once the text ends in a #hashtag or @name, X's suggestion list
+   covers the bar with the gallery icon). If {{count}} is 0, skip to step 5. Otherwise tap the picture /
+   gallery icon in the bar above the keyboard (not the camera). If a row of recent photos appears above the
+   keyboard, open the full gallery instead with the gallery icon. Tap the first {{count}} items in order,
+   left to right, top row first, so they are numbered 1 to {{count}}, then tap "Add" or "Done". Change
+   nothing in the photo editor.
+5. Tap the "What's happening?" box and type the text exactly as given below, the way it says (a long one in
+   pieces, one type action each). Never press enter. Ignore any suggestion list that pops up while typing
+   (don't tap it, don't press back to close it); do not add, fix or translate anything.
 
 Text:
 {{caption}}
 
-5. If {{count}} is 0, skip to step 6. Otherwise add the media: tap the picture / gallery icon in the bar above
-   the keyboard (not the camera). If a row of recent photos appears above the keyboard, open the full gallery
-   instead with the gallery icon. Tap the first {{count}} items in order, left to right, top row first, so they
-   are numbered 1 to {{count}}, then tap "Add" or "Done". Change nothing in the photo editor.
 6. Check the compose box: the text must be exactly as given, and {{media}} attached. If words are missing or
    doubled, fix it before going on.
 7. Tap "Post" (top right). If a pop-up appears (e.g. about who can reply, or a premium offer), close it in the

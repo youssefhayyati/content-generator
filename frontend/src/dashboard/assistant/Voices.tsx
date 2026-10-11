@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Check, LoaderCircle, Mic, Play, Search, Square, Upload, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
-import { Btn, inputClass, Skeleton } from '../ui'
+import { Btn, inputClass, Skeleton, Select } from '../ui'
 import { useAssistant, useVoiceState, type Voice } from './store'
 
 const USE: Record<string, string> = {
@@ -128,14 +128,14 @@ export function VoicePicker({ open, onClose }: { open: boolean; onClose: () => v
                         />
                       </label>
                       <div className="w-[8.75rem] shrink-0">
-                        <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" className={cn(inputClass, 'h-8 px-2 text-[12px]')}>
+                        <Select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" fieldClassName={cn(inputClass, 'h-8 px-2 text-[12px]')}>
                           <option value="">Any language</option>
                           {list.languages.map((l) => (
                             <option key={l} value={l}>
                               {l}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
                     </div>
                     <div className={cn('space-y-1.5 transition-opacity', searching && 'opacity-60')}>{list.catalog.map((v, i) => row(v, i, true))}</div>

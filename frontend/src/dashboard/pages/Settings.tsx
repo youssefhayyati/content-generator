@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { Check, ChevronDown, Clapperboard, Image, KeyRound, LoaderCircle, Trash2, Type } from 'lucide-react'
+import { Check, Clapperboard, Image, KeyRound, LoaderCircle, Trash2, Type } from 'lucide-react'
 import { siGithub, siGoogle } from 'simple-icons'
 import { PalettePicker } from '../../components/ui/PalettePicker'
 import { PLATFORMS, PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
@@ -11,10 +11,11 @@ import { cn } from '../../lib/cn'
 import { useCursorChoice } from '../../lib/cursor'
 import { useRouter } from '../../lib/router'
 import { useSession } from '../../lib/session'
+import { useWash, WASH_DEFAULT } from '../../lib/wash'
 import { PLATFORM_ORDER, useInvalidate } from '../data'
 import { useUser } from '../Shell'
 import { useToast } from '../toast'
-import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Stagger, Toggle } from '../ui'
+import { Btn, FieldError, inputClass, Label, Modal, PageHeader, Stagger, Toggle, Select } from '../ui'
 
 const FORMATS: Array<{ id: PostFormat; label: string; icon: typeof Type }> = [
   { id: 'text', label: 'Text', icon: Type },
@@ -163,16 +164,13 @@ function Profile() {
         </p>
         <div className="mt-4">
           <FieldRow label="Timezone" error={errors.timezone}>
-            <span className="relative block">
-              <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className={cn(inputClass, 'appearance-none pr-9')}>
-                {zones.map((z) => (
-                  <option key={z} value={z} className="bg-panel-3">
-                    {z.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
-            </span>
+            <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} aria-label="Timezone">
+              {zones.map((z) => (
+                <option key={z} value={z}>
+                  {z.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </Select>
           </FieldRow>
           {timezone !== browserTimezone() && (
             <button type="button" onClick={() => setTimezone(browserTimezone())} className="mt-1.5 text-[11.5px] text-accent-soft hover:underline">
@@ -278,10 +276,26 @@ function Defaults() {
 
 function Appearance() {
   const [cursor, setCursor] = useCursorChoice()
+  const [wash, setWash] = useWash()
   return (
-    <Section title="Appearance" body="The palette and the cursor, for the studio and the site. Both change right away and are remembered on this device.">
+    <Section title="Appearance" body="The palette, the colour at the edges and the cursor. They change right away and are remembered on this device.">
       <PalettePicker />
-      <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
+      <div className="mt-4 rounded-lg border border-line px-3 py-2.5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[13px] font-medium">Colour at the edges</p>
+            <p className="text-[11.5px] text-dim">How strongly the palette glows around the edges of the studio, behind the glass. At 0% the background is plain.</p>
+          </div>
+          <span className="shrink-0 font-mono text-[12px] tabular-nums text-muted">{wash}%</span>
+        </div>
+        <div className="mt-2.5 flex items-center gap-3">
+          <input type="range" min={0} max={100} step={5} value={wash} onChange={(e) => setWash(Number(e.target.value))} aria-label="Colour at the edges" className="w-full accent-[var(--color-accent)]" />
+          <Btn size="sm" variant="subtle" disabled={wash === WASH_DEFAULT} onClick={() => setWash(null)}>
+            Reset
+          </Btn>
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
         <div>
           <p className="text-[13px] font-medium">Custom cursor</p>
           <p className="text-[11.5px] text-dim">A crisper pointer in the palette's colour, here and on the site. Turn it off to use your system cursor.</p>

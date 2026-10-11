@@ -36,10 +36,8 @@ large-v3, transcripts), the pod's other URLs and keys (`COMFYUI_*`, `MUSIC_*`, `
 docker compose mounts it into the API as `backend/.env`. The Models page (`/dashboard/models`) shows each
 connector's settings, which are filled in, and whether the assistant has picked them up.
 
-The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models
-(about 6 GB), and the dashboard installs its packages. The assistant's speech recognition uses an
-NVIDIA GPU; without one, `docker compose --profile assistant-cpu up -d --scale assistant=0` runs it on
-the CPU. The GPU models run on a RunPod pod, deployed from `runpod/` in one command (`runpod/README.md`).
+The first `up` takes a while: it builds the assistant (PyTorch) and downloads its speech models,
+and the dashboard installs its packages. The assistant runs on the CPU. The GPU models run on a RunPod pod, deployed from `runpod/` in one command (`runpod/README.md`).
 FlowAI Sound and local Ollama are off by default (`--profile local-sound`, `--profile local-ollama` to run them
 here anyway). To run the dashboard outside Docker instead: `docker compose stop frontend`, then
 `cd frontend && npm install && API_ORIGIN=http://localhost:8002 npm run dev`.
@@ -205,14 +203,14 @@ of its catalog of over a thousand, searched by words like “british”, “deep
 to hear it first. Every sentence is said in that voice, in all your conversations, and it stays
 picked after a reload.
 
-It is its own service (`assistant/`, Python, needs an NVIDIA GPU) and starts with the rest:
+It is its own service (`assistant/`, Python, on the CPU) and starts with the rest:
 
 ```sh
 cp .env.example .env                          # once: OLLAMA_CLOUD_API_KEY at least
-docker compose up -d                          # no GPU: --profile assistant-cpu --scale assistant=0, with VOICESTUDIO_URL set
+docker compose up -d                          # with VOICESTUDIO_URL set
 ```
 
-The first start downloads its speech models (about 6 GB). The Vite proxy serves it at
+The first start downloads its speech recognition model; its voice comes from VoiceStudio on the pod. The Vite proxy serves it at
 `/assistant/`. It works as whoever opens the page: the page gets it a token
 (`POST /api/assistant/session`) that can save drafts but not schedule. Approving on the page books
 the post with your own session.
@@ -278,6 +276,6 @@ docker compose exec api php artisan migrate     # after adding a migration
   VoiceStudio (voices), ACE-Step 1.5 (songs under videos; MIT), LatentSync (dubbed videos' lips; Apache-2.0) and
   face swaps (inswapper_128 and GFPGAN, ONNX).
   Music and lip sync also run here on a local GPU: `docker compose --profile music` / `--profile lipsync`
-- `assistant/` — the voice assistant behind the Assistant page (Python, GPU; copied from the gamechange repo, where it's developed)
+- `assistant/` — the voice assistant behind the Assistant page (Python, CPU; copied from the gamechange repo, where it's developed)
 - `demo/` — the one-command full cycle
 - `deploy/` — production stack for the VPS (nginx + PHP-FPM + Postgres)

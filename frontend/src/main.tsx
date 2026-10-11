@@ -8,8 +8,10 @@ import 'lenis/dist/lenis.css'
 import './index.css'
 import App from './App'
 import { applySavedPalette } from './components/ui/PalettePicker'
+import { applySavedWash } from './lib/wash'
 
 applySavedPalette()
+applySavedWash()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

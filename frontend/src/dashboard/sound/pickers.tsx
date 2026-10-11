@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check, LoaderCircle, Pause, Play } from 'lucide-react'
 import type { SoundCatalog } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
+import { ColorInput } from '../pickers'
 
 type Voice = SoundCatalog['voices'][number]
 type Mood = SoundCatalog['moods'][number]
@@ -138,7 +139,6 @@ export const ACCENTS = ['#f5b04c', '#a5b4fc', '#5ee39a', '#ff8fa3', '#6ee7f2', '
 
 /** A few accents that read on dark and on paper, plus any colour you like. */
 export function AccentPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
-  const input = useRef<HTMLInputElement>(null)
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {ACCENTS.map((c) => (
@@ -151,16 +151,14 @@ export function AccentPicker({ value, onChange }: { value: string; onChange: (he
           style={{ background: c }}
         />
       ))}
-      <button
-        type="button"
-        onClick={() => input.current?.click()}
-        className={cn('relative size-6 overflow-hidden rounded-full border border-dashed border-white/25 text-[11px] text-dim hover:text-fg', !ACCENTS.includes(value.toLowerCase()) && 'border-solid border-white')}
+      {/* A swatch that isn't a button itself: the colour picker covering it is, and opens the pane. */}
+      <span
+        className={cn('relative grid size-6 place-items-center overflow-hidden rounded-full border border-dashed border-white/25 text-[11px] text-dim hover:text-fg', !ACCENTS.includes(value.toLowerCase()) && 'border-solid border-white')}
         style={!ACCENTS.includes(value.toLowerCase()) ? { background: value } : undefined}
-        aria-label="Any colour"
       >
         {ACCENTS.includes(value.toLowerCase()) && '+'}
-        <input ref={input} type="color" value={value} onChange={(e) => onChange(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
-      </button>
+        <ColorInput aria-label="Any colour" value={value} onChange={(e) => onChange(e.target.value)} className="absolute inset-0 cursor-pointer rounded-full opacity-0" />
+      </span>
     </div>
   )
 }

@@ -37,9 +37,11 @@ import { cn } from '../lib/cn'
 import { useRouter } from '../lib/router'
 import { useSession } from '../lib/session'
 import { firstName, fmtRelative, postState, titleOf, useApi, type Overview } from './data'
-import { NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, type NavItem } from './nav'
+import { covers, NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, VIEWS, type NavItem } from './nav'
 import { useToast } from './toast'
 import { Avatar, Kbd, Menu, Platforms, StateBadge } from './ui'
+import { ConfirmHost } from './confirm'
+import { Tips } from './Tips'
 
 export { pageLabel }
 
@@ -112,11 +114,22 @@ export function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => setDrawer(false), [path])
 
+  // The studio is glass: while it's on screen the surface colours are translucent (index.css,
+  // html.glass-app). On <html> rather than here, so sheets and menus portalled to <body> get it too.
+  useEffect(() => {
+    document.documentElement.classList.add('glass-app')
+    return () => document.documentElement.classList.remove('glass-app')
+  }, [])
+
   return (
     <OverviewContext.Provider value={{ data: overview.data, loading: overview.loading }}>
       {/* --sidebar-w lets anything pinned to the viewport (bottom bars) clear the sidebar. */}
-      <div className="min-h-dvh bg-ink text-fg" style={{ '--sidebar-w': rail ? '64px' : '248px' } as CSSProperties}>
-        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] overflow-hidden border-r border-line bg-panel transition-[width] duration-300 ease-expo lg:block">
+      <div className="isolate min-h-dvh bg-ink text-fg" style={{ '--sidebar-w': rail ? '64px' : '248px' } as CSSProperties}>
+        {/* The wash the glass sits on: fixed, behind everything, tinted by the palette. */}
+        <div aria-hidden className="glass-ambient pointer-events-none fixed inset-0 -z-10" />
+        <Tips />
+        <ConfirmHost />
+        <aside className="glass-chrome fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] overflow-hidden border-r border-white/[0.09] transition-[width] duration-300 ease-expo lg:block">
           <Sidebar overview={overview.data} rail={rail} />
         </aside>
 
@@ -124,14 +137,14 @@ export function Shell({ children }: { children: ReactNode }) {
           {drawer && (
             <>
               <motion.div
-                className="fixed inset-0 z-50 bg-ink/70 backdrop-blur-sm lg:hidden"
+                className="fixed inset-0 z-50 bg-ink/45 backdrop-blur-[2px] lg:hidden"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onClick={() => setDrawer(false)}
               />
               <motion.aside
-                className="fixed inset-y-0 left-0 z-50 w-[272px] border-r border-line bg-panel lg:hidden"
+                className="glass-chrome fixed inset-y-0 left-0 z-50 w-[272px] border-r border-white/[0.09] lg:hidden"
                 initial={{ x: '-100%' }}
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
@@ -196,7 +209,7 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
   const fade = cn('whitespace-nowrap transition-opacity duration-200', rail && 'pointer-events-none opacity-0')
 
   const item = (n: NavItem) => {
-    const active = path === n.path
+    const active = covers(n, path)
     const Icon = n.icon
     const count = overview && n.count ? n.count(overview) : 0
     const live = overview && n.live ? n.live(overview) : false
@@ -290,13 +303,14 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
           aria-label={rail ? 'New post' : undefined}
           {...tipProps('New post  N')}
           className={cn(
-            'group flex h-8 items-center gap-2 rounded-md bg-fg px-3 text-[13px] font-medium text-ink transition-[width,background-color] duration-300 ease-expo hover:bg-white',
+            // In the palette's own colour, like every other place the accent asks to be pressed.
+            'group flex h-8 items-center gap-2 rounded-md bg-accent px-3 text-[13px] font-medium text-on-accent transition-[width,background-color] duration-300 ease-expo hover:bg-[color-mix(in_oklab,var(--color-accent)_82%,white)]',
             rail ? 'w-10' : 'w-full',
           )}
         >
           <Plus className="size-4 shrink-0" strokeWidth={2} />
           <span className={fade}>New post</span>
-          <Kbd className={cn('ml-auto border-ink/15 text-ink/45', fade)}>N</Kbd>
+          <Kbd className={cn('ml-auto border-on-accent/25 text-on-accent/60', fade)}>N</Kbd>
         </button>
       </div>
 
@@ -304,7 +318,7 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
         {NAV_GROUPS.map((group, i) => {
           const isFolded = !rail && !!group.label && folded.includes(group.label)
           // A folded section still shows the page you're on.
-          const shown = isFolded ? group.items.filter((n) => n.path === path) : group.items
+          const shown = isFolded ? group.items.filter((n) => covers(n, path)) : group.items
           return (
             <div key={group.label ?? i}>
               {group.label && (
@@ -354,7 +368,7 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
           <motion.div
             key={tip.label}
             role="tooltip"
-            className="pointer-events-none fixed left-[72px] z-[60] -translate-y-1/2 whitespace-pre rounded-md border border-line-2 bg-panel-3 px-2 py-1 text-[12px] text-fg shadow-[0_8px_24px_-8px_rgb(0_0_0_/_0.8)]"
+            className="glass-menu pointer-events-none fixed left-[72px] z-[60] -translate-y-1/2 whitespace-pre rounded-[8px] px-2 py-1 text-[12px] text-fg"
             style={{ top: tip.top }}
             initial={{ opacity: 0, x: -4 }}
             animate={{ opacity: 1, x: 0 }}
@@ -454,7 +468,7 @@ function TopBar({ onMenu, onSearch, rail, onRail }: { onMenu: () => void; onSear
   const label = pageLabel(path)
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-ink/80 px-4 backdrop-blur-xl md:px-6">
+    <header className="glass-chrome sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-white/[0.08] px-4 md:px-6">
       <button
         type="button"
         onClick={onMenu}
@@ -599,6 +613,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   const pages: Result[] = [
     { key: 'new', label: 'New post', icon: Plus, to: NEW_POST, hint: <Kbd>N</Kbd> },
     ...NAV.map((n) => ({ key: n.path, label: n.label, icon: n.icon, to: n.path })),
+    ...VIEWS.map((v) => ({ key: v.path, label: v.label, icon: v.icon, to: v.path })),
   ].filter((r) => !needle || r.label.toLowerCase().includes(needle))
   const found: Result[] = posts.map((p) => ({
     key: `post-${p.id}`,
@@ -662,12 +677,12 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
     <AnimatePresence>
       {open && (
         <motion.div className="fixed inset-0 z-[120] flex items-start justify-center p-4 pt-[12vh]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <div className="absolute inset-0 bg-ink/70 backdrop-blur-sm" onClick={onClose} />
+          <div className="absolute inset-0 bg-ink/45 backdrop-blur-[3px]" onClick={onClose} />
           <motion.div
             role="dialog"
             aria-label="Search"
             data-lenis-prevent
-            className="relative w-full max-w-xl overflow-hidden rounded-xl border border-line-2 bg-panel-2 shadow-[0_40px_120px_-30px_rgb(0_0_0_/_0.95)]"
+            className="glass-sheet relative w-full max-w-xl overflow-hidden rounded-2xl"
             initial={{ opacity: 0, y: -12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.98 }}

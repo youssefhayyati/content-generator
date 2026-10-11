@@ -541,15 +541,20 @@ async def edit_area(mode: str, session, prompt: str = "", draft: int | None = No
                                                        "closest voice is used), a voice id from find_voices, or "
                                                        "'mine' for the voice you speak in. Leave out to keep the last "
                                                        "video's voice; the first video gets one cast for the post"},
+            "language": {"type": "string", "description": "The language the lines are written in, when it isn't "
+                                                          "English, e.g. 'Moroccan Arabic' for Darija, 'Egyptian "
+                                                          "Arabic', 'French'. Any voice speaks it, with that "
+                                                          "language's accent. Leave out to keep the last video's; "
+                                                          "empty to have it guessed from the lines"},
         },
     },
 )
 async def make_video(session, draft: int | None = None, lines: list | None = None, cta: str | None = None,
                      cta_line: str | None = None, music: str | None = None, captions: bool | None = None,
                      motion: str | None = None, placement: str | None = None, color: str | None = None,
-                     voice: str | None = None):
+                     voice: str | None = None, language: str | None = None):
     return await session.make_video(draft, lines=lines, cta=cta, cta_line=cta_line, music=music, captions=captions,
-                                    motion=motion, placement=placement, color=color, voice=voice)
+                                    motion=motion, placement=placement, color=color, voice=voice, language=language)
 
 
 @tool(
@@ -572,9 +577,21 @@ async def find_voices(session, description: str, language: str = ""):
     if not tts.choosable:
         return {"voices": await asyncio.to_thread(tts.profiles),
                 "note": "these are all the voices (no VoiceStudio server): its own and the ones cloned here"}
-    found = await asyncio.to_thread(tts.match, description, language, 8)
-    return {"voices": [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found],
-            "note": "pass a voice's id as make_video's voice"}
+    _, _, labelled = await asyncio.to_thread(tts.catalog)
+    known = next((lang for lang in labelled if lang.lower() == language.strip().lower()), "")
+    found = await asyncio.to_thread(tts.match, description, known, 8)
+    voices = [{k: v[k] for k in ("id", "name", "description", "language", "use") if v.get(k)} for v in found]
+    if language.strip() and not known:
+        # No voice is labelled with it, but every voice speaks it: searching again finds nothing more
+        try:
+            speaks = await asyncio.to_thread(tts.language, language)
+        except ValueError as exc:
+            return {"voices": voices, "error": str(exc)}
+        return {"voices": voices,
+                "note": f"any of these voices speaks {speaks}: write the lines in it and pass a voice's id as "
+                        f"make_video's voice and '{speaks}' as its language. For a native speaker's own voice, "
+                        f"the user can record one and clone it (clone_voice). Don't search again"}
+    return {"voices": voices, "note": "pass a voice's id as make_video's voice"}
 
 
 @tool(
@@ -867,3 +884,50 @@ async def cancel_phone_task(session):
 
 # Creative Lab: building and running node graphs in FlowAI (lab_tools.py registers its tools here)
 from . import lab_tools  # noqa: E402,F401
+
+# --- How content is made here, and the plan the user approves ------------------------
+# A conversation makes content one way at a time: drafts here (the old-school way) or a Creative Lab canvas.
+# Each way sees only its own tools (session.py, VoiceSession.respond), so one can't drift into the other.
+
+DRAFT_TOOLS = (STUDIO_TOOLS - {"load_skill"}) | {"edit_area", "generate_media", "dub_video", "swap_face",
+                                                 "save_draft", "open_post", "schedule_post", "open_campaign",
+                                                 "post_on_phone"}
+CANVAS_TOOLS = {name for name in _REGISTRY if name.startswith("lab_")}
+MODES = {"drafts": "drafts in this chat", "canvas": "nodes on a Creative Lab canvas"}
+
+
+@tool(
+    "set_mode",
+    "Switch how content is made in this conversation, when the user asks for the other way: drafts (the "
+    "old-school way, drafts in this chat; they may say old school, classic, drafts, here) or canvas (a Creative "
+    "Lab project of nodes; they may say canvas, flow, nodes, graph, Creative Lab). The page goes to that view and "
+    "what was made stays where it is.",
+    {"type": "object", "properties": {"mode": {"type": "string", "enum": list(MODES)}}, "required": ["mode"]},
+)
+async def set_mode(mode: str, session):
+    return await session.set_mode(mode)
+
+
+@tool(
+    "propose_plan",
+    "Show the user the plan on screen before making several posts, or anything slow or paid (videos, songs, "
+    "dubbing, face swaps, cloud models), and wait: you are told when they approve it, or what to change. Not for "
+    "one quick post. Once approved, make all of it without asking again; each post still needs its own approval "
+    "to be scheduled.",
+    {"type": "object", "properties": {
+        "summary": {"type": "string", "description": "What it is, in one line: what, for whom, the angle, when"},
+        "items": {"type": "array", "items": {"type": "string"},
+                  "description": "What gets made, one short line each, e.g. \"Sun 12:00 · Instagram post · the "
+                                 "octopus escapes the printer\""},
+        "takes": {"type": "string", "description": "About how long it takes to make, e.g. \"about 8 minutes\""},
+        "cost": {"type": "string", "description": "What it costs, if anything is paid"},
+    }, "required": ["summary", "items"]},
+)
+async def propose_plan(session, summary: str, items: list | None = None, takes: str = "", cost: str = ""):
+    if not session.flowai:
+        return {"error": "FlowAI isn't connected, so nothing can be approved on screen; ask the user in words"}
+    a = await session.flowai.ask("plan", str(summary)[:300], items=[str(i)[:200] for i in items or []][:60],
+                                 takes=str(takes)[:80], cost=str(cost)[:80])
+    return {"approval": a.id, "status": "waiting for the user to approve the plan on screen",
+            "note": "make nothing until you are told they approved it; if they ask for a change, change the plan "
+                    "and propose it again"}

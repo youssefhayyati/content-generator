@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react'
 import { cn } from '../../lib/cn'
-import { Label } from '../ui'
+import { Label, ColorInput } from '../ui'
 import type { TextBox } from './store'
 
 /*
@@ -153,7 +153,7 @@ function Swatches({ value, palette, hardFor, onPick }: { value: string; palette:
             style={known ? undefined : { background: current }}
           >
             {known && <Plus className="size-3" />}
-            <input type="color" aria-label="Any colour" value={current} className="absolute inset-0 cursor-pointer opacity-0" onChange={(e) => onPick(e.target.value)} />
+            <ColorInput aria-label="Any colour" value={current} className="absolute inset-0 cursor-pointer rounded-full opacity-0" onChange={(e) => onPick(e.target.value)} />
           </label>
         </div>
       </div>

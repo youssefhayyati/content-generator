@@ -1,8 +1,8 @@
 import {
   AudioWaveform,
-  Clapperboard,
   CalendarClock,
   CalendarDays,
+  Clapperboard,
   Cpu,
   ChartColumn,
   Flame,
@@ -12,12 +12,12 @@ import {
   LayoutGrid,
   Megaphone,
   MessageSquareText,
-  PenLine,
   RadioTower,
   Repeat2,
   SearchCheck,
   Send,
   Settings,
+  Shapes,
   Smartphone,
   UsersRound,
   Wand2,
@@ -36,11 +36,27 @@ export type NavItem = {
   urgent?: boolean
   /** A beating dot beside the label while this is true. */
   live?: (o: Overview) => boolean
+  /** Other pages this entry stands for: a second view of the same place, reached by the switch in its header. */
+  also?: string[]
 }
 
 export type NavGroup = { label: string | null; items: NavItem[] }
 
 export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
+
+/** The one-off generators (text, pictures, video, sound, reels, recipes): Creative Lab's quick tools, beside its canvas. */
+export const GENERATORS = '/dashboard/generate'
+
+/** Two views of one place, switched in the page header (PageSwitch); the sidebar shows them as one entry. */
+export type View = { path: string; label: string }
+export const LAB_VIEWS: View[] = [
+  { path: '/dashboard/studio', label: 'Canvas' },
+  { path: GENERATORS, label: 'Quick tools' },
+]
+export const INSPIRE_VIEWS: View[] = [
+  { path: '/dashboard/inspire', label: 'Trending' },
+  { path: '/dashboard/showcase', label: 'Made with FlowAI' },
+]
 
 /** The studio's pages, in the order the sidebar shows them. */
 export const NAV_GROUPS: NavGroup[] = [
@@ -56,18 +72,20 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Create',
     items: [
-      // Everything that makes content lives here now: nodes on a canvas, the assistant beside them.
-      { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
-      // Highlights from a link: not a canvas node yet, so it keeps its own page.
+      { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
+      // One entry, two views: the canvas of nodes, and the one-off generators as its quick tools.
+      { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2, also: [GENERATORS] },
+      // Highlights from a link and reposts between X and Instagram: not canvas nodes, so their own pages.
       { path: '/dashboard/clips', label: 'Highlights', icon: Clapperboard },
-      // Reposts between X and Instagram: also not a node, so its own page too.
       { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
+      { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
     ],
   },
   {
     label: 'Plan',
     items: [
-      { path: '/dashboard/inspire', label: 'Inspire', icon: Flame },
+      // What's trending, and what FlowAI has made (the showcase): both are places to start from.
+      { path: '/dashboard/inspire', label: 'Inspire', icon: Flame, also: ['/dashboard/showcase'] },
       { path: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays, count: (o) => o.counts.scheduled },
       { path: '/dashboard/library', label: 'Gallery', icon: FolderOpen, count: (o) => o.counts.total },
       { path: '/dashboard/automations', label: 'Automations', icon: CalendarClock },
@@ -98,18 +116,19 @@ export const NAV_GROUPS: NavGroup[] = [
 /** Every page, Settings included. */
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
-/**
- * Pages kept off the sidebar since Creative Lab took in everything that makes content; still opened
- * from links (a campaign's gates, a post in the composer, the showcase), so they keep their titles.
- */
-export const OFF_NAV: NavItem[] = [
-  { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
-  { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
-  { path: '/dashboard/create', label: 'Composer', icon: PenLine },
+/** Where every "New post" goes, from anywhere: the Composer. */
+export const NEW_POST = '/dashboard/create'
+
+/** Pages with no entry of their own that still have a name: the Composer is the New post button. */
+const UNLISTED: Array<Pick<NavItem, 'path' | 'label'>> = [{ path: NEW_POST, label: 'Composer' }]
+
+/** Whether a sidebar entry is the page being shown, either itself or one of its views. */
+export const covers = (n: NavItem, path: string) => n.path === path || !!n.also?.includes(path)
+
+/** A page's second views, for the search palette: found by their own names. */
+export const VIEWS: Array<View & { icon: LucideIcon }> = [
+  { path: GENERATORS, label: 'Quick tools', icon: Shapes },
   { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
 ]
 
-/** Where every "New post" goes, from anywhere: Creative Lab, which starts with the brief. */
-export const NEW_POST = '/dashboard/studio'
-
-export const pageLabel = (path: string) => [...NAV, ...OFF_NAV].find((n) => n.path === path)?.label ?? 'Overview'
+export const pageLabel = (path: string) => NAV.find((n) => covers(n, path))?.label ?? UNLISTED.find((n) => n.path === path)?.label ?? 'Overview'

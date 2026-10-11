@@ -18,6 +18,7 @@ import Clips from './pages/Clips'
 import Comments from './pages/Comments'
 import Create from './pages/Create'
 import Flows from './pages/Flows'
+import Generators from './pages/Generators'
 import Inbox from './pages/Inbox'
 import Inspire from './pages/Inspire'
 import Investigations from './pages/Investigations'
@@ -44,6 +45,7 @@ const PAGES: Record<string, ComponentType> = {
   '/dashboard/assistant': Assistant,
   '/dashboard/studio': Studio,
   '/dashboard/clips': Clips,
+  '/dashboard/generate': Generators,
   '/dashboard/campaigns': Campaigns,
   '/dashboard/create': Create,
   '/dashboard/showcase': Showcase,

@@ -26,7 +26,7 @@ import { useToast } from '../toast'
 import { Writer } from '../Writer'
 import { Examples } from '../Examples'
 import type { Case } from '../../showcase/cases'
-import { Btn, FieldError, inputClass, Modal, PageHeader, Panel, Segmented, Skeleton, StateBadge, Stagger } from '../ui'
+import { Btn, FieldError, inputClass, Modal, PageHeader, Panel, Segmented, Skeleton, StateBadge, Stagger, DateInput, TimeInput } from '../ui'
 
 type When = 'draft' | 'now' | 'queue' | 'pick' | 'published'
 
@@ -384,10 +384,10 @@ export default function Create() {
                     <div className="flex items-center gap-2">
                       {/* Sized by their wrappers: inputClass is w-full, and cn doesn't merge classes. */}
                       <div className="min-w-0 flex-1 md:w-40 md:flex-none">
-                        <input type="date" value={date} onChange={(e) => setPicked((p) => ({ ...p, date: e.target.value }))} aria-label="Date" className={inputClass} />
+                        <DateInput value={date} onChange={(e) => setPicked((p) => ({ ...p, date: e.target.value }))} aria-label="Date" className={inputClass} />
                       </div>
                       <div className="w-[136px] shrink-0">
-                        <input type="time" value={time} onChange={(e) => setPicked((p) => ({ ...p, time: e.target.value }))} aria-label="Time" className={inputClass} />
+                        <TimeInput value={time} onChange={(e) => setPicked((p) => ({ ...p, time: e.target.value }))} aria-label="Time" className={inputClass} />
                       </div>
                     </div>
                   ) : when === 'queue' ? (

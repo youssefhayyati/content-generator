@@ -97,9 +97,11 @@ class TTSEngine:
             log.warning("Best designed voice only scored %.2f; consider TTS_REF_AUDIO", best_score)
         return best
 
-    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None) -> np.ndarray:
-        """Returns float32 mono audio at 24 kHz, in the one voice or a cloned one. seconds is
-        VoiceStudio's: here a dub's speech is fitted to its video afterwards (dub.fit)."""
+    def synthesize(self, text: str, voice: str | None = None, seconds: float | None = None,
+                   language: str = "") -> np.ndarray:
+        """Returns float32 mono audio at 24 kHz, in the one voice or a cloned one. seconds and language
+        are VoiceStudio's: here a dub's speech is fitted to its video afterwards (dub.fit), and the
+        language is guessed from the text."""
         prompt = self.clones[voice][1] if voice in self.clones else self.voice
         with self.lock, torch.inference_mode():
             audio = self.model.generate(
@@ -141,6 +143,12 @@ class TTSEngine:
 
     def catalog(self, q: str = "", lang: str = "", exclude: set[str] = frozenset()) -> tuple[list[dict], int, list[str]]:
         return [], 0, []
+
+    def languages(self) -> list[str]:
+        return []
+
+    def language(self, wanted: str) -> str:
+        return ""  # guessed from the text
 
     def find(self, wanted: str) -> tuple[dict, bool] | None:
         wanted = wanted.strip()

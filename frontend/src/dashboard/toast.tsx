@@ -36,7 +36,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 24, scale: 0.97 }}
               transition={{ duration: 0.4, ease }}
-              className="pointer-events-auto flex w-full items-start gap-3 rounded-lg border border-line-2 bg-panel-3 px-4 py-3 text-[13px] shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]"
+              className="pointer-events-auto flex w-full items-start gap-3 glass-menu rounded-[12px] px-4 py-3 text-[13px]"
             >
               {t.tone === 'error' ? (
                 <CircleAlert className="mt-px size-4 shrink-0 text-fail" strokeWidth={1.75} />

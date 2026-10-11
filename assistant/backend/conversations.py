@@ -38,6 +38,7 @@ SAVE_DELAY = 1.0  # seconds: a burst of changes (a whole carousel) is one write
 STATE_EVENTS = {"draft", "media", "saved", "approval", "linked", "phone_post"}  # sent when something worth keeping changed
 HISTORY_SHOWN = 200  # log lines the page gets when a conversation is reopened
 TITLE_CHARS = 60
+POSTS_LISTED = 60  # drafts a conversation's line in the list shows (Creative Lab's home, a row that scrolls)
 
 
 def _now() -> str:
@@ -82,6 +83,11 @@ class Conversation:
         self.title = ""
         self.created = self.updated = _now()
         self.campaign: dict | None = None  # the FlowAI campaign it was opened for: id, name, stage, brief
+        # How content is made in it: "drafts" (here, as drafts) or "canvas" (a Creative Lab project, as nodes);
+        # None until the first request, which takes the page's (session.py, VoiceSession.mode)
+        self.mode: str | None = None
+        self.project: int | None = None  # its Creative Lab project, the one the canvas mode opens
+        self.plan_ok = False  # the user approved its last plan: what it needs runs without asking again
         self.sessions: set["VoiceSession"] = set()  # the connections showing it
         self.messages: list[dict] = []  # for the LLM, without the system prompt (made fresh every turn)
         self.notes: list[str] = []  # events the LLM hasn't seen yet
@@ -168,7 +174,8 @@ class Conversation:
     def about(self) -> dict:
         """Its name and campaign, as the page shows them above the conversation."""
         return {"type": "about", "id": self.id, "title": self.title, "kept": bool(self.owner),
-                "campaign": {k: self.campaign.get(k) for k in ("id", "name", "stage")} if self.campaign else None}
+                "campaign": {k: self.campaign.get(k) for k in ("id", "name", "stage")} if self.campaign else None,
+                "mode": self.mode, "project": self.project}
 
     # --- on disk --------------------------------------------------------------------
 
@@ -180,13 +187,28 @@ class Conversation:
                 "updated": self.updated, "drafts": len(self.studio.drafts),
                 "pictures": sum(i.kind in ("image", "video") for i in self.media.items.values()),
                 "campaign": {"id": self.campaign["id"], "name": self.campaign.get("name")} if self.campaign else None,
-                "preview": _cut(last, 90)}
+                "preview": _cut(last, 90), "mode": self.mode, "project": self.project,
+                **self._posts()}
+
+    def _posts(self) -> dict:
+        """Its drafts as Creative Lab's home lists them, beside the projects: the first few, each with its
+        first slide and where it stands in FlowAI, and how many are scheduled or out."""
+        posts = []
+        for d in self.studio.drafts.values():
+            saved = self.saved.get(d.id)
+            posts.append({"draft": d.id, "title": d.title, "what": d.label,
+                          "thumb": (d.versions.get(d.version) or {}).get("thumb"),
+                          "status": saved.status if saved else "not saved",
+                          "when": saved.scheduled_at if saved else None})
+        live = sum(p["status"] in ("scheduled", "publishing", "submitted", "published") for p in posts)
+        return {"posts": posts[:POSTS_LISTED], "scheduled": live}
 
     def dump(self) -> dict:
         from .flowai import dump_links  # flowai imports studio, which this module imports too
 
         return {"id": self.id, "title": self.title, "created": self.created, "updated": self.updated,
-                "campaign": self.campaign, "messages": [_jsonable(m) for m in self.messages], "notes": self.notes,
+                "campaign": self.campaign, "mode": self.mode, "project": self.project, "plan_ok": self.plan_ok,
+                "messages": [_jsonable(m) for m in self.messages], "notes": self.notes,
                 "media": self.media.dump(), "studio": self.studio.dump(), "phone": self.phone.dump(),
                 "flowai": dump_links(self.saved, self.linked, self.approvals, self.uploaded)}
 
@@ -195,6 +217,7 @@ class Conversation:
 
         self.restoring = True  # redrawing a lost slide isn't a change worth a new date
         self.title, self.campaign = data.get("title", ""), data.get("campaign")
+        self.mode, self.project, self.plan_ok = data.get("mode"), data.get("project"), bool(data.get("plan_ok"))
         self.created, self.updated = data.get("created", self.created), data.get("updated", self.updated)
         self.messages, self.notes = data.get("messages", []), data.get("notes", [])
         self.media.restore(data.get("media", {}))

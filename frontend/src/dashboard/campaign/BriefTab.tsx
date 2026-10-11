@@ -6,7 +6,7 @@ import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
-import { Btn, FieldError, inputClass, Label, Panel } from '../ui'
+import { Btn, FieldError, inputClass, Label, Panel, DateInput } from '../ui'
 
 const FIELDS: Array<{ key: keyof BriefForm; label: string; hint: string; rows?: number; type?: 'date' }> = [
   { key: 'goal', label: 'Goal', hint: 'What it’s for: sell the gift box, grow the list, fill the workshop.' },
@@ -125,7 +125,7 @@ function FormBrief({ campaign, locked, onChange }: { campaign: Campaign; locked:
           <label key={f.key} className={cn('block', (f.rows ?? 1) > 1 && 'md:col-span-2')}>
             <Label>{f.label}</Label>
             {f.type === 'date' ? (
-              <input type="date" value={form[f.key] ?? ''} disabled={locked} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} className={cn(inputClass, 'mt-2')} />
+              <DateInput value={form[f.key] ?? ''} disabled={locked} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} className={cn(inputClass, 'mt-2')} />
             ) : (f.rows ?? 1) > 1 ? (
               <textarea rows={f.rows} value={form[f.key] ?? ''} disabled={locked} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} className={cn(inputClass, 'mt-2 h-auto resize-none py-2 leading-snug')} />
             ) : (
@@ -185,8 +185,8 @@ function Setup({ campaign, accounts, state }: { campaign: Campaign; accounts: Ac
         <div>
           <Label>Runs</Label>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <input type="date" value={start} disabled={!canPlan} onChange={(e) => setStart(e.target.value)} aria-label="From" className={inputClass} />
-            <input type="date" value={end} disabled={!canPlan} onChange={(e) => setEnd(e.target.value)} aria-label="To" className={inputClass} />
+            <DateInput value={start} disabled={!canPlan} onChange={(e) => setStart(e.target.value)} aria-label="From" className={inputClass} />
+            <DateInput value={end} disabled={!canPlan} onChange={(e) => setEnd(e.target.value)} aria-label="To" className={inputClass} />
           </div>
           <FieldError message={errors.period_start ?? errors.period_end} />
         </div>

@@ -127,7 +127,7 @@ export function ModelPicker({
               data-lenis-prevent
               style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right, zIndex: 130 }}
             className={cn(
-              'max-h-[360px] w-[min(360px,90vw)] overflow-y-auto rounded-lg border border-line-2 bg-panel-3 p-1 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
+              'glass-menu max-h-[360px] w-[min(360px,90vw)] overflow-y-auto rounded-[11px] p-1',
             )}
           >
             {groups.map(([group, items]) => (

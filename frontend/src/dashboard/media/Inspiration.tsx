@@ -67,7 +67,7 @@ export function Inspiration() {
     <div className="space-y-5">
       <div className="rounded-xl border border-accent/30 bg-accent/[0.06] p-6">
         <p className="text-xl font-medium">Find an idea. Make it yours.</p>
-        <p className="mt-2 text-sm text-muted">Collect recent videos, save creative notes, then build your own version in Creative Lab.</p>
+        <p className="mt-2 text-sm text-muted">Collect recent videos, save creative notes, then build your own version with the video generator.</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Btn variant={view === 'discover' ? 'primary' : 'subtle'} onClick={() => { setView('discover'); setBoard('') }}>Recent videos</Btn>
           <Btn variant={view === 'saved' ? 'primary' : 'subtle'} onClick={() => setView('saved')}>My boards · {saved.length}</Btn>
@@ -122,7 +122,7 @@ export function Inspiration() {
           <label className="block text-sm">Your product / brand<input className={inputClass + ' mt-1'} value={product} onChange={(e) => setProduct(e.target.value)} placeholder="What are you promoting?" /></label>
           <label className="block text-sm">What should your version do differently?<textarea rows={3} className={inputClass + ' mt-1 h-auto'} value={direction} onChange={(e) => setDirection(e.target.value)} placeholder="Describe the hook, scene sequence and style you want…" /></label>
           <pre className="whitespace-pre-wrap rounded-lg border border-line p-3 text-xs leading-relaxed">{brief}</pre>
-          <Btn variant="primary" icon={Sparkles} disabled={!product.trim()} onClick={() => navigate('/dashboard/studio?make=video&prompt=' + encodeURIComponent(brief))}>Review in Creative Lab</Btn>
+          <Btn variant="primary" icon={Sparkles} disabled={!product.trim()} onClick={() => navigate('/dashboard/generate?tab=video&prompt=' + encodeURIComponent(brief))}>Review in the video generator</Btn>
         </div>
       </Modal>
     </div>

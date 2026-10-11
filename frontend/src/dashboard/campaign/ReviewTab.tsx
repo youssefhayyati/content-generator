@@ -22,7 +22,7 @@ import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi } from '../data'
 import { AssetModal, MediaThumb } from '../media/Media'
 import { useToast } from '../toast'
-import { Btn, FieldError, inputClass, Label, Modal, Panel, Skeleton } from '../ui'
+import { Btn, FieldError, inputClass, Label, Modal, Panel, Skeleton, Select } from '../ui'
 import { FORMAT_ICON, FORMAT_LABEL, Pill } from './shared'
 
 type Specs = Record<PlatformId, Record<string, { label: string }>>
@@ -483,13 +483,13 @@ function VariantRow({ variant, item, campaign, onChanged }: { variant: ItemVaria
           {Object.keys(placements).length > 1 && (
             <label className="mt-3 block">
               <Label>Posted as</Label>
-              <select value={placement} onChange={(e) => setPlacement(e.target.value)} className={cn(inputClass, 'mt-2 [color-scheme:dark]')}>
+              <Select value={placement} onChange={(e) => setPlacement(e.target.value)} fieldClassName={cn(inputClass, 'mt-2 [color-scheme:dark]')}>
                 {Object.entries(placements).map(([id, p]) => (
                   <option key={id} value={id}>
                     {PLATFORMS[variant.account.platform].name} {p.label.toLowerCase()}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
           <div className="mt-3 flex justify-end gap-2">

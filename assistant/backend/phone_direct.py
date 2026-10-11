@@ -73,6 +73,10 @@ Rules:
   typing in it, or several lines of typing with "enter" between them, can go in one list.
 - If a pop-up or dialog is in the way, deal with it first ("Not now", "Cancel", "OK", the X), unless the task
   says otherwise.
+- While making a post, press "back" only where the task says to (in an editor it can close the post); to get
+  past a suggestion list, keep going or tap another part of the screen. A dialog asking to save or discard the
+  post or a draft ("Save post?", "Discard?") means you left it by mistake: tap "Cancel" or "Keep editing",
+  never Save or Discard.
 - Do only what the task asks, in the apps it names. Never type a password. Never buy or pay for anything, delete
   anything, change settings or account details, or send messages, comments, likes or follows, unless the task
   says exactly that. If the task needs one of these and doesn't say so, or something needs a login, stop: report

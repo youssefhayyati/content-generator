@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react'
 import type { Account, FlowCatalog, FlowField, FlowGraph, FlowNode, SoundCatalog } from '../../lib/api'
 import { cn } from '../../lib/cn'
 import { useApi } from '../data'
-import { Btn, inputClass, Label } from '../ui'
+import { Btn, inputClass, Label, Select, TimeInput } from '../ui'
 import { hueOf, iconOf, variablesFor } from './look'
 
 /** A node's settings with every default in place, for a node that's just been made or changed kind. */
@@ -57,13 +57,13 @@ export function Inspector({
       {isTrigger && (
         <label className="block">
           <Label>Starts when</Label>
-          <select value={node.type} onChange={(e) => onChange({ type: e.target.value, config: defaults(catalog, e.target.value) })} className={cn(inputClass, 'mt-2')}>
+          <Select value={node.type} onChange={(e) => onChange({ type: e.target.value, config: defaults(catalog, e.target.value) })} fieldClassName={cn(inputClass, 'mt-2')}>
             {triggers.map(([t, k]) => (
               <option key={t} value={t}>
                 {k.label}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       )}
 
@@ -129,24 +129,24 @@ function Field({
       {f.kind === 'voice' ? (
         <VoiceSelect value={String(value ?? '')} onChange={onChange} hint={f.hint} />
       ) : f.kind === 'account' ? (
-        <select value={value ?? ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} className={cn(inputClass, 'mt-2')}>
+        <Select value={value ?? ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} fieldClassName={cn(inputClass, 'mt-2')}>
           <option value="">{f.hint ?? 'Any account'}</option>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
               {a.label}
             </option>
           ))}
-        </select>
+        </Select>
       ) : f.kind === 'select' ? (
-        <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, 'mt-2')}>
+        <Select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} fieldClassName={cn(inputClass, 'mt-2')}>
           {f.options?.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
-        </select>
+        </Select>
       ) : f.kind === 'time' ? (
-        <input type="time" value={String(value ?? '09:00')} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, 'mt-2')} />
+        <TimeInput value={String(value ?? '09:00')} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, 'mt-2')} />
       ) : f.kind === 'number' ? (
         <input type="number" min={0} step="any" value={value ?? ''} onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))} className={cn(inputClass, 'mt-2')} />
       ) : f.kind === 'textarea' ? (
@@ -179,13 +179,13 @@ function Field({
 function VoiceSelect({ value, onChange, hint }: { value: string; onChange: (v: string) => void; hint?: string }) {
   const { data } = useApi<SoundCatalog>('/sound')
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, 'mt-2')}>
+    <Select value={value} onChange={(e) => onChange(e.target.value)} fieldClassName={cn(inputClass, 'mt-2')}>
       <option value="">{hint ?? 'The account’s voice'}</option>
       {(data?.voices ?? []).map((v) => (
         <option key={v.id} value={v.id}>
           {v.name} · {v.language} · {v.style}
         </option>
       ))}
-    </select>
+    </Select>
   )
 }

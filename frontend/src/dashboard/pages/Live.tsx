@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Clapperboard, Expand, Image as ImageIcon, LoaderCircle, Mic, Music2, OctagonPause, Play, Shrink, Smartphone, Type, Workflow } from 'lucide-react'
+import { CalendarClock, CalendarDays, Clapperboard, Expand, Image as ImageIcon, LoaderCircle, Mic, Music2, OctagonX, Play, Shrink, Smartphone, Type, Workflow } from 'lucide-react'
 import { PlatformIcon, type PlatformId } from '../../components/ui/PlatformIcon'
+import { Serif } from '../../components/ui/Reveal'
 import { api, type Asset, type FlowGraph, type FlowRunStatus } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { useRouter } from '../../lib/router'
 import { useClock } from '../../lib/useClock'
-import { fmtRelative, useInvalidate } from '../data'
+import { fmtRelative, STATE, useInvalidate } from '../data'
 import { hueOf } from '../flows/look'
-import { RUN_STATUS } from '../flows/Runs'
-import { Flap } from '../live/Flap'
+import { RunStatus } from '../flows/Runs'
+import { tone } from '../storm/StormGuard'
 import { useToast } from '../toast'
-import { Btn, Skeleton } from '../ui'
+import { Btn, CountUp, EmptyState, PageHeader, Panel, Skeleton, Stagger } from '../ui'
+import { STATUS as PHONE_STATUS } from './Phones'
 
 type BoardStatus = 'on_time' | 'boarding' | 'publishing' | 'live' | 'checking' | 'needs_you' | 'held' | 'waiting' | 'delayed' | 'by_hand' | 'due' | 'draft'
 
@@ -39,30 +41,38 @@ type Live = {
   today: { published: number; runs: number; flows: number; made: number; comments: number }
 }
 
-const STATUS: Record<BoardStatus, { label: string; color: string; blink?: boolean }> = {
-  on_time: { label: 'On time', color: '#f2efe6' },
-  boarding: { label: 'Boarding', color: '#f5b04c', blink: true },
-  publishing: { label: 'Publishing', color: 'var(--color-accent-soft)', blink: true },
-  live: { label: 'Live', color: '#5ee39a' },
-  checking: { label: 'Checking', color: '#f5b04c' },
-  needs_you: { label: 'Needs you', color: '#ff6b6b', blink: true },
-  held: { label: 'Held', color: '#6ee7f2' },
-  waiting: { label: 'Awaits yes', color: '#ff8fa3' },
-  delayed: { label: 'Delayed', color: '#f5b04c' },
-  by_hand: { label: 'By hand', color: '#8a8a93' },
-  due: { label: 'Due', color: '#f5b04c' },
-  draft: { label: 'Draft', color: '#8a8a93' },
+/** Where a post on its way out stands, in the words and colours posts have everywhere else. */
+const BOARD: Record<BoardStatus, { label: string; dot: string; text: string; ring: string }> = {
+  on_time: STATE.scheduled,
+  boarding: { ...STATE.scheduled, label: 'Up next', dot: 'bg-plan animate-pulse' },
+  publishing: STATE.publishing,
+  live: STATE.published,
+  checking: STATE.submitted,
+  needs_you: STATE.failed,
+  held: { ...STATE.due, label: 'Held' },
+  waiting: { label: 'Needs approval', dot: 'bg-[#ff8fa3]', text: 'text-[#ff8fa3]', ring: 'border-[#ff8fa3]/30' },
+  delayed: { ...STATE.due, label: 'Delayed' },
+  by_hand: { ...STATE.draft, label: 'By hand' },
+  due: STATE.due,
+  draft: STATE.draft,
 }
 
 const KIND_ICON: Record<string, typeof Mic> = { voice: Mic, music: Music2, reel: Clapperboard, video: Clapperboard, image: ImageIcon, text: Type }
 
-/** How often the wall asks what's going on. */
+/** How a phone's last run ended, as the Publishing page says it. */
+const LAST_RUN: Record<string, string> = { confirmed: 'confirmed', failed: 'failed', uncertain: 'unconfirmed' }
+
+/** How often the page asks what's going on. */
 const POLL_MS = 4000
 
+/** A list that runs edge to edge inside a flush Panel, and one of its rows. */
+const ROWS = 'divide-y divide-line border-t border-line'
+const ROW = 'flex items-center gap-3 px-4 py-3 md:px-5'
+
 /**
- * /dashboard/live — Mission Control. A departures board for the posts going out, the phones
- * and what they're doing, flows at work, the weather on every account, and the studio making
- * sound and video. Put it on a screen in fullscreen and leave it.
+ * /dashboard/live: everything the automation is doing right now, on one page that refreshes
+ * itself. The posts going out, the phones, flows at work, Storm Guard on every account, and
+ * what the studio is making. It goes fullscreen for a screen on the wall.
  */
 export default function LiveWall() {
   const { navigate } = useRouter()
@@ -70,8 +80,8 @@ export default function LiveWall() {
   const invalidate = useInvalidate()
   const [live, setLive] = useState<Live | null>(null)
   const [full, setFull] = useState(false)
+  const [acting, setActing] = useState(false)
   const wall = useRef<HTMLDivElement>(null)
-  const clock = useClock()
 
   useEffect(() => {
     let cancelled = false
@@ -101,6 +111,7 @@ export default function LiveWall() {
   const toggleFull = () => (document.fullscreenElement ? document.exitFullscreen() : wall.current?.requestFullscreen?.())?.catch(() => {})
 
   const setPaused = async (paused: boolean) => {
+    setActing(true)
     try {
       await api(`/publishing/${paused ? 'pause' : 'resume'}`, { method: 'POST' })
       setLive((l) => (l ? { ...l, paused } : l))
@@ -108,85 +119,86 @@ export default function LiveWall() {
       toast(paused ? 'Stopped. Nothing publishes until you resume.' : 'Publishing resumes.')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Couldn’t change it.', 'error')
+    } finally {
+      setActing(false)
     }
   }
 
-  const time = clock.toLocaleTimeString('en-GB', { hour12: false, timeZone: live?.timezone })
-  const date = clock.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: live?.timezone })
-
   return (
-    <div ref={wall} className={cn('-mx-4 -mt-8 bg-[#060607] md:-mx-6 md:-mt-10', full && 'h-screen overflow-y-auto')} data-lenis-prevent>
-      {/* The top bar: the clock, the state of publishing, today's numbers. */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-white/[0.06] px-4 py-4 md:px-6">
-        <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[#5ee39a]">
-          <span className="relative flex size-2">
-            <span className="absolute inset-0 animate-ping rounded-full bg-[#5ee39a]/60" />
-            <span className="relative size-2 rounded-full bg-[#5ee39a]" />
-          </span>
-          Live
-        </span>
-        <h1 className="text-[15px] font-medium tracking-[-0.01em] text-fg">Mission control</h1>
-        <span className="font-mono text-[28px] font-medium tabular-nums tracking-[-0.02em] text-fg md:text-[34px]">{time}</span>
-        <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-dim">{date}</span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {live && (
-            <button
-              type="button"
-              onClick={() => setPaused(!live.paused)}
-              className={cn(
-                'flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.14em] transition-colors',
-                live.paused ? 'border-fail/50 bg-fail/10 text-fail hover:bg-fail/15' : 'border-[#5ee39a]/30 text-[#5ee39a] hover:bg-[#5ee39a]/10',
+    // Fullscreen shows this element alone, so there it brings its own wash, scroll and gutters.
+    <div ref={wall} className={cn(full && 'isolate h-screen overflow-y-auto px-4 pb-16 pt-8 md:px-6 md:pt-10')} data-lenis-prevent={full || undefined}>
+      {full && <div aria-hidden className="glass-ambient pointer-events-none fixed inset-0 -z-10" />}
+      <div className={cn(full && 'mx-auto max-w-[1680px]')}>
+        <PageHeader
+          title={
+            <>
+              Happening <Serif>now.</Serif>
+            </>
+          }
+          sub="Posts on their way out, the phones, flows at work, the mood in the comments and what the studio is making. It refreshes itself every few seconds."
+          actions={
+            <>
+              <Btn icon={full ? Shrink : Expand} onClick={toggleFull}>
+                {full ? 'Leave fullscreen' : 'Fullscreen'}
+              </Btn>
+              {live && (
+                <Btn variant={live.paused ? 'primary' : 'danger'} icon={live.paused ? Play : OctagonX} loading={acting} onClick={() => setPaused(!live.paused)}>
+                  {live.paused ? 'Resume publishing' : 'Stop everything'}
+                </Btn>
               )}
-              title={live.paused ? 'Resume automated publishing' : 'Stop all automated publishing'}
-            >
-              {live.paused ? <Play className="size-3" fill="currentColor" /> : <OctagonPause className="size-3.5" />}
-              {live.paused ? 'Publishing stopped · resume' : 'Publishing on · stop'}
-            </button>
-          )}
-          <Btn size="sm" variant="subtle" icon={full ? Shrink : Expand} onClick={toggleFull}>
-            {full ? 'Leave fullscreen' : 'Fullscreen'}
-          </Btn>
-        </div>
-      </div>
+            </>
+          }
+        />
 
-      {!live ? (
-        <div className="grid gap-4 p-4 md:p-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-          <Skeleton className="h-[520px] rounded-xl bg-white/[0.03]" />
-          <Skeleton className="h-[520px] rounded-xl bg-white/[0.03]" />
-        </div>
-      ) : (
-        <div className="space-y-4 p-4 md:p-8">
-          <Today today={live.today} />
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
-            <Departures rows={live.departures} timezone={live.timezone} paused={live.paused} onOpen={(id) => navigate(`/dashboard/create?post=${id}`)} />
-            <div className="min-w-0 space-y-4">
-              <Phones phones={live.phones} />
-              <Flows flows={live.flows} onOpen={(f) => navigate(`/dashboard/flows?id=${f.flow_id}&run=${f.id}`)} />
+        {!live ? (
+          <div className="mt-10 space-y-4">
+            <Skeleton className="h-[76px] rounded-xl" />
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
+              <Skeleton className="h-[420px] rounded-xl" />
+              <Skeleton className="h-[420px] rounded-xl" />
             </div>
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Weather weather={live.weather} />
-            <Studio making={live.making} made={live.made} />
-          </div>
-        </div>
-      )}
+        ) : (
+          <>
+            <Stagger i={0} className="mt-10">
+              <Today today={live.today} timezone={live.timezone} />
+            </Stagger>
+            {/* Two columns that each stack on their own, so a short list leaves no hole beside a long one. */}
+            <div className="mt-4 grid items-start gap-4 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
+              <div className="min-w-0 space-y-4">
+                <Stagger i={1}>
+                  <GoingOut rows={live.departures} timezone={live.timezone} paused={live.paused} />
+                </Stagger>
+                <Stagger i={3}>
+                  <Studio making={live.making} made={live.made} />
+                </Stagger>
+                <Stagger i={5}>
+                  <Weather weather={live.weather} />
+                </Stagger>
+              </div>
+              <div className="min-w-0 space-y-4">
+                <Stagger i={2}>
+                  <Phones phones={live.phones} />
+                </Stagger>
+                <Stagger i={4}>
+                  <Flows flows={live.flows} onOpen={(f) => navigate(`/dashboard/flows?id=${f.flow_id}&run=${f.id}`)} />
+                </Stagger>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
 
-function Section({ title, aside, children, className }: { title: string; aside?: React.ReactNode; children: React.ReactNode; className?: string }) {
-  return (
-    <section className={cn('min-w-0 rounded-xl border border-white/[0.06] bg-[#0b0b0d] p-4 md:p-5', className)}>
-      <header className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-dim">{title}</h2>
-        {aside}
-      </header>
-      {children}
-    </section>
-  )
+/** Why a panel has nothing in it, in a line. */
+function Quiet({ children }: { children: React.ReactNode }) {
+  return <p className="py-8 text-center text-[12.5px] text-dim">{children}</p>
 }
 
-function Today({ today }: { today: Live['today'] }) {
+/** The clock, then today's numbers. */
+function Today({ today, timezone }: { today: Live['today']; timezone: string }) {
   const items: Array<[string, number]> = [
     ['Published today', today.published],
     ['Phone runs', today.runs],
@@ -195,147 +207,180 @@ function Today({ today }: { today: Live['today'] }) {
     ['Comments in', today.comments],
   ]
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.06] sm:grid-cols-5">
-      {items.map(([label, n], i) => (
-        <div key={label} className={cn('bg-[#0b0b0d] px-4 py-3', i === items.length - 1 && 'col-span-2 sm:col-span-1')}>
-          <p className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-dim">{label}</p>
-          <p className="mt-1">
-            <Flap text={String(n)} width={4} className="text-[17px]" />
-          </p>
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3 xl:grid-cols-6">
+      <Clock timezone={timezone} />
+      {items.map(([label, n]) => (
+        <div key={label} className="bg-panel px-4 py-3.5">
+          <p className="truncate font-mono text-[10px] uppercase tracking-[0.14em] text-dim">{label}</p>
+          <CountUp value={n} className="mt-1 block text-[24px] font-medium tabular-nums tracking-[-0.03em]" />
         </div>
       ))}
     </div>
   )
 }
 
-/** The departures board: time, account, destination, the post, and its status, in flaps. */
-function Departures({ rows, timezone, paused, onOpen }: { rows: Live['departures']; timezone: string; paused: boolean; onOpen: (id: number) => void }) {
-  const fmt = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone })
-  const day = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', timeZone: timezone })
-  const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', timeZone: timezone })
+/** On its own, so the second hand redraws this tile and nothing else. */
+function Clock({ timezone }: { timezone: string }) {
+  const now = useClock()
   return (
-    <Section
-      title="Departures"
-      aside={paused ? <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-fail">All departures held</span> : <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-dim">Next 48 hours</span>}
-    >
-      {rows.length === 0 ? (
-        <div className="grid min-h-[260px] place-items-center text-center">
-          <div>
-            <Flap text="NO DEPARTURES" width={13} className="text-[18px]" />
-            <p className="mt-4 text-[12.5px] text-dim">Nothing scheduled in the next two days. Approve some posts and they’ll board here.</p>
-          </div>
-        </div>
-      ) : (
-        <div className="no-scrollbar overflow-x-auto" data-lenis-prevent>
-          <div className="min-w-[640px]">
-            <div className="grid grid-cols-[64px_150px_34px_minmax(0,1fr)_118px] gap-3 px-2 pb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-dim">
-              <span>Time</span>
-              <span>Account</span>
-              <span>To</span>
-              <span>Post</span>
-              <span className="text-right">Status</span>
-            </div>
-            <ul>
-              {rows.map((r, i) => {
-                const s = STATUS[r.status]
-                return (
-                  <motion.li key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease, delay: Math.min(i, 12) * 0.03 }}>
-                    <button
-                      type="button"
-                      onClick={() => onOpen(r.id)}
-                      className="grid w-full grid-cols-[64px_150px_34px_minmax(0,1fr)_118px] items-center gap-3 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.03]"
-                    >
-                      <span className="flex flex-col">
-                        <Flap text={fmt(r.at)} width={5} stagger={i * 30} />
-                        {day(r.at) !== today && <span className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-dim">{day(r.at)}</span>}
-                      </span>
-                      <span className="min-w-0 overflow-hidden">
-                        <Flap text={r.account ? `@${r.account.handle}` : 'Any'} width={11} stagger={i * 30 + 60} className="max-w-full" />
-                      </span>
-                      <span className="grid size-[26px] place-items-center rounded-[4px] bg-[#16161a] text-[#f2efe6]">
-                        <PlatformIcon id={r.account?.platform ?? r.platforms[0] ?? 'instagram'} className="size-3.5" />
-                      </span>
-                      <span className="min-w-0 truncate text-[13px] text-[#d9d6cc]">{r.title}</span>
-                      <span className="flex justify-end" style={{ ['--flap-ink' as string]: s.color }}>
-                        <span className={cn(s.blink && 'animate-[blink_1.4s_steps(1)_infinite]')}>
-                          <Flap text={s.label} width={10} stagger={i * 30 + 120} />
-                        </span>
-                      </span>
-                    </button>
-                  </motion.li>
-                )
-              })}
-            </ul>
-          </div>
-        </div>
-      )}
-    </Section>
+    <div className="bg-panel px-4 py-3.5">
+      <p className="flex items-center gap-1.5 truncate font-mono text-[10px] uppercase tracking-[0.14em] text-dim">
+        <span className="status-beat size-1.5 shrink-0 rounded-full bg-ok" />
+        {now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: timezone })}
+      </p>
+      <p className="mt-1 whitespace-nowrap text-[24px] font-medium tabular-nums tracking-[-0.03em]">
+        {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: timezone })}
+      </p>
+    </div>
   )
 }
 
-/** The phones: their screens as they last were, and what each is doing. */
-function Phones({ phones }: { phones: Live['phones'] }) {
+/** The posts going out: when, where to, what, and where each one stands. */
+function GoingOut({ rows, timezone, paused }: { rows: Live['departures']; timezone: string; paused: boolean }) {
+  const { navigate } = useRouter()
+  const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: timezone })
+  const day = (d: Date) => d.toLocaleDateString(undefined, { weekday: 'short', timeZone: timezone })
+  const today = day(new Date())
   return (
-    <Section title={`Phones · ${phones.length}`}>
-      {phones.length === 0 ? (
-        <p className="py-6 text-center text-[12.5px] text-dim">No phones yet. Add one under Phones.</p>
+    <Panel
+      title="Going out"
+      sub={paused ? <span className="text-fail">Publishing is stopped. Nothing leaves until you resume.</span> : `Scheduled for the next 48 hours. Times in ${timezone.replace(/_/g, ' ')}.`}
+      actions={
+        <Btn size="sm" icon={CalendarDays} onClick={() => navigate('/dashboard/calendar')}>
+          Calendar
+        </Btn>
+      }
+      flush={rows.length > 0}
+      className="overflow-hidden"
+    >
+      {rows.length === 0 ? (
+        <EmptyState icon={CalendarClock} title="Nothing going out" body="No post is scheduled in the next two days. Approve some and they line up here." className="py-10" />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {phones.slice(0, 6).map((p) => {
-            const busy = !!p.run
-            const light = p.status === 'paused' ? '#f5b04c' : busy ? 'var(--color-accent-soft)' : p.status === 'error' || p.status === 'offline' ? '#ff6b6b' : '#5ee39a'
-            const last = p.run?.steps[p.run.steps.length - 1]
+        <ul className={ROWS}>
+          {rows.map((r, i) => {
+            const s = BOARD[r.status]
+            const on = day(new Date(r.at))
+            const platform = r.account?.platform ?? r.platforms[0] ?? 'instagram'
             return (
-              <div key={p.id} className="min-w-0">
-                <div className={cn('relative aspect-[9/16] overflow-hidden rounded-[14px] border-[3px] border-[#1a1a1e] bg-black', busy && 'ring-2 ring-accent-soft/50')}>
-                  {p.screenshot_url ? (
-                    <img src={p.screenshot_url} alt="" className="size-full object-cover object-top opacity-90" />
-                  ) : (
-                    <span className="grid size-full place-items-center text-white/20">
-                      <Smartphone className="size-6" strokeWidth={1.25} />
+              <motion.li key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease, delay: Math.min(i, 12) * 0.03 }}>
+                <button type="button" onClick={() => navigate(`/dashboard/create?post=${r.id}`)} className={cn(ROW, 'w-full text-left transition-colors hover:bg-white/[0.04]')}>
+                  <span className="w-[66px] shrink-0 sm:w-[72px]">
+                    <span className="block font-mono text-[10px] uppercase tracking-[0.1em] text-dim">{on === today ? 'Today' : on}</span>
+                    <span className="block whitespace-nowrap text-[13.5px] font-medium tabular-nums">{time(r.at)}</span>
+                  </span>
+                  {/* On a phone the tile gives its room to the title, and the platform moves down a line. */}
+                  <span className="hidden size-8 shrink-0 place-items-center rounded-lg border border-line-2 bg-white/[0.03] text-muted sm:grid">
+                    <PlatformIcon id={platform} className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-medium">{r.title}</span>
+                    <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-dim">
+                      <PlatformIcon id={platform} className="size-3 shrink-0 sm:hidden" />
+                      <span className="truncate">
+                        {r.account ? `@${r.account.handle}` : 'Any account'} · {r.format}
+                      </span>
                     </span>
-                  )}
-                  {busy && <span aria-hidden className="absolute inset-x-0 top-0 h-1/3 animate-[scan_2.2s_linear_infinite] bg-gradient-to-b from-accent-soft/0 via-accent-soft/15 to-accent-soft/0" />}
-                </div>
-                <p className="mt-2 flex items-center gap-1.5 truncate text-[12px] font-medium text-fg">
-                  <span className={cn('size-1.5 shrink-0 rounded-full', busy && 'animate-pulse')} style={{ background: light }} />
-                  {p.name}
-                </p>
-                <p className="truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-dim">
-                  {busy ? (last ? `${last.action} · ${last.ok ? 'ok' : 'failed'}` : 'Starting…') : p.status === 'paused' ? 'Paused' : p.last ? `Last: ${p.last.status}` : 'Idle'}
-                </p>
-                {busy && <p className="mt-0.5 truncate text-[11px] text-muted">{p.run!.goal}</p>}
-              </div>
+                  </span>
+                  <span className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium', s.ring, s.text)}>
+                    <span className={cn('size-1.5 rounded-full', s.dot)} />
+                    {s.label}
+                  </span>
+                </button>
+              </motion.li>
             )
           })}
-        </div>
+        </ul>
       )}
-    </Section>
+    </Panel>
+  )
+}
+
+/** The phones: each one's last screen, what it's doing, and its light. */
+function Phones({ phones }: { phones: Live['phones'] }) {
+  const { navigate } = useRouter()
+  const working = phones.filter((p) => p.run).length
+  return (
+    <Panel
+      title="Phones"
+      sub={phones.length === 0 ? 'The phones that post for you' : `${working} working · ${phones.length} in all`}
+      actions={
+        <Btn size="sm" icon={Smartphone} onClick={() => navigate('/dashboard/phones')}>
+          Manage
+        </Btn>
+      }
+      flush={phones.length > 0}
+    >
+      {phones.length === 0 ? (
+        <Quiet>No phones yet. Add one under Phones.</Quiet>
+      ) : (
+        <ul className={ROWS}>
+          {phones.map((p) => {
+            const status = PHONE_STATUS[p.run ? 'busy' : p.status] ?? PHONE_STATUS.offline
+            const step = p.run?.steps[p.run.steps.length - 1]
+            const handles = p.accounts.map((a) => `@${a.handle}`).join(', ')
+            return (
+              <li key={p.id} className={ROW}>
+                <Screen url={p.screenshot_url} name={p.name} busy={!!p.run} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13.5px] font-medium">{p.name}</span>
+                  <span className="mt-0.5 block truncate text-[11.5px] text-dim">
+                    {p.run ? p.run.goal : p.last ? `Last run ${LAST_RUN[p.last.status] ?? p.last.status}${p.last.ended_at ? ` · ${fmtRelative(p.last.ended_at)}` : ''}` : handles || 'No accounts'}
+                  </span>
+                  {p.run && (
+                    <span className="mt-0.5 block truncate font-mono text-[10.5px] text-accent-soft">{step ? `${step.action} · ${step.ok ? 'ok' : 'failed'}` : 'Starting…'}</span>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5 font-mono text-[10.5px] text-dim">
+                  <span className={cn('size-1.5 rounded-full', status.dot)} />
+                  {status.label}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Panel>
+  )
+}
+
+/** A phone's latest screen, small, opening the whole picture. The outline of a phone when there isn't one. */
+function Screen({ url, name, busy }: { url: string | null; name: string; busy: boolean }) {
+  const [broken, setBroken] = useState(false)
+  useEffect(() => setBroken(false), [url])
+  const frame = cn('grid aspect-[9/16] w-8 shrink-0 place-items-center overflow-hidden rounded-md border bg-white/[0.03] text-dim', busy ? 'border-accent/50' : 'border-line-2')
+  return url && !broken ? (
+    <a href={url} target="_blank" rel="noreferrer" className={frame} title="The phone's latest screen">
+      <img src={url} alt={`${name}'s latest screen`} className="size-full object-cover object-top" onError={() => setBroken(true)} />
+    </a>
+  ) : (
+    <span className={frame}>
+      <Smartphone className="size-3.5" strokeWidth={1.5} />
+    </span>
   )
 }
 
 /** Flows at work: each live run as beads, the ones it has passed lit, the one it's at pulsing. */
 function Flows({ flows, onOpen }: { flows: Live['flows']; onOpen: (f: Live['flows'][number]) => void }) {
   return (
-    <Section title={`Flows at work · ${flows.length}`}>
+    <Panel title="Flows at work" sub="Runs in progress, and where each one is" flush={flows.length > 0} className="overflow-hidden">
       {flows.length === 0 ? (
-        <p className="py-4 text-center text-[12.5px] text-dim">No flow is running right now.</p>
+        <Quiet>No flow is running right now.</Quiet>
       ) : (
-        <ul className="space-y-2">
+        <ul className={ROWS}>
           <AnimatePresence initial={false}>
             {flows.map((f) => {
-              const s = RUN_STATUS[f.status]
               const order = f.graph.nodes.slice().sort((a, b) => a.y - b.y || a.x - b.x)
               return (
                 <motion.li key={f.id} layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <button type="button" onClick={() => onOpen(f)} className="w-full rounded-lg border border-white/[0.06] px-3 py-2.5 text-left transition-colors hover:border-white/[0.12]">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-2 truncate text-[12.5px] font-medium">
-                        <Workflow className="size-3.5 shrink-0 text-accent-soft" /> {f.name}
+                  <button type="button" onClick={() => onOpen(f)} className="block w-full px-4 py-3 text-left transition-colors hover:bg-white/[0.04] md:px-5">
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="flex min-w-0 items-center gap-2 text-[13.5px] font-medium">
+                        <Workflow className="size-3.5 shrink-0 text-dim" strokeWidth={1.75} />
+                        <span className="truncate">{f.name}</span>
                       </span>
-                      <span className={cn('shrink-0 font-mono text-[10px]', s.text)}>{s.label}</span>
+                      <RunStatus status={f.status} className="shrink-0" />
                     </span>
-                    <span className="mt-2 flex items-center gap-1">
+                    <span className="mt-2.5 flex items-center gap-1">
                       {order.map((n) => {
                         const visited = f.visited.includes(n.id)
                         const here = f.here === n.id
@@ -348,7 +393,7 @@ function Flows({ flows, onOpen }: { flows: Live['flows']; onOpen: (f: Live['flow
                         )
                       })}
                     </span>
-                    <span className="mt-1.5 block truncate text-[11px] text-dim">
+                    <span className="mt-2 block truncate text-[11.5px] text-dim">
                       {f.status === 'waiting' && f.resume_at ? `Waiting · carries on ${fmtRelative(f.resume_at)}` : f.step ? `At: ${f.step}` : f.cause}
                     </span>
                   </button>
@@ -358,41 +403,54 @@ function Flows({ flows, onOpen }: { flows: Live['flows']; onOpen: (f: Live['flow
           </AnimatePresence>
         </ul>
       )}
-    </Section>
+    </Panel>
   )
 }
 
 /** Storm Guard on every account: a bar that fills as comments turn. */
 function Weather({ weather }: { weather: Live['weather'] }) {
   return (
-    <Section title="Weather · Storm Guard">
-      <ul className="space-y-2.5">
-        {weather.map((w) => {
-          const color = w.tripped ? '#ff6b6b' : w.pressure >= 85 ? '#ff6b6b' : w.pressure >= 45 ? '#f5b04c' : '#5ee39a'
-          return (
-            <li key={w.account_id} className="flex items-center gap-3">
-              <PlatformIcon id={w.platform} className="size-3.5 shrink-0 text-muted" />
-              <span className="w-[130px] shrink-0 truncate text-[12.5px]">@{w.handle}</span>
-              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
-                <motion.span className="block h-full rounded-full" style={{ background: color }} initial={{ width: 0 }} animate={{ width: `${Math.max(3, w.tripped ? 100 : w.pressure)}%` }} transition={{ duration: 1, ease }} />
-              </span>
-              <span className="w-[86px] shrink-0 text-right font-mono text-[10px] uppercase tracking-[0.12em]" style={{ color }}>
-                {!w.enabled ? 'Off' : w.tripped ? 'Frozen' : w.pressure >= 85 ? 'Stormy' : w.pressure >= 45 ? 'Choppy' : 'Calm'}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-    </Section>
+    <Panel title="Storm Guard" sub="How close each account’s comments are to a freeze" flush={weather.length > 0}>
+      {weather.length === 0 ? (
+        <Quiet>No accounts yet. Connect one and its comments are watched from here.</Quiet>
+      ) : (
+        <ul className={ROWS}>
+          {weather.map((w) => {
+            const t = tone(w)
+            return (
+              <li key={w.account_id} className={ROW}>
+                <PlatformIcon id={w.platform} className="size-3.5 shrink-0 text-muted" />
+                <span className="w-[120px] shrink-0 truncate text-[13px] font-medium sm:w-[150px]">@{w.handle}</span>
+                <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.08]">
+                  <motion.span
+                    className="block h-full rounded-full"
+                    style={{ background: t.color }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.max(3, w.tripped ? 100 : w.pressure)}%` }}
+                    transition={{ duration: 1, ease }}
+                  />
+                </span>
+                <span className="flex w-[74px] shrink-0 justify-end">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium" style={{ color: t.color, borderColor: `color-mix(in oklab, ${t.color} 35%, transparent)` }}>
+                    <span className="size-1.5 rounded-full" style={{ background: t.color }} />
+                    {t.name}
+                  </span>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Panel>
   )
 }
 
 /** The studio: what's being made right now, and the last few things it made. */
 function Studio({ making, made }: { making: Live['making']; made: Live['made'] }) {
   return (
-    <Section title="In the studio">
+    <Panel title="In the studio" sub="Being made now, and the latest finished">
       {making.length > 0 && (
-        <ul className="mb-4 space-y-1.5">
+        <ul className={cn('space-y-2', made.length > 0 && 'mb-4')}>
           {making.map((g) => {
             const Icon = KIND_ICON[g.kind] ?? LoaderCircle
             return (
@@ -400,32 +458,38 @@ function Studio({ making, made }: { making: Live['making']; made: Live['made'] }
                 <LoaderCircle className="size-3.5 shrink-0 animate-spin text-accent-soft" />
                 <Icon className="size-3.5 shrink-0 text-dim" />
                 <span className="min-w-0 flex-1 truncate">{g.prompt}</span>
-                <span className="font-mono text-[10px] text-dim">{fmtRelative(g.since)}</span>
+                <span className="shrink-0 font-mono text-[10.5px] text-dim">{fmtRelative(g.since)}</span>
               </li>
             )
           })}
         </ul>
       )}
       {made.length === 0 && making.length === 0 ? (
-        <p className="py-4 text-center text-[12.5px] text-dim">Nothing made yet today.</p>
+        <Quiet>Nothing made yet today.</Quiet>
       ) : (
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {made.map((g) => {
             const Icon = KIND_ICON[g.kind] ?? ImageIcon
             return (
               <div key={g.id} className="min-w-0">
-                <div className="relative aspect-square overflow-hidden rounded-lg bg-white/[0.04]">
-                  {g.output?.poster_url ? <img src={g.output.poster_url} alt="" className="size-full object-cover" /> : <span className="grid size-full place-items-center text-dim"><Icon className="size-5" strokeWidth={1.5} /></span>}
-                  <span className="absolute bottom-1 left-1 grid size-5 place-items-center rounded bg-black/60 text-white">
+                <div className="relative aspect-square overflow-hidden rounded-lg border border-line bg-white/[0.03]">
+                  {g.output?.poster_url ? (
+                    <img src={g.output.poster_url} alt="" className="size-full object-cover" />
+                  ) : (
+                    <span className="grid size-full place-items-center text-dim">
+                      <Icon className="size-5" strokeWidth={1.5} />
+                    </span>
+                  )}
+                  <span className="absolute bottom-1.5 left-1.5 grid size-5 place-items-center rounded bg-black/60 text-white">
                     <Icon className="size-3" />
                   </span>
                 </div>
-                <p className="mt-1 truncate text-[10.5px] text-dim">{g.prompt}</p>
+                <p className="mt-1.5 truncate text-[11.5px] text-dim">{g.prompt}</p>
               </div>
             )
           })}
         </div>
       )}
-    </Section>
+    </Panel>
   )
 }

@@ -1,15 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode, type Ref } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, ChevronRight, CircleAlert, Headphones, LoaderCircle, Mic, MicOff, Paperclip, Repeat2, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { ArrowUp, AudioLines, AudioWaveform, BadgeCheck, CalendarCheck, Check, CheckCheck, ChevronRight, CircleAlert, FileText, Headphones, ImageOff, ListChecks, LoaderCircle, Mic, MicOff, Paperclip, Pencil, Play, Repeat2, Square, Volume2, VolumeX, Workflow, X } from 'lucide-react'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
+import { useRouter } from '../../lib/router'
 import { Btn, Toggle } from '../ui'
 import { ConversationBar, ConversationList } from './Conversations'
 import { JobsBar } from './Jobs'
 import { PhoneCard, PhoneLiveBar } from './PhoneProof'
 import { VoicePicker } from './Voices'
 import type { VoiceState } from './link'
-import { useAssistant, useAssistantLog, useVoiceState, type Approval, type LogItem } from './store'
+import { useAssistant, useAssistantLog, useVoiceState, type Approval, type LogItem, type Mode } from './store'
 
 const WORDS: Record<VoiceState, [string, string]> = {
   disconnected: ['Offline', 'Reconnecting to the assistant…'],
@@ -54,6 +55,7 @@ export function Conversation({ className, onImport }: { className?: string; onIm
       onDrop={onDrop}
     >
       <ConversationBar onList={() => setListing(true)} />
+      <ModeSwitch />
       <VoiceBar />
       <Log />
       <JobsBar />
@@ -268,75 +270,278 @@ function Line({ item }: { item: LogItem }) {
 
 /* ------------------------------------------------------------------ */
 
+const REVIEW = new Set<Approval['kind']>(['schedule', 'time', 'version', 'lab_post', 'repost'])
 const CLOSED: Record<Approval['status'], string> = {
   waiting: 'Needs your approval',
+  changing: 'Being changed',
   approved: 'Scheduled',
-  declined: 'Declined',
+  declined: 'Skipped',
   failed: 'Couldn’t schedule',
   outdated: 'No longer current',
 }
-/** A campaign version (gate 6B) is approved, not scheduled. */
-const VERSION: Partial<Record<Approval['status'], string>> = { approved: 'Approved', failed: 'Couldn’t approve' }
+/** A campaign version (gate 6B), a plan or a run is approved, not scheduled. */
+const APPROVED: Partial<Record<Approval['kind'], string>> = { version: 'Approved', plan: 'Plan approved', run: 'Running' }
 
-/** Nothing is booked until the person says so here. */
+const fmtWhen = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Next free time in the queue')
+
+/**
+ * What waits for the person, in order: the plan (or a run) first, then each post, one at a time, to
+ * approve, skip, or change (it comes back changed, to approve again). Nothing is made or booked before.
+ */
 function Approvals() {
   const a = useAssistant()
-  const list = Object.values(a.approvals).sort((x, y) => y.id - x.id)
-  const shown = [...list.filter((x) => x.status === 'waiting'), ...list.filter((x) => x.status !== 'waiting').slice(0, 1)]
-  if (!shown.length) return null
+  const [bulk, setBulk] = useState(false)
+  /** The reviews of this round: every one asked since the queue was last empty. */
+  const round = useRef(new Set<number>())
+  const list = Object.values(a.approvals).sort((x, y) => x.id - y.id)
+  const asks = list.filter((x) => !REVIEW.has(x.kind) && x.status === 'waiting')
+  const waiting = list.filter((x) => REVIEW.has(x.kind) && x.status === 'waiting')
+  const changing = list.filter((x) => x.status === 'changing')
+  // This round of reviews: the ones settled since the queue was last empty are done.
+  const open = [...waiting, ...changing.filter((x) => REVIEW.has(x.kind))]
+  if (!open.length) round.current.clear()
+  for (const x of open) round.current.add(x.id)
+  const done = list.filter((x) => round.current.has(x.id) && ['approved', 'declined', 'failed'].includes(x.status)).length
+  const current = waiting[0]
+  const last = !asks.length && !current && !changing.length ? list.filter((x) => ['approved', 'declined', 'failed'].includes(x.status)).at(-1) : undefined
+  if (!asks.length && !current && !changing.length && !last) return null
+
+  const approveAll = async () => {
+    setBulk(true)
+    for (const x of waiting) await a.approve(x)
+    setBulk(false)
+  }
 
   return (
-    <div className="space-y-2 border-t border-line px-4 py-3 md:px-5">
-      <AnimatePresence initial={false}>
-        {shown.map((x) => (
-          <motion.div
-            key={x.id}
-            layout
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease }}
-            className={cn(
-              'rounded-lg border px-3.5 py-3',
-              x.status === 'waiting' ? 'border-accent/40 bg-accent/[0.07]' : x.status === 'approved' ? 'border-ok/25 bg-ok/[0.05]' : 'border-line bg-white/[0.02]',
-            )}
-          >
-            <p className={cn('flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]', x.status === 'waiting' ? 'text-accent-soft' : x.status === 'approved' ? 'text-ok' : 'text-dim')}>
-              {x.kind === 'version' ? <BadgeCheck className="size-3" /> : x.kind === 'repost' ? <Repeat2 className="size-3" /> : <CalendarCheck className="size-3" />}
-              {(x.kind === 'version' && VERSION[x.status]) || CLOSED[x.status]}
-            </p>
+    <div className="max-h-[55%] space-y-2 overflow-y-auto border-t border-line px-4 py-3 md:px-5">
+      <AnimatePresence initial={false} mode="popLayout">
+        {asks.map((x) => (
+          <Card key={x.id} x={x} label={x.kind === 'plan' ? 'Plan · needs your OK' : 'Run · needs your OK'}>
             <p className="mt-1.5 text-[12.5px] leading-snug">{x.text}</p>
-            {x.kind === 'repost' && x.payload && <RepostPreview payload={x.payload} />}
-            {x.detail && x.status !== 'approved' && <p className="mt-1 text-[11.5px] text-dim">{x.detail}</p>}
-            {x.status === 'waiting' && (
-              <div className="mt-3 flex justify-end gap-2">
-                <Btn size="sm" variant="subtle" onClick={() => a.decline(x)}>
-                  Decline
-                </Btn>
-                <Btn size="sm" variant="primary" icon={Check} loading={a.booking.includes(x.id)} disabled={(x.kind === 'schedule' || x.kind === 'repost') && !x.payload} onClick={() => void a.approve(x)}>
-                  Approve
-                </Btn>
-              </div>
+            {!!x.items?.length && (
+              <ol className="mt-2 max-h-40 space-y-0.5 overflow-y-auto text-[11.5px] leading-snug text-muted">
+                {x.items.map((t, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="w-5 shrink-0 text-right font-mono text-dim">{i + 1}</span>
+                    <span>{t}</span>
+                  </li>
+                ))}
+              </ol>
             )}
-          </motion.div>
+            {(x.takes || x.cost) && <p className="mt-2 font-mono text-[10.5px] text-dim">{[x.takes, x.cost && `cost ${x.cost}`].filter(Boolean).join(' · ')}</p>}
+            <Answer x={x} yes={x.kind === 'plan' ? 'Go ahead' : 'Run it'} no="Not now" />
+          </Card>
         ))}
+        {current && (
+          <Card key={current.id} x={current} label={`Review · ${done + 1} of ${done + open.length}`}>
+            {current.kind === 'repost' ? <RepostPreview x={current} /> : <Preview x={current} />}
+            {current.detail && <p className="mt-2 text-[11.5px] text-accent-soft">{current.detail}</p>}
+            <Answer x={current} yes="Approve" no="Skip" />
+            {waiting.length > 1 && (
+              <button type="button" disabled={bulk} onClick={() => void approveAll()} className="mt-2 flex w-full items-center justify-end gap-1 text-[11.5px] text-muted transition-colors hover:text-fg disabled:opacity-50">
+                {bulk ? <LoaderCircle className="size-3 animate-spin" /> : <CheckCheck className="size-3.5" />} Approve all {waiting.length}
+              </button>
+            )}
+          </Card>
+        )}
+        {changing.map((x) => (
+          <motion.p key={`c${x.id}`} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2 rounded-lg border border-line bg-white/[0.02] px-3 py-2 text-[11.5px] text-muted">
+            <LoaderCircle className="size-3 shrink-0 animate-spin text-accent-soft" />
+            <span className="min-w-0 truncate">
+              Changing {x.kind === 'plan' ? 'the plan' : x.text.replace(/^Schedule /, '')}: <span className="text-fg">{x.detail}</span>
+            </span>
+          </motion.p>
+        ))}
+        {last && (
+          <Card key={last.id} x={last} label={(last.status === 'approved' && APPROVED[last.kind]) || CLOSED[last.status]}>
+            <p className="mt-1.5 text-[12.5px] leading-snug">{last.text}</p>
+            {last.detail && last.status !== 'approved' && <p className="mt-1 text-[11.5px] text-dim">{last.detail}</p>}
+          </Card>
+        )}
       </AnimatePresence>
     </div>
   )
 }
 
+// The ref is AnimatePresence's (popLayout measures the card as it leaves)
+function Card({ x, label, children, ref }: { x: Approval; label: string; children: ReactNode; ref?: Ref<HTMLDivElement> }) {
+  const waiting = x.status === 'waiting'
+  return (
+    <motion.div
+      ref={ref}
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.35, ease }}
+      className={cn('rounded-lg border px-3.5 py-3', waiting ? 'border-accent/40 bg-accent/[0.07]' : x.status === 'approved' ? 'border-ok/25 bg-ok/[0.05]' : 'border-line bg-white/[0.02]')}
+    >
+      <p className={cn('flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em]', waiting ? 'text-accent-soft' : x.status === 'approved' ? 'text-ok' : 'text-dim')}>
+        {x.kind === 'plan' ? <ListChecks className="size-3" /> : x.kind === 'run' ? <Play className="size-3" /> : x.kind === 'version' ? <BadgeCheck className="size-3" /> : x.kind === 'repost' ? <Repeat2 className="size-3" /> : <CalendarCheck className="size-3" />}
+        {label}
+      </p>
+      {children}
+    </motion.div>
+  )
+}
+
 /** What a repost's Approve books: its pictures as drawn, and its caption (the credit line comes on top). */
-function RepostPreview({ payload }: { payload: Record<string, unknown> }) {
+function RepostPreview({ x }: { x: Approval }) {
+  const payload = x.payload ?? {}
   const previews = (payload.previews as string[] | undefined) ?? []
   return (
-    <div className="mt-2 flex gap-2.5 rounded-md border border-line bg-white/[0.02] p-2">
-      {previews.slice(0, 3).map((src) => (
-        <img key={src} src={src} alt="" className="size-16 shrink-0 rounded object-cover" />
-      ))}
-      <div className="min-w-0">
-        <p className="line-clamp-4 whitespace-pre-wrap text-[11.5px] leading-snug text-muted">{String(payload.caption ?? '')}</p>
-        <p className="mt-1 text-[10.5px] text-dim">Credit: @{String(payload.author ?? '')} on X</p>
+    <>
+      <p className="mt-1.5 text-[12.5px] leading-snug">{x.text}</p>
+      <div className="mt-2 flex gap-2.5 rounded-md border border-line bg-white/[0.02] p-2">
+        {previews.slice(0, 3).map((src) => (
+          <img key={src} src={src} alt="" className="size-16 shrink-0 rounded object-cover" />
+        ))}
+        <div className="min-w-0">
+          <p className="line-clamp-4 whitespace-pre-wrap text-[11.5px] leading-snug text-muted">{String(payload.caption ?? '')}</p>
+          <p className="mt-1 text-[10.5px] text-dim">Credit: @{String(payload.author ?? '')} on X</p>
+        </div>
       </div>
+    </>
+  )
+}
+
+/** The post under review: what it looks like, where and when it goes. Clicking it shows it whole. */
+function Preview({ x }: { x: Approval }) {
+  const a = useAssistant()
+  const d = x.kind === 'lab_post' ? undefined : a.drafts[x.draft]
+  const thumb = d && (d.versions.find((v) => v.version === d.version)?.thumb ?? d.versions.at(-1)?.thumb)
+  const p = x.preview
+  const media = x.kind === 'lab_post' ? (p?.url ? { url: p.url, kind: p.kind === 'video' ? 'video' : 'image', poster: p.poster } : null) : thumb ? { ...thumb, poster: null } : null
+  const caption = x.kind === 'lab_post' ? p?.caption : d?.caption
+  const what = x.kind === 'lab_post' ? p?.what : d ? `${d.label}${d.title ? ` · ${d.title}` : ''}` : `Draft ${x.draft}`
+  const show = () => {
+    if (x.kind === 'lab_post') window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: `/dashboard/studio?project=${x.project}&node=${encodeURIComponent(String(x.node))}` }))
+    else if (d) {
+      a.setCurrent(d.id)
+      a.setTab('draft')
+      if (window.location.pathname !== '/dashboard/assistant') window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: '/dashboard/assistant' }))
+    }
+  }
+  return (
+    <button type="button" onClick={show} title="Show it" className="mt-2 flex w-full gap-3 rounded-md text-left transition-colors hover:bg-white/[0.03]">
+      <span className="grid h-20 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-black/40">
+        {media?.kind === 'video' ? (
+          <video src={media.url} poster={media.poster ?? undefined} muted playsInline preload="metadata" className="size-full object-cover" />
+        ) : media ? (
+          <img src={media.url} alt="" className="size-full object-cover" />
+        ) : (
+          <ImageOff className="size-4 text-dim" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12.5px] font-medium">{what}</span>
+        <span className="mt-0.5 flex items-center gap-1 font-mono text-[10.5px] text-accent-soft">
+          <CalendarCheck className="size-3" /> {x.kind === 'version' ? 'New version, for the campaign' : fmtWhen(x.when)}
+        </span>
+        {caption && <span className="mt-1 line-clamp-2 block text-[11.5px] leading-snug text-muted">{caption}</span>}
+      </span>
+    </button>
+  )
+}
+
+/** Approve, say no, or say what to change. */
+function Answer({ x, yes, no }: { x: Approval; yes: string; no: string }) {
+  const a = useAssistant()
+  const [asking, setAsking] = useState(false)
+  const [text, setText] = useState('')
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    setAsking(false)
+    setText('')
+  }, [x.id])
+  useEffect(() => {
+    if (asking) input.current?.focus()
+  }, [asking])
+  const send = () => {
+    if (!text.trim()) return
+    a.change(x, text.trim())
+    setAsking(false)
+    setText('')
+  }
+  if (asking) {
+    return (
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          ref={input}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') send()
+            if (e.key === 'Escape') setAsking(false)
+          }}
+          placeholder={x.kind === 'plan' ? 'What to change in the plan…' : 'What to change…'}
+          className="min-w-0 flex-1 rounded-md border border-line-2 bg-ink/60 px-2.5 py-1.5 text-[12.5px] outline-none focus:border-accent/60"
+        />
+        <Btn size="sm" variant="subtle" onClick={() => setAsking(false)}>
+          Cancel
+        </Btn>
+        <Btn size="sm" variant="primary" icon={ArrowUp} disabled={!text.trim()} onClick={send}>
+          Send
+        </Btn>
+      </div>
+    )
+  }
+  return (
+    <div className="mt-3 flex justify-end gap-2">
+      <Btn size="sm" variant="subtle" onClick={() => a.decline(x)}>
+        {no}
+      </Btn>
+      <Btn size="sm" variant="subtle" icon={Pencil} onClick={() => setAsking(true)}>
+        Change…
+      </Btn>
+      <Btn size="sm" variant="primary" icon={Check} loading={a.booking.includes(x.id)} disabled={(x.kind === 'schedule' || x.kind === 'repost') && !x.payload} onClick={() => void a.approve(x)}>
+        {yes}
+      </Btn>
+    </div>
+  )
+}
+
+/**
+ * How content is made in this conversation: drafts here in the chat, or a Creative Lab canvas. Until the
+ * first request it shows the page's (canvas in Creative Lab); the other view is a click away.
+ */
+function ModeSwitch() {
+  const a = useAssistant()
+  const { path, navigate } = useRouter()
+  const c = a.conversation
+  if (!c || !a.kept) return null
+  const inLab = path.startsWith('/dashboard/studio')
+  const mode: Mode = c.mode ?? (inLab ? 'canvas' : 'drafts')
+  const elsewhere = mode === 'canvas' ? !inLab : path !== '/dashboard/assistant'
+  return (
+    <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
+      <span className="text-[11px] text-dim">Make it as</span>
+      <div role="radiogroup" aria-label="How content is made" className="flex rounded-md border border-line bg-ink/40 p-0.5">
+        {(['drafts', 'canvas'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={mode === m}
+            disabled={a.conn !== 'online'}
+            onClick={() => mode !== m && a.setMode(m)}
+            title={m === 'drafts' ? 'Posts made here, in the chat' : 'Posts built from nodes, on a Creative Lab canvas'}
+            className={cn('flex items-center gap-1 rounded px-2 py-0.5 text-[11.5px] transition-colors', mode === m ? 'bg-white/[0.08] text-fg' : 'text-muted hover:text-fg')}
+          >
+            {m === 'drafts' ? <FileText className="size-3" /> : <Workflow className="size-3" />}
+            {m === 'drafts' ? 'Drafts' : 'Canvas'}
+          </button>
+        ))}
+      </div>
+      {elsewhere && (
+        <button
+          type="button"
+          onClick={() => navigate(mode === 'canvas' ? (c.project ? `/dashboard/studio?project=${c.project}` : '/dashboard/studio') : '/dashboard/assistant')}
+          className="ml-auto flex items-center gap-0.5 text-[11px] text-accent-soft hover:underline"
+        >
+          {mode === 'canvas' ? 'Open the canvas' : 'Open the drafts'} <ChevronRight className="size-3" />
+        </button>
+      )}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
 import { CloneVoice, describe } from '../assistant/Voices'
 import type { Voice } from '../assistant/store'
-import { Btn, inputClass, Skeleton } from '../ui'
+import { Btn, inputClass, Skeleton, Select } from '../ui'
 
 type List = { ready: Voice[]; catalog: Voice[]; total: number; languages: string[]; choosable: boolean; clonable: boolean }
 
@@ -172,14 +172,14 @@ export function LabVoicePicker({ id, value, onChange, prefix = '', emptyLabel }:
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
                     <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Describe it: warm, british, narration…" aria-label="Find a voice" className={cn(inputClass, 'h-8 pl-8 text-[12.5px]')} />
                   </label>
-                  <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" className={cn(inputClass, 'h-8 px-2 text-[12px]')}>
+                  <Select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Language" fieldClassName={cn(inputClass, 'h-8 px-2 text-[12px]')}>
                     <option value="">Any language</option>
                     {(list?.languages ?? []).map((l) => (
                       <option key={l} value={l}>
                         {l}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               )}
               {error && <p className="text-[11.5px] leading-snug text-warn">{error}</p>}

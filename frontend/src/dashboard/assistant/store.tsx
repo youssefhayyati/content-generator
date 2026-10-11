@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { api } from '../../lib/api'
+import { api, type LabPayload } from '../../lib/api'
+import { useSession } from '../../lib/session'
 import { useInvalidate } from '../data'
 import { useToast } from '../toast'
 import { ASSISTANT_BASE, AssistantLink, assistantUrl, type AssistantEvent, type VoiceState } from './link'
@@ -115,17 +116,29 @@ export type Linked = {
 }
 export type Approval = {
   id: number
+  /** 0 for a plan, a run or a Post node's time. */
   draft: number
   /** schedule: a time for a post. version: a changed campaign version (gate 6B). time: a time for one.
-   *  repost: a redesigned X post for Instagram (reuse allowed and booked in one click). */
-  kind: 'schedule' | 'version' | 'time' | 'repost'
+   * plan: what is about to be made. run: Creative Lab nodes to run. lab_post: a time for a Post node's post.
+   * repost: a redesigned X post for Instagram (reuse allowed and booked in one click). */
+  kind: 'schedule' | 'version' | 'time' | 'plan' | 'run' | 'lab_post' | 'repost'
   post: number | null
   campaign: number | null
   variant: number | null
   repost?: number | null
   text: string
-  status: 'waiting' | 'approved' | 'declined' | 'failed' | 'outdated'
+  /** changing: the person asked for a change (detail says what); it comes back as a new one. */
+  status: 'waiting' | 'changing' | 'approved' | 'declined' | 'failed' | 'outdated'
   detail: string
+  /** run, lab_post: the Creative Lab project and node. */
+  project?: number | null
+  node?: string | null
+  /** plan, run: what gets made or run, a line each; how long; what it costs. */
+  items?: string[]
+  takes?: string
+  cost?: string
+  /** lab_post: what goes out. */
+  preview?: { url: string | null; poster: string | null; kind: string | null; caption: string; what: string; post: number } | null
   /** UTC; null: the queue's next free time. */
   when: string | null
   /** The post's fields, for booking it with the person's own session. */
@@ -141,6 +154,13 @@ export type ConversationSummary = {
   pictures: number
   campaign: { id: number; name: string } | null
   preview: string
+  /** How content is made in it (null: not settled yet, or kept before there were modes). */
+  mode?: Mode | null
+  project?: number | null
+  /** Its first drafts: the first slide as drawn (an assistant media path), where each stands in FlowAI. */
+  posts?: Array<{ draft: number; title: string; what: string; thumb: { url: string; kind: 'image' | 'video' } | null; status: string; when: string | null }>
+  /** How many are scheduled or out. */
+  scheduled?: number
 }
 /** A voice the assistant can speak in (assistant/backend/voicestudio.py): a ready one, or one from the voice server's catalog. */
 export type Voice = {
@@ -191,7 +211,18 @@ export type VideoVoices = {
 /** A font texts can use (assistant/fonts/fonts.yaml): its name, the style it's grouped under, what it suits. */
 export type FontInfo = { name: string; label: string; style: string; suits: string; url: string }
 export type FontList = { styles: Array<{ id: string; label: string }>; fonts: FontInfo[] }
-export type CurrentConversation = { id: string; title: string; kept: boolean; campaign: { id: number; name: string; stage: string } | null }
+/** How content is made in a conversation: drafts in the chat, or a Creative Lab canvas. */
+export type Mode = 'drafts' | 'canvas'
+export type CurrentConversation = {
+  id: string
+  title: string
+  kept: boolean
+  campaign: { id: number; name: string; stage: string } | null
+  /** Null until the first request, which takes the page's: canvas in Creative Lab, drafts elsewhere. */
+  mode: Mode | null
+  /** Its Creative Lab project, the one canvas mode opens. */
+  project: number | null
+}
 /** A numbered picture or video in the conversation. */
 export type Picture = { id: number; kind: 'image' | 'video'; name: string; source: string; url: string; workflow: string; prompt: string }
 /** A picture, video, dub or face swap being made: where it is now (stage, its detail in text, share done 0..1 when
@@ -470,7 +501,7 @@ function opened(s: State, m: AssistantEvent): State {
   let next: State = {
     ...s,
     ...EMPTY_SESSION,
-    conversation: { id: String(m.id), title: String(m.title ?? ''), kept: !!m.kept, campaign: (m.campaign as CurrentConversation['campaign']) ?? null },
+    conversation: { id: String(m.id), title: String(m.title ?? ''), kept: !!m.kept, campaign: (m.campaign as CurrentConversation['campaign']) ?? null, mode: (m.mode as Mode | null) ?? null, project: (m.project as number | null) ?? null },
     switching: false,
     open: null,
     log: [],
@@ -494,7 +525,7 @@ function onEvent(s: State, m: AssistantEvent): State {
     }
     case 'about': {
       const c = s.conversation
-      return c && c.id === m.id ? { ...s, conversation: { ...c, title: String(m.title ?? ''), campaign: (m.campaign as CurrentConversation['campaign']) ?? null } } : s
+      return c && c.id === m.id ? { ...s, conversation: { ...c, title: String(m.title ?? ''), campaign: (m.campaign as CurrentConversation['campaign']) ?? null, mode: (m.mode as Mode | null) ?? null, project: (m.project as number | null) ?? null } } : s
     }
     case 'linked':
       return { ...s, linked: { ...s.linked, [Number(m.draft)]: m as unknown as Linked } }
@@ -674,7 +705,8 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   newConversation: (campaign?: number) => void
   /** A new conversation that opens with the assistant asking what to make (Creative Lab's New post, no campaign questions). */
   newPost: () => void
-  openConversation: (id: string) => void
+  /** With a draft: that one on screen once it's open. */
+  openConversation: (id: string, draft?: number) => void
   renameConversation: (id: string, title: string) => void
   deleteConversation: (id: string) => void
   /** Ask for the list again (it also comes by itself after every change). */
@@ -710,6 +742,10 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   upload: (files: File[]) => Promise<void>
   approve: (a: Approval) => Promise<void>
   decline: (a: Approval) => void
+  /** Change… on something waiting for approval: what to change; it comes back to approve once changed. */
+  change: (a: Approval, text: string) => void
+  /** How content is made in this conversation (the Drafts | Canvas switch); the page goes to that view. */
+  setMode: (mode: Mode) => void
   /** Book a draft for a time the person picked themselves (or the queue's next free one): their pick is the approval. */
   schedule: (draft: number, at: Date | 'queue') => void
   /** Pictures and videos can be made (ComfyUI is connected). */
@@ -730,6 +766,35 @@ type Assistant = Omit<State, 'log' | 'seq' | 'open'> & {
   setBargeIn: (on: boolean) => void
   /** Approvals being booked right now. */
   booking: number[]
+}
+
+/** A Post node's post scheduled at the time asked, by the person (the node refuses the assistant): its time set,
+ * then run, then its outcome awaited, so "Scheduled" is only said once it is. */
+async function scheduleNode(a: Approval, tz: string) {
+  const base = `/projects/${a.project}/lab`
+  const node = String(a.node)
+  // The node's date field is in the person's FlowAI time zone: the Post node reads it in that one.
+  const local = (iso: string) => {
+    const f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    const p = Object.fromEntries(f.formatToParts(new Date(iso)).map((x) => [x.type, x.value]))
+    return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
+  }
+  const when = (params: Record<string, unknown>) => api(`${base}/ops`, { method: 'POST', body: { ops: [{ op: 'set', id: node, params }] } })
+  await when(a.when ? { when: 'at', at: local(a.when) } : { when: 'queue' })
+  try {
+    await api(`${base}/nodes/${encodeURIComponent(node)}/run`, { method: 'POST', body: { upstream: true } })
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => window.setTimeout(r, 1000))
+      const state = (await api<LabPayload>(base)).nodes[node]
+      if (state?.status === 'failed') throw new Error(state.failed?.error || 'The Post node couldn’t schedule it.')
+      if (state?.post?.status === 'scheduled') return
+    }
+  } catch (e) {
+    // Back to a draft, so the assistant can run the node again (it may only save drafts)
+    await when({ when: 'draft' }).catch(() => undefined)
+    throw e
+  }
+  throw new Error('It’s taking long to schedule: look at the Post node on the canvas.')
 }
 
 const LAST = 'flowai.assistant.conversation'
@@ -813,6 +878,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const retryTimer = useRef<number | undefined>(undefined)
   /** Drafts the person scheduled from the page: their approval is already given. */
   const autoApprove = useRef(new Set<number>())
+  /** The person's FlowAI time zone (UTC when none is set, as FlowAI reads it), for a Post node's time. */
+  const { user } = useSession()
+  const timezone = useRef('UTC')
+  timezone.current = user?.timezone || 'UTC'
+  /** The draft to show once the conversation being opened is (openConversation). */
+  const openAt = useRef<{ id: string; draft: number } | null>(null)
   /** The conversation on screen, for messages sent from callbacks; kept so a reload picks it up again. */
   const conversation = useRef<string | null>(readConversation())
   /** Something to ask for as soon as the assistant is ready (the page opened with ?campaign=). */
@@ -872,6 +943,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const approve = useCallback(
     async (a: Approval) => {
       if ((a.kind === 'schedule' || a.kind === 'repost') && !a.payload) return
+      // A plan or a run is the assistant's to start, once the person said yes.
+      if (a.kind === 'plan' || a.kind === 'run') return link.send({ type: 'approve', id: a.id, conversation: conversation.current })
       setBooking((b) => [...b, a.id])
       try {
         // Done with the person's own session: they are the one approving it.
@@ -881,7 +954,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           const at = a.when && Date.parse(a.when) > Date.now() + 60_000 ? a.when : new Date(Date.now() + 90_000).toISOString()
           await api(`/reposts/${a.repost}/permission`, { method: 'POST', body: { decision: 'allowed', note: p.note, attribution: true } })
           await api(`/reposts/${a.repost}/schedule`, { method: 'POST', body: { caption: p.caption, asset_ids: p.asset_ids, scheduled_at: at, placement: p.placement } })
-        } else if (a.kind === 'version') await api(`/campaigns/${a.campaign}/variants/${a.variant}/approve`, { method: 'POST' })
+        } else if (a.kind === 'lab_post') await scheduleNode(a, timezone.current)
+        else if (a.kind === 'version') await api(`/campaigns/${a.campaign}/variants/${a.variant}/approve`, { method: 'POST' })
         else if (a.kind === 'time') await api(`/campaigns/${a.campaign}/variants/${a.variant}/times`, { method: 'POST', body: { at: a.when } })
         else await api(`/posts/${a.post}`, { method: 'PUT', body: { ...a.payload, status: 'scheduled', ...(a.when ? { scheduled_at: a.when } : { queue: true }) } })
         link.send({ type: 'approve', id: a.id, done: true, conversation: conversation.current })
@@ -894,6 +968,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     },
     [link, invalidate, toast],
   )
+
+  /** A draft on screen, its tab open, and the assistant told it's the one being looked at. */
+  const showDraft = (draft: number) => {
+    dispatch({ type: 'current', id: draft })
+    dispatch({ type: 'tab', tab: 'draft' })
+    dispatch({ type: 'focus', focus: { draft } })
+    link.send({ type: 'focus', draft })
+  }
 
   handlers.current = {
     onEvent: (m) => {
@@ -908,6 +990,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
             queued.current = null
           }
           break
+        case 'mode_changed': {
+          // The switch, or the assistant asked: the view that goes with it.
+          const path = window.location.pathname
+          const to = m.mode === 'canvas' ? (path.startsWith('/dashboard/studio') ? null : m.project ? `/dashboard/studio?project=${Number(m.project)}` : '/dashboard/studio') : path === '/dashboard/assistant' ? null : '/dashboard/assistant'
+          if (to) window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: to }))
+          break
+        }
         case 'lab_open':
           // The assistant made a Creative Lab project: show it (Dashboard listens and navigates).
           window.dispatchEvent(new CustomEvent('flowai:navigate', { detail: `/dashboard/studio?project=${Number(m.project)}` }))
@@ -916,6 +1005,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
           conversation.current = String(m.id)
           autoApprove.current.clear()
           if (m.kept) writeConversation(conversation.current)
+          if (openAt.current?.id === conversation.current) showDraft(openAt.current.draft)
+          openAt.current = null
           break
         case 'voice':
           // The list shows the one in use, and a catalog voice just set up is a ready one now
@@ -1067,7 +1158,14 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       start,
       newConversation: (campaign) => switchTo({ type: 'new', ...(campaign ? { campaign } : {}) }),
       newPost: () => switchTo({ type: 'new', quick: true }),
-      openConversation: (id) => id !== conversation.current && switchTo({ type: 'open', id }),
+      openConversation: (id, draft) => {
+        if (id === conversation.current) {
+          if (draft) showDraft(draft)
+          return
+        }
+        openAt.current = draft ? { id, draft } : null
+        switchTo({ type: 'open', id })
+      },
       renameConversation: (id, title) => link.send({ type: 'rename', id, title }),
       deleteConversation: (id) => {
         if (id === conversation.current) dispatch({ type: 'switching' })
@@ -1128,6 +1226,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       },
       approve,
       decline: (a) => link.send({ type: 'decline', id: a.id, conversation: conversation.current }),
+      change: (a, text) => {
+        link.ensureAudio()
+        link.send({ type: 'change', id: a.id, text, conversation: conversation.current })
+      },
+      setMode: (mode) => action('mode', { mode }),
       schedule: (draft, at) => {
         autoApprove.current.add(draft)
         action('schedule', { draft, when: at === 'queue' ? 'queue' : at.toISOString() })

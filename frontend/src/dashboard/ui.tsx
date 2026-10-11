@@ -6,11 +6,10 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
   type RefObject,
-  type SelectHTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { animate, AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
-import { ChevronDown, LoaderCircle, X, type LucideIcon } from 'lucide-react'
+import { LoaderCircle, X, type LucideIcon } from 'lucide-react'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
 import type { User } from '../lib/api'
@@ -28,6 +27,7 @@ export function Panel({
   children,
   className,
   bodyClassName,
+  flush,
 }: {
   title?: ReactNode
   sub?: ReactNode
@@ -35,6 +35,8 @@ export function Panel({
   children: ReactNode
   className?: string
   bodyClassName?: string
+  /** No padding around the body: for a list whose rows run edge to edge and pad themselves. */
+  flush?: boolean
 }) {
   return (
     <section className={cn('min-w-0 rounded-xl border border-line bg-panel', className)}>
@@ -47,7 +49,7 @@ export function Panel({
           {actions && <div className="flex max-w-full shrink-0 items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={cn('p-4 md:p-5', bodyClassName)}>{children}</div>
+      <div className={cn(flush ? 'mt-4' : 'p-4 md:p-5', bodyClassName)}>{children}</div>
     </section>
   )
 }
@@ -124,7 +126,7 @@ type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 const BTN_VARIANT = {
   primary: 'bg-fg text-ink hover:bg-white hover:shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_20%,transparent)] disabled:bg-fg/50',
-  ghost: 'border border-line-2 text-fg hover:border-white/30 hover:bg-white/[0.04] disabled:text-dim',
+  ghost: 'glass-control border border-line-2 text-fg hover:border-white/30 hover:bg-white/[0.1] disabled:text-dim',
   subtle: 'text-muted hover:bg-white/[0.05] hover:text-fg disabled:text-dim',
   danger: 'border border-fail/30 text-fail hover:bg-fail/10 disabled:opacity-50',
 }
@@ -152,20 +154,8 @@ export function Btn({ variant = 'ghost', size = 'md', icon: Icon, loading, child
   )
 }
 
-export const inputClass =
-  'h-9 w-full rounded-md border border-line-2 bg-white/[0.02] px-3 text-[13px] text-fg outline-none transition-[border-color,box-shadow,background-color] duration-300 placeholder:text-dim hover:border-white/20 focus:border-accent-soft/60 focus:bg-white/[0.03] focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_18%,transparent)] disabled:opacity-60 [color-scheme:dark]'
-
-/** A native select dressed like the other fields: no browser arrow, the studio's chevron instead. */
-export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <span className={cn('relative block', className)}>
-      <select {...rest} className={cn(inputClass, 'appearance-none pr-9 [&>option]:bg-panel-3')}>
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-dim" />
-    </span>
-  )
-}
+export { inputClass } from './field'
+export { ColorInput, DateInput, DateTimeInput, Popover, Select, TimeInput } from './pickers'
 
 export function FieldError({ message }: { message: string | null | undefined }) {
   return (
@@ -204,7 +194,7 @@ export function Segmented<T extends string | number>({
   label: string
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cn('flex rounded-md border border-line p-0.5 text-[12px]', className)}>
+    <div role="radiogroup" aria-label={label} className={cn('glass-control flex rounded-lg border border-line p-0.5 text-[12px]', className)}>
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -213,14 +203,14 @@ export function Segmented<T extends string | number>({
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'relative flex items-center gap-1.5 rounded-[5px] px-3 py-1.5 transition-colors',
+            'relative flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 transition-colors',
             value === o.value ? 'text-fg' : 'text-dim hover:text-muted',
           )}
         >
           {value === o.value && (
             <motion.span
               layoutId={`seg-${id}`}
-              className="absolute inset-0 rounded-[5px] bg-white/[0.08]"
+              className="absolute inset-0 rounded-[6px] bg-white/[0.16] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.2),0_1px_4px_rgb(0_0_0_/_0.35)]"
               transition={{ type: 'spring', stiffness: 500, damping: 40 }}
             />
           )}
@@ -407,7 +397,7 @@ export function Modal({
   className?: string
   /** Nearly the whole page, for looking at a picture or a video: lay it out with Viewer. */
   full?: boolean
-  /** A wide sheet that scrolls inside, for browsing a set of things. */
+  /** A wide sheet, for browsing a set of things. */
   wide?: boolean
 }) {
   useEffect(() => {
@@ -427,19 +417,20 @@ export function Modal({
           exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
         >
-          <div className="absolute inset-0 bg-ink/70 backdrop-blur-sm" onClick={onClose} />
+          <div className="absolute inset-0 bg-ink/55 backdrop-blur-[3px]" onClick={onClose} />
           <motion.div
             role="dialog"
             aria-modal="true"
             aria-label={typeof title === 'string' ? title : undefined}
             data-lenis-prevent
+            // Never taller than the window: the title stays put and the body scrolls under it.
             className={cn(
-              'relative w-full overflow-hidden rounded-xl border border-line-2 bg-panel-2 shadow-[0_40px_120px_-30px_rgb(0_0_0_/_0.95)]',
+              'glass-sheet relative flex w-full flex-col overflow-hidden rounded-2xl',
               full
-                ? 'flex h-[calc(100dvh-2rem)] flex-col md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]'
-                : wide
-                  ? 'flex max-h-[calc(100dvh-2rem)] max-w-5xl flex-col md:max-h-[calc(100dvh-3rem)]'
-                  : 'max-w-md',
+                ? 'h-[calc(100dvh-2rem)] md:h-[calc(100dvh-3rem)] md:max-w-[calc(100vw-3rem)]'
+                : // cn() only joins, and the stylesheet's order decides between two max-w-*: a width the
+                  // caller asked for has to be the only one here.
+                  cn('max-h-[calc(100dvh-2rem)] md:max-h-[calc(100dvh-3rem)]', !/\bmax-w-/.test(className ?? '') && (wide ? 'max-w-5xl' : 'max-w-md')),
               className,
             )}
             initial={{ opacity: 0, y: 16, scale: 0.97 }}
@@ -447,13 +438,13 @@ export function Modal({
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.35, ease }}
           >
-            <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-              <p className="text-[13.5px] font-medium">{title}</p>
-              <button type="button" onClick={onClose} aria-label="Close" className="text-dim transition-colors hover:text-fg">
+            <div className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 px-5 py-3.5">
+              <p className="min-w-0 truncate text-[13.5px] font-medium">{title}</p>
+              <button type="button" onClick={onClose} aria-label="Close" className="shrink-0 text-dim transition-colors hover:text-fg">
                 <X className="size-4" />
               </button>
             </div>
-            <div className={cn('p-5', (full || wide) && 'min-h-0 flex-1 overflow-y-auto')}>{children}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
           </motion.div>
         </motion.div>
       )}
@@ -530,9 +521,7 @@ export function Menu({
             <motion.div
               role="menu"
               style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right }}
-              className={cn(
-                'z-[130] min-w-[200px] origin-top overflow-hidden rounded-lg border border-line-2 bg-panel-3 p-1 shadow-[0_24px_60px_-20px_rgb(0_0_0_/_0.9)]',
-              )}
+              className="glass-menu z-[130] min-w-[200px] origin-top overflow-hidden rounded-[11px] p-1"
               initial={{ opacity: 0, y: -6, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -4, scale: 0.98 }}
@@ -551,8 +540,8 @@ export function Menu({
                     item.onSelect()
                   }}
                   className={cn(
-                    'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12.5px] transition-colors',
-                    item.danger ? 'text-fail hover:bg-fail/10' : 'text-muted hover:bg-white/[0.06] hover:text-fg',
+                    'flex w-full items-center gap-2.5 rounded-[7px] px-2.5 py-1.5 text-left text-[13px]',
+                    item.danger ? 'text-fail hover:bg-fail hover:text-white' : 'text-fg hover:bg-accent hover:text-on-accent',
                   )}
                 >
                   {Icon && <Icon className="size-3.5" strokeWidth={1.75} />}

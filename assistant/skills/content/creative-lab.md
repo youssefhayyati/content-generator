@@ -30,11 +30,14 @@ description: Building and running content as a graph of nodes in FlowAI's Creati
    branch gets different words. Never put "three captions" in a Write node's instructions with variants 1: it
    writes one, and every branch would get the same. Check lab_graph's lines: each says which piece it takes.
    Text over it (Design) is drawn for its placement: give it the same placement as the Where it goes after it.
-3. Running needs the user's OK: say what's ready and what it takes (lab_run's plan: time and cost, and slow or paid
-   nodes such as Video, Animate, Dub, Face swap, songs and cloud models), and run it only once they agree, unless
-   they handed you control (then run what the work needs, and say what you ran).
-4. Posts: a Post node needs the account (account_id). You can save it as a draft (when: draft, then lab_run). Scheduling,
-   posting now and approving are the user's: tell them to press the button on the Post node.
+3. Running needs the user's OK, on screen: for several posts or anything slow or paid (Video, Animate, Dub, Face
+   swap, songs, cloud models), propose_plan before building; once it's approved, lab_run runs what the plan needs
+   right away. Otherwise lab_run shows a Run card (what runs, how long, what it costs) and runs once they approve
+   it. With control handed to you, lab_run runs at once: say what you ran.
+4. Posts: a Post node needs the account (account_id). Save it as a draft (when: draft, then lab_run), then
+   lab_schedule each post with its time, in posting order: the user approves them one by one in their review
+   queue, or asks for a change (then change it, run the Post node again and lab_schedule it again). Posting now
+   is the user's, on the Post node.
 5. YouTube clipping: YouTube video, Transcript, Find moments, Cut & reframe, Captions, Where it goes, Post (the
    youtube-clips template has them). Read the video with lab_youtube and set the node's url and source_id; the user
    records whose video it is on the node (theirs, with permission, or Creative Commons) before anything downloads.

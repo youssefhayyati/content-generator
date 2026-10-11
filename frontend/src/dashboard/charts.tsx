@@ -44,7 +44,7 @@ function niceStep(max: number, ticks = 4) {
 function Tip({ left, value, label, keyed = true }: { left: number; value: ReactNode; label: ReactNode; keyed?: boolean }) {
   return (
     <div
-      className="pointer-events-none absolute top-0 z-10 w-[150px] rounded-md border border-line-2 bg-panel-3 px-3 py-2 shadow-xl"
+      className="pointer-events-none absolute top-0 z-10 w-[150px] glass-menu rounded-[9px] px-3 py-2"
       style={{ left }}
     >
       <p className="text-[15px] font-semibold tracking-[-0.01em]">{value}</p>
