@@ -17,6 +17,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * The publisher. When a post's time comes it books the phone (one job at a time, R8), and the
@@ -154,6 +155,13 @@ class Publisher
             $this->settleFromScreen($run, $shot);
         } catch (PhoneFailed $e) {
             $this->fail($run, $e->getMessage());
+        } catch (Throwable $e) {
+            // Anything else ends the run too, rather than leaving the post "publishing" and the phone booked.
+            report($e);
+            // Never once it has ended (confirmed, say): failing it then would post it a second time.
+            if (($fresh = $run->fresh())?->isRunning()) {
+                $this->fail($fresh, 'The run stopped unexpectedly: '.class_basename($e).'.');
+            }
         }
     }
 
@@ -337,6 +345,9 @@ class Publisher
     /** Proven live: the post is Published, with the evidence on the record. */
     private function settle(PublishingRun $run, bool $ok, ?string $postUrl, ?string $note): void
     {
+        if (! $this->claim($run, 'confirmed')) {
+            return;
+        }
         $post = $run->post;
         $run->update([
             'status' => 'confirmed',
@@ -357,6 +368,9 @@ class Publisher
     /** Told to post, nothing proves it: Submitted, and the Inbox asks a person to look. */
     private function uncertain(PublishingRun $run, ?string $note): void
     {
+        if (! $this->claim($run, 'uncertain')) {
+            return;
+        }
         $run->update([
             'status' => 'uncertain',
             'evidence' => array_filter(['kind' => 'screenshot', 'ref' => $run->screenshot_id ? "/api/assets/{$run->screenshot_id}/file" : null, 'note' => $note]),
@@ -371,6 +385,9 @@ class Publisher
     /** It failed: release the phone, wait (R3), and either try again or hand it to a person. */
     private function fail(PublishingRun $run, string $why): void
     {
+        if (! $this->claim($run, 'failed')) {
+            return;
+        }
         $run->update(['status' => 'failed', 'error' => $why, 'ended_at' => now()]);
         $this->release($run);
         $post = $run->post;
@@ -420,6 +437,21 @@ class Publisher
         $post->update(['status' => PostStatus::Failed, 'error' => $why]);
         ActionLog::record($post->user, 'agent:publisher', 'publish.failed', $post, 'Couldn’t publish: '.$why, 'queued');
         rescue(fn () => app(Flows::class)->postFailed($post->fresh()));
+    }
+
+    /**
+     * End a running run, atomically: the agent finishing it and the stale sweep can race, and whichever
+     * comes second must change nothing (a live post failed and rescheduled would go up twice).
+     */
+    private function claim(PublishingRun $run, string $status): bool
+    {
+        $won = PublishingRun::whereKey($run->id)->where('status', 'running')->update(['status' => $status]) === 1;
+        if ($won) {
+            $run->status = $status;
+            $run->syncOriginalAttribute('status');
+        }
+
+        return $won;
     }
 
     private function release(PublishingRun $run): void

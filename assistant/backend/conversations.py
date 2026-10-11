@@ -280,12 +280,12 @@ class ConversationStore:
     async def save(self, conv: Conversation):
         if not conv.owner or conv.empty:
             return
-        folder = self._dir(conv.owner)
-        data, summary = conv.dump(), conv.summary()
         try:
+            folder = self._dir(conv.owner)
+            data, summary = conv.dump(), conv.summary()
             async with self.lock:
                 await asyncio.to_thread(self._write, folder, conv.id, data, summary)
-        except OSError as exc:
+        except (OSError, TypeError, ValueError) as exc:  # e.g. something in it that isn't JSON
             log.error("conversation %s could not be saved: %s", conv.id, exc)
 
     @staticmethod

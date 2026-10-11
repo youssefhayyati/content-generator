@@ -549,6 +549,8 @@ class Engine
         $node = Graph::find($canvas, $run->node_id);
         if (! $node || $node['type'] !== $run->type) {
             $run->update(['status' => 'canceled', 'error' => 'The node was removed.', 'finished_at' => now()]);
+            // Runs waiting for it hear it won't come.
+            $this->pump($project);
 
             return;
         }
@@ -569,7 +571,13 @@ class Engine
         // An auto run whose result already exists (the same inputs and settings) has nothing to do.
         if ($run->by === 'auto' && ($current = $ctx->current($node)) && $current->inputs_hash === $hash) {
             $run->delete();
+            // Runs waiting for this one go ahead with the result already there.
+            $this->pump($project);
 
+            return;
+        }
+        // Taken atomically: the sweep may have queued this run a second time, and two workers must not both run it.
+        if (! NodeRun::whereKey($run->id)->where('status', 'queued')->update(['status' => 'running', 'started_at' => now()])) {
             return;
         }
         $params = Catalog::withDefaults($node['type'], $node['params'] ?? []);
@@ -578,13 +586,16 @@ class Engine
             'inputs' => $inputs->snapshot(), 'stage' => 'Starting', 'error' => null,
         ]);
 
+        $job = new NodeJob($run, $node, $params, $inputs, $project, $this);
         try {
-            $result = Executors::for($node['type'])->start(new NodeJob($run, $node, $params, $inputs, $project, $this));
+            $result = Executors::for($node['type'])->start($job);
         } catch (NodeFailed|GenerationFailed|InvalidArgumentException $e) {
+            $job->discard();
             $this->fail($run, $e->getMessage());
 
             return;
         } catch (Throwable $e) {
+            $job->discard();
             report($e);
             $this->fail($run, 'Something went wrong running it: '.class_basename($e).'. Try again.');
 
@@ -593,6 +604,8 @@ class Engine
         if (isset($result['outputs'])) {
             $this->succeed($run, $result['outputs'], $result['cost'] ?? 0);
         }
+        // Only now, with every model call made: one that finishes at once can't end the run before the rest exist.
+        $job->dispatch();
     }
 
     /**
@@ -640,6 +653,9 @@ class Engine
      */
     public function succeed(NodeRun $run, array $outputs, float $cost = 0): void
     {
+        if ($this->stopped($run)) {
+            return;
+        }
         $run->update(['status' => 'succeeded', 'outputs' => $outputs, 'cost' => $cost, 'stage' => null, 'share' => 1, 'finished_at' => now()]);
         $project = $run->project()->first();
         $this->unpin($project, $run->node_id);
@@ -669,8 +685,17 @@ class Engine
 
     public function fail(NodeRun $run, string $error): void
     {
+        if ($this->stopped($run)) {
+            return;
+        }
         $run->update(['status' => 'failed', 'error' => mb_substr($error, 0, 2000), 'stage' => null, 'finished_at' => now()]);
         rescue(fn () => $this->pump($run->project()->first()), report: true);
+    }
+
+    /** Stopped by a person while it was working: what it was doing ends with it, and the run stays stopped. */
+    private function stopped(NodeRun $run): bool
+    {
+        return NodeRun::whereKey($run->id)->where('status', 'canceled')->exists();
     }
 
     /**
@@ -687,6 +712,9 @@ class Engine
             }
             $this->fail($r, 'It stopped answering for an hour. Run it again.');
         });
+        // Runs waiting on nodes before them that nothing will ever wake (what they waited for ended without saying so).
+        NodeRun::where('status', 'queued')->whereNotNull('state')->where('updated_at', '<', now()->subMinutes(15))->distinct()->pluck('project_id')
+            ->each(fn ($id) => ($project = Project::find($id)) && $this->pump($project));
     }
 
     public function stop(Project $project, string $nodeId): void

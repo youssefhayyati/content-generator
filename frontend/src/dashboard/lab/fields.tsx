@@ -336,6 +336,9 @@ function PresetPicker({ tool, value, onChange }: { tool: string; value: string; 
   const [q, setQ] = useState('')
   useEffect(() => {
     let live = true
+    // Another tool: not its looks, or its error, while the new ones come.
+    setPresets(null)
+    setError(null)
     api<{ presets: Preset[] }>(`/lab/higgsfield/presets/${tool}`)
       .then((r) => live && setPresets(r.presets))
       .catch((e) => {

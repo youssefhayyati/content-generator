@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { CircleAlert, CircleCheck, Cpu, FileCog, FlaskConical, HardDrive, Link2, PlugZap } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
@@ -263,6 +263,9 @@ function EvalsPanel({ models }: { models: ModelInfo[] }) {
   const { data: evals, setData } = useApi<Evals>('/models/evals')
   const [running, setRunning] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  // The check-back loop, stopped when the page closes (it would poll on for minutes otherwise).
+  const poll = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearInterval(poll.current), [])
 
   const run = async (model: string) => {
     setRunning(model)
@@ -271,7 +274,8 @@ function EvalsPanel({ models }: { models: ModelInfo[] }) {
       toast('Evaluating. Scores appear here as the tasks finish.')
       // Check back while the suite runs in the background.
       const started = Date.now()
-      const t = window.setInterval(async () => {
+      window.clearInterval(poll.current)
+      const t = (poll.current = window.setInterval(async () => {
         const next = await api<Evals>('/models/evals').catch(() => null)
         if (next) setData(next)
         const done = next?.results[model] && Object.values(next.results[model]).every((r) => Date.parse(r.at) >= started - 1000)
@@ -279,7 +283,7 @@ function EvalsPanel({ models }: { models: ModelInfo[] }) {
           window.clearInterval(t)
           setRunning(null)
         }
-      }, 3000)
+      }, 3000))
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Couldn’t start the evals.', 'error')
       setRunning(null)

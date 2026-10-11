@@ -160,17 +160,24 @@ function AutomationService() {
   const [token, setToken] = useState<string | null>(null)
   const [shown, setShown] = useState(false)
   const [rotating, setRotating] = useState(false)
+  const [unloaded, setUnloaded] = useState(false)
 
   useEffect(() => {
     api<{ token: string }>('/publishing/agent-token')
       .then((r) => setToken(r.token))
-      .catch(() => {})
+      .catch(() => setUnloaded(true))
   }, [])
 
   const copy = async () => {
     if (!token) return
-    await navigator.clipboard?.writeText(token)
-    toast('Token copied.')
+    try {
+      if (!navigator.clipboard) throw new Error()
+      await navigator.clipboard.writeText(token)
+      toast('Token copied.')
+    } catch {
+      setShown(true)
+      toast('Couldn’t copy it here: it’s shown, select it instead.', 'error')
+    }
   }
 
   const rotate = async () => {
@@ -178,6 +185,7 @@ function AutomationService() {
     try {
       const r = await api<{ token: string }>('/publishing/agent-token/rotate', { method: 'POST' })
       setToken(r.token)
+      setUnloaded(false)
       setShown(true)
       toast('Token rotated. Update the automation service — the old one is dead.')
     } catch (e) {
@@ -216,7 +224,7 @@ function AutomationService() {
             <Label>Agent token</Label>
             <div className="mt-2 flex items-center gap-2">
               <code className="h-9 flex-1 truncate rounded-md border border-line-2 bg-white/[0.02] px-3 font-mono text-[12px] leading-9 text-muted">
-                {token ? (shown ? token : '•'.repeat(12) + token.slice(-6)) : '…'}
+                {token ? (shown ? token : '•'.repeat(12) + token.slice(-6)) : unloaded ? 'Couldn’t be loaded. Reload, or rotate it.' : '…'}
               </code>
               <Btn size="sm" icon={shown ? EyeOff : Eye} onClick={() => setShown((s) => !s)} disabled={!token}>
                 {shown ? 'Hide' : 'Show'}

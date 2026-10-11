@@ -183,6 +183,12 @@ def with_user_turn(messages: list) -> list:
     return [*messages[:i], {"role": "user", "content": "(Nothing said yet: go by the notes above.)"}, *messages[i:]]
 
 
+def _log_failure(task: asyncio.Task):
+    """Background work has nobody to tell when it fails: the log at least says so."""
+    if not task.cancelled() and (exc := task.exception()):
+        log.error("background work failed", exc_info=exc)
+
+
 @dataclass
 class Models:
     asr: ASREngine
@@ -274,6 +280,7 @@ class VoiceSession:
         task = asyncio.create_task(coro)
         group.add(task)
         task.add_done_callback(group.discard)
+        task.add_done_callback(_log_failure)
         return task
 
     def system_prompt(self) -> str:
@@ -483,7 +490,13 @@ class VoiceSession:
                 if msg.get("bytes"):
                     await self.on_audio(msg["bytes"])
                 elif msg.get("text"):
-                    await self.on_message(json.loads(msg["text"]))
+                    try:
+                        await self.on_message(json.loads(msg["text"]))
+                    except WebSocketDisconnect:
+                        raise
+                    except Exception as exc:  # one bad message mustn't end the connection
+                        log.exception("message %.200r failed", msg["text"])
+                        await self.try_send(type="error", message=f"That didn't work: {exc}")
         except WebSocketDisconnect:
             pass
         finally:

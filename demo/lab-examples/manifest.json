@@ -261,7 +261,7 @@
                 "sm": "/showcase/lab/tips-carousel/slide-1-sm.webp",
                 "w": 1024,
                 "h": 1280,
-                "tone": "#a79f92"
+                "tone": "#a59f98"
             },
             "slide-2": {
                 "kind": "image",
@@ -269,7 +269,7 @@
                 "sm": "/showcase/lab/tips-carousel/slide-2-sm.webp",
                 "w": 1024,
                 "h": 1280,
-                "tone": "#938a7b"
+                "tone": "#978c7a"
             },
             "slide-3": {
                 "kind": "image",
@@ -277,7 +277,7 @@
                 "sm": "/showcase/lab/tips-carousel/slide-3-sm.webp",
                 "w": 1024,
                 "h": 1280,
-                "tone": "#948676"
+                "tone": "#9b9081"
             },
             "slide-4": {
                 "kind": "image",
@@ -285,7 +285,7 @@
                 "sm": "/showcase/lab/tips-carousel/slide-4-sm.webp",
                 "w": 1024,
                 "h": 1280,
-                "tone": "#bbb5ab"
+                "tone": "#95846f"
             }
         },
         "words": {
@@ -483,6 +483,32 @@
         },
         "words": {
             "The caption": "Weekend wheel classes are open. A warm studio, a turning wheel, and a lump of clay waiting for your hands.\n\nYou will learn to centre the clay, raise the walls, and shape a cup with your own two hands, guided by the same people who throw our stoneware every day. No experience needed, just sleeves you can roll up.\n\nYour piece gets fired and glazed in our kiln, ready to pick up when it is done.\n\nBook a class through the link in our bio.\n\n#KilnAndCo #StonewareCups #WheelThrowing #HandmadeCeramics #PotteryClass"
+        }
+    },
+    "hf-restyle": {
+        "media": {
+            "clay": {
+                "kind": "image",
+                "src": "/showcase/lab/hf-restyle/clay.webp",
+                "sm": "/showcase/lab/hf-restyle/clay-sm.webp",
+                "w": 722,
+                "h": 1280,
+                "tone": "#9d938b"
+            },
+            "clip": {
+                "kind": "video",
+                "src": "/showcase/lab/hf-restyle/clip.mp4",
+                "poster": "/showcase/lab/hf-restyle/clip-poster.webp",
+                "w": 414,
+                "h": 720,
+                "tone": "#9a877d",
+                "seconds": 5,
+                "sound": false
+            }
+        },
+        "words": {
+            "The hook over it": "Cold brew season is open at Low Tide. Plan accordingly.",
+            "The caption": "Cold brew season is open at Low Tide. The ice machine has been training all winter for this exact moment.\n\nEighteen hours of slow steep, poured over ice, no fuss beyond that. It tastes like the quay at golden hour, weathered stone and all, and frankly it's the best-looking thing in the harbour besides that one boat we won't name.\n\nCome by the harbour and get one before the regulars clear us out.\n\n#LowTideCoffee #ColdBrewSeason #IcedColdBrew #HarbourSide"
         }
     }
 }

@@ -14,6 +14,9 @@ use App\Models\User;
  */
 class NodeJob
 {
+    /** @var list<int> generations made by start(), sent off once it returns (dispatch) */
+    private array $made = [];
+
     /**
      * @param  array<string, mixed>  $node
      * @param  array<string, mixed>  $params  with defaults filled in
@@ -38,7 +41,8 @@ class NodeJob
     }
 
     /**
-     * A model call made for this run, queued: the run waits for it (Engine::generationSettled).
+     * A model call made for this run, queued once start() returns (dispatch): the run waits for it
+     * (Engine::generationSettled).
      *
      * @param  array<string, mixed>  $params
      * @param  list<int>  $inputs  asset ids
@@ -55,9 +59,27 @@ class NodeJob
             'input_asset_ids' => $inputs ?: null,
             'status' => 'queued',
         ]);
-        RunGeneration::dispatch($generation->id);
+        $this->made[] = $generation->id;
 
         return $generation;
+    }
+
+    /** Send off the model calls start() made. */
+    public function dispatch(): void
+    {
+        foreach ($this->made as $id) {
+            RunGeneration::dispatch($id);
+        }
+        $this->made = [];
+    }
+
+    /** start() failed after making some: they never go out (nor cost anything). */
+    public function discard(): void
+    {
+        if ($this->made) {
+            Generation::whereIn('id', $this->made)->update(['status' => 'canceled', 'finished_at' => now()]);
+            $this->made = [];
+        }
     }
 
     public function label(): string

@@ -122,7 +122,7 @@ export function LabHome() {
 function WhatYouCanMake({ onAsk }: { onAsk: (t: LabTemplate) => void }) {
   const { navigate } = useRouter()
   const toast = useToast()
-  const { data: catalog } = useApi<LabCatalog>('/lab/catalog')
+  const { data: catalog, error } = useApi<LabCatalog>('/lab/catalog')
   const [current, setCurrent] = useState<LabTemplate | null>(null)
   const [open, setOpen] = useState(false)
   const [all, setAll] = useState(false)
@@ -140,7 +140,8 @@ function WhatYouCanMake({ onAsk }: { onAsk: (t: LabTemplate) => void }) {
     setAll(false)
     onAsk(t)
   }
-  if (!catalog) return <Skeleton className="h-[300px] rounded-xl" />
+  // Without the catalog there are no templates to show; the rest of the page still works.
+  if (!catalog) return error ? null : <Skeleton className="h-[300px] rounded-xl" />
   return (
     <>
       <TemplateStrip
@@ -309,11 +310,12 @@ function StartFrom() {
 }
 
 export function LabProjects() {
-  const { data: projects } = useApi<Project[]>('/projects')
+  const { data: projects, error } = useApi<Project[]>('/projects')
   const { navigate } = useRouter()
   const invalidate = useInvalidate()
   const toast = useToast()
 
+  if (!projects && error) return <EmptyState icon={FolderKanban} title="The projects couldn’t be loaded" body={error.message || 'Reload the page to try again.'} />
   if (!projects) return <Skeleton className="h-[160px] rounded-xl" />
   if (!projects.length) {
     return <EmptyState icon={FolderKanban} title="No projects yet" body="Start one above, or ask the assistant: it can do the questions with you and build the first nodes." />
@@ -368,8 +370,8 @@ export function LabBrief({ id }: { id: number }) {
   useEffect(() => {
     api<Campaign>(`/campaigns/${id}`)
       .then(setCampaign)
-      .catch(() => {
-        toast('That brief doesn’t exist any more.')
+      .catch((e) => {
+        toast(e instanceof ApiError && e.status !== 404 ? e.message : 'That brief doesn’t exist any more.')
         navigate('/dashboard/studio', { replace: true })
       })
   }, [id])

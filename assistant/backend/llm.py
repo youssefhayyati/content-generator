@@ -2,13 +2,16 @@
 
 from collections.abc import AsyncIterator
 
+import httpx
 from ollama import AsyncClient, Message
 
 
 class LLM:
     def __init__(self, host: str, api_key: str, model: str, think: bool | str):
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
-        self.client = AsyncClient(host=host, headers=headers)
+        # Without a timeout a stalled request hangs the reply (or a browser task) for good; streamed, it is the
+        # longest wait for the next piece
+        self.client = AsyncClient(host=host, headers=headers, timeout=httpx.Timeout(180, connect=15))
         self.model = model
         self.think = think
 

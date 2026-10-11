@@ -95,7 +95,7 @@ class Graph
     {
         $results = [];
         foreach ($ops as $i => $op) {
-            $what = (string) ($op['op'] ?? '');
+            $what = is_scalar($op['op'] ?? null) ? (string) $op['op'] : '';
             try {
                 [$canvas, $result] = match ($what) {
                     'add' => self::add($canvas, $op),
@@ -120,6 +120,9 @@ class Graph
                 };
             } catch (InvalidArgumentException $e) {
                 throw new InvalidArgumentException('Operation '.($i + 1)." ({$what}): ".$e->getMessage());
+            } catch (\ErrorException|\TypeError) {
+                // A list where a name belongs (an id sent as ["a"], say): the caller's mistake, not a crash.
+                throw new InvalidArgumentException('Operation '.($i + 1)." ({$what}): a field has the wrong type.");
             }
             $results[] = $result;
         }

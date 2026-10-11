@@ -45,7 +45,13 @@ class HiggsfieldClient
      */
     public function status(string $statusUrl): array
     {
-        return $this->call(fn () => $this->http()->get($statusUrl))->json() ?? [];
+        $status = $this->call(fn () => $this->http()->get($statusUrl))->json();
+        // A gateway's error page (HTML, 200) isn't an answer: it must not read as a failed generation.
+        if (! is_array($status) || ! isset($status['status'])) {
+            throw new GenerationFailed('Higgsfield’s status answer wasn’t readable. Asking again shortly.');
+        }
+
+        return $status;
     }
 
     /**
@@ -95,9 +101,16 @@ class HiggsfieldClient
     public function upload(string $contents, string $mime): string
     {
         $slot = $this->call(fn () => $this->http()->post('/files/generate-upload-url', ['content_type' => $mime]));
+        if (! is_string($slot->json('upload_url')) || ! is_string($slot->json('public_url'))) {
+            throw new GenerationFailed('Higgsfield didn’t give a place to upload the input to.');
+        }
         // The presigned URL gets the file and its own headers, never the API credentials.
-        $put = Http::timeout(120)->withHeaders((array) $slot->json('upload_headers', []) + ['Content-Type' => $mime])
-            ->withBody($contents, $mime)->put($slot->json('upload_url'));
+        try {
+            $put = Http::timeout(120)->withHeaders((array) $slot->json('upload_headers', []) + ['Content-Type' => $mime])
+                ->withBody($contents, $mime)->put($slot->json('upload_url'));
+        } catch (ConnectionException) {
+            throw new GenerationFailed('Couldn’t upload the input to Higgsfield. Try again in a moment.');
+        }
         if (! $put->successful()) {
             throw new GenerationFailed('Couldn’t upload the input image to Higgsfield.');
         }

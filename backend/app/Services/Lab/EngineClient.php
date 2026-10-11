@@ -55,7 +55,8 @@ class EngineClient
                 $r = Http::timeout(6)->withHeaders($this->headers())->acceptJson()->get($this->url().'/engine/catalog');
 
                 return match (true) {
-                    $r->successful() => $r->json(),
+                    $r->successful() && is_array($r->json()) => $r->json(),
+                    $r->successful() => ['error' => 'The assistant’s engine answered with something other than JSON.'],
                     // Both sides read ENGINE_KEY from the one .env: the assistant has an older copy of it.
                     in_array($r->status(), [401, 403], true) => ['error' => 'The assistant rejected ENGINE_KEY: it started before .env changed. Recreate it: docker compose up -d assistant.'],
                     default => ['error' => "The assistant’s engine answered {$r->status()}."],
@@ -76,7 +77,7 @@ class EngineClient
      */
     public function voiceList(string $query = '', string $lang = ''): array
     {
-        return $this->call(fn () => Http::timeout(20)->withHeaders($this->headers())->acceptJson()->get($this->url().'/engine/voices/list', ['q' => $query, 'lang' => $lang]))->json();
+        return $this->json($this->call(fn () => Http::timeout(20)->withHeaders($this->headers())->acceptJson()->get($this->url().'/engine/voices/list', ['q' => $query, 'lang' => $lang])));
     }
 
     /** How a voice sounds, as WAV bytes. */
@@ -92,7 +93,7 @@ class EngineClient
      */
     public function useVoice(string $id): array
     {
-        return $this->call(fn () => Http::timeout(120)->withHeaders($this->headers())->acceptJson()->post($this->url().'/engine/voices/use', ['id' => $id]))->json();
+        return $this->json($this->call(fn () => Http::timeout(120)->withHeaders($this->headers())->acceptJson()->post($this->url().'/engine/voices/use', ['id' => $id])));
     }
 
     /**
@@ -102,9 +103,9 @@ class EngineClient
      */
     public function cloneVoice(string $path, string $filename, string $name): array
     {
-        return $this->call(fn () => Http::timeout(300)->withHeaders($this->headers())->acceptJson()
+        return $this->json($this->call(fn () => Http::timeout(300)->withHeaders($this->headers())->acceptJson()
             ->attach('recording', fopen($path, 'r'), $filename)
-            ->post($this->url().'/engine/voices/clone', ['name' => $name]))->json();
+            ->post($this->url().'/engine/voices/clone', ['name' => $name])));
     }
 
     /**
@@ -123,10 +124,33 @@ class EngineClient
             throw new GenerationFailed('The assistant service isn’t answering. Start it (docker compose up -d assistant).');
         }
         if ($r->failed()) {
-            throw new GenerationFailed(is_string($r->json('detail')) ? ucfirst($r->json('detail')).'.' : "The assistant’s engine answered {$r->status()}.");
+            throw new GenerationFailed($this->refusal($r));
         }
 
         return $r;
+    }
+
+    /** The engine's own words when it refused (FastAPI's `detail`, a string or a list of field errors). */
+    private function refusal(Response $r): string
+    {
+        return is_string($r->json('detail')) && trim($r->json('detail')) !== '' ? ucfirst(rtrim($r->json('detail'), '.')).'.' : "The assistant’s engine answered {$r->status()}.";
+    }
+
+    /**
+     * The answer as JSON. A proxy in front of the pod can answer 200 with an HTML error page.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws GenerationFailed
+     */
+    private function json(Response $r): array
+    {
+        $json = $r->json();
+        if (! is_array($json)) {
+            throw new GenerationFailed('The assistant’s engine answered with something other than JSON (a proxy error page?). Try again in a moment.');
+        }
+
+        return $json;
     }
 
     /**
@@ -177,10 +201,14 @@ class EngineClient
             }
         }
         if (! $r->successful()) {
-            throw new GenerationFailed($r->json('detail') ?: "The assistant’s engine answered {$r->status()}.");
+            throw new GenerationFailed($this->refusal($r));
+        }
+        $id = $this->json($r)['id'] ?? null;
+        if (! is_scalar($id) || (string) $id === '') {
+            throw new GenerationFailed('The assistant’s engine didn’t take the job (no id came back).');
         }
 
-        return (string) $r->json('id');
+        return (string) $id;
     }
 
     /**
@@ -200,7 +228,7 @@ class EngineClient
             throw new GenerationFailed("The assistant’s engine answered {$r->status()}.");
         }
 
-        return $r->json();
+        return $this->json($r);
     }
 
     public function fileUrl(string $id, int $index): string

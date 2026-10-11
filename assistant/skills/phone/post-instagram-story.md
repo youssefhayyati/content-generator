@@ -6,8 +6,11 @@ Publish a new Instagram story with the {{kind}} that was just put on this phone,
 is the newest item in the gallery (top left in the picker); use exactly that one. A story has no caption:
 its words are already on the {{kind}}, so add no text, stickers or music.
 
-1. Open the Instagram app (package com.instagram.android). If it is not installed, stop and say so. If it
-   shows a login screen, stop and say the account must be logged in first; never type a password.
+1. The Instagram app was just closed and opened anew, so it should show its home feed; if it isn't open, open
+   it (package com.instagram.android). If it is not installed, stop and say so. If it shows a login screen,
+   stop and say the account must be logged in first; never type a password. If it offers to continue an
+   earlier draft or unfinished post, don't: start a new one ("Start new", "Discard" or "Not now"), even if
+   that drops the old draft. It is never the post asked for here.
 2. Close anything in the way (notification prompts, "Not now" dialogs) with "Not now", "Cancel" or the X.
 3. Tap your own profile picture with the "+" at the top left of the home feed ("Your story"), or tap "+"
    (Create, top left of the Home feed; the middle of the bottom bar is Messages) and choose STORY at the bottom.

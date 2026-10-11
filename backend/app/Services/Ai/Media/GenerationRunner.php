@@ -57,6 +57,10 @@ class GenerationRunner
             }
         } catch (GenerationFailed $e) {
             $this->fail($generation, $e->getMessage());
+        } catch (Throwable $e) {
+            // A timeout, or an answer that isn't what was asked for: never left "running" with nothing polling it.
+            report($e);
+            $this->fail($generation, 'The provider couldn’t be asked: '.class_basename($e).'. Try again.');
         }
     }
 
@@ -77,8 +81,8 @@ class GenerationRunner
         try {
             $model = $this->models->find($generation->model);
             $result = $this->provider($model)->poll($generation);
-        } catch (GenerationFailed $e) {
-            // A hiccup while asking isn't a failed generation; ask again next time.
+        } catch (GenerationFailed|ConnectionException $e) {
+            // A hiccup while asking isn't a failed generation; ask again next time (MAX_MINUTES still ends it).
             report($e);
 
             return false;
@@ -145,6 +149,9 @@ class GenerationRunner
 
     public function fail(Generation $generation, string $error): void
     {
+        if ($generation->fresh()?->isFinished()) {
+            return; // stopped (or ended) meanwhile: it stays as it ended
+        }
         $generation->update(['status' => 'failed', 'error' => $error, 'finished_at' => now()]);
         $this->report($generation);
     }

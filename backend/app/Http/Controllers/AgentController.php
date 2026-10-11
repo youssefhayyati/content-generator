@@ -35,7 +35,6 @@ class AgentController extends Controller
     {
         $this->ownRun($request, $run);
         abort_unless($run->isRunning(), 409, 'This run already ended.');
-        abort_if(count($run->steps ?? []) + count($request->input('steps', [])) > (int) config('publishing.step_budget'), 422, 'Step budget exceeded (R7). End the run.');
         $data = $request->validate([
             'steps' => ['required', 'array', 'min:1'],
             'steps.*.action' => ['required', 'string', 'max:60'],
@@ -43,6 +42,7 @@ class AgentController extends Controller
             'steps.*.ms' => ['required', 'integer', 'min:0', 'max:600000'],
             'steps.*.note' => ['nullable', 'string', 'max:200'],
         ]);
+        abort_if(count($run->steps ?? []) + count($data['steps']) > (int) config('publishing.step_budget'), 422, 'Step budget exceeded (R7). End the run.');
         $publisher->addSteps($run, $data['steps']);
 
         return response()->json(['steps' => count($run->steps ?? [])]);

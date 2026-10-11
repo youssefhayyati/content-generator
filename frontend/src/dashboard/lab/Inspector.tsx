@@ -298,7 +298,11 @@ function Outputs({ lab, node, catalog, assets, onAsset, onSelect }: { lab: Lab; 
         <div key={piece.key} className="relative rounded-lg border border-line bg-white/[0.02] p-3">
           {piece.n > 0 && <p className="mb-1 font-mono text-[10.5px] text-dim">#{piece.n}</p>}
           <p className="whitespace-pre-wrap pr-6 text-[12.5px] leading-relaxed">{piece.text}</p>
-          <button type="button" aria-label="Copy" onClick={() => void navigator.clipboard.writeText(piece.text).then(() => toast('Copied.'))} className="absolute right-2 top-2 text-dim hover:text-fg">
+          <button type="button" aria-label="Copy" onClick={() => {
+            // No clipboard outside a secure page (the app opened by its LAN address, say).
+            const copied = navigator.clipboard ? navigator.clipboard.writeText(piece.text) : Promise.reject(new Error('no clipboard'))
+            void copied.then(() => toast('Copied.'), () => toast('It couldn’t be copied here. Select the text instead.'))
+          }} className="absolute right-2 top-2 text-dim hover:text-fg">
             <Copy className="size-3.5" />
           </button>
         </div>
@@ -341,13 +345,24 @@ function Versions({ lab, node, pinned, currentId }: { lab: Lab; node: LabNode; p
   const [runs, setRuns] = useState<LabHistoryRun[] | null>(null)
   const [assets, setAssets] = useState<Record<number, Asset>>({})
   const [open, setOpen] = useState(false)
+  const [failed, setFailed] = useState(false)
   const askHistory = lab.history
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     askHistory(node.id).then((h) => {
+      if (cancelled) return
       setRuns(h.runs)
       setAssets(h.assets)
-    }).catch(() => setRuns([]))
+      setFailed(false)
+    }).catch(() => {
+      if (cancelled) return
+      setRuns([])
+      setFailed(true)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [open, node.id, askHistory, currentId])
 
   return (
@@ -384,7 +399,7 @@ function Versions({ lab, node, pinned, currentId }: { lab: Lab; node: LabNode; p
               </div>
             )
           })}
-          {runs && !runs.length && <p className="text-[11.5px] text-dim">No versions yet.</p>}
+          {runs && !runs.length && <p className={cn('text-[11.5px]', failed ? 'text-warn' : 'text-dim')}>{failed ? 'Its versions couldn’t be loaded. Try again in a moment.' : 'No versions yet.'}</p>}
         </div>
       )}
     </section>
@@ -426,7 +441,8 @@ function YoutubePanel({ lab, node, source }: { lab: Lab; node: LabNode; source: 
     setBusy(true)
     try {
       await api(`/lab/youtube/${source.id}/permission`, { method: 'POST', body: deny ? { deny: true, note } : { basis, note, credit } })
-      await lab.refresh()
+      // Saved either way: a refresh that fails here is caught up by the next poll.
+      await lab.refresh().catch(() => {})
       toast(deny ? 'Marked as not ours to use.' : 'Permission recorded. Fetch it when you’re ready.')
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'That couldn’t be saved.')

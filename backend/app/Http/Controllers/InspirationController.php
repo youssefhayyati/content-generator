@@ -68,6 +68,7 @@ class InspirationController extends Controller
                     'short' => str_contains($url, '/shorts/'),
                 ];
             }
+
             return ['items' => $items, 'checked_at' => now()->toIso8601String(), 'channel' => $channel];
         });
 

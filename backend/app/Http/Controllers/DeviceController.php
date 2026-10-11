@@ -74,7 +74,7 @@ class DeviceController extends Controller
     public function screenshot(Device $device): BinaryFileResponse
     {
         Gate::authorize('view', $device);
-        abort_unless($device->last_screenshot, 404, 'This phone has no screenshot yet.');
+        abort_unless($device->last_screenshot && Storage::disk('local')->exists($device->last_screenshot), 404, 'This phone has no screenshot yet.');
 
         return response()->file(Storage::disk('local')->path($device->last_screenshot), ['Content-Type' => 'image/png']);
     }
@@ -86,13 +86,15 @@ class DeviceController extends Controller
     {
         $partial = $device !== null;
         $driver = $request->input('driver', $device?->driver);
+        // A phone on the service needs its device ID: on a change too, when it's being cleared or it never had one.
+        $needsRef = $driver === 'http' && (! $partial || blank($request->has('ref') ? $request->input('ref') : $device->ref));
 
         return $request->validate([
             'name' => [$partial ? 'sometimes' : 'required', 'string', 'max:60'],
             'driver' => [$partial ? 'sometimes' : 'required', Rule::in(Device::DRIVERS)],
             // The phone-control service addresses each phone by its device ID (heracles-phone), never by the team key
             // (hk_…), which signs the assistant in and stays in its PHONE_API_KEY.
-            'ref' => [$driver === 'http' && ! $partial ? 'required' : 'nullable', 'string', 'max:120', 'not_regex:/^hk_/'],
+            'ref' => [$needsRef ? 'required' : 'nullable', 'string', 'max:120', 'not_regex:/^hk_/'],
             'profile' => ['sometimes', Rule::in(Device::PROFILES)],
         ], [
             'ref.required' => 'Enter the device ID the phone-control service uses for this phone.',

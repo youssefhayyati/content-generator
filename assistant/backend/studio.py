@@ -650,7 +650,10 @@ class StudioSession:
             frames_from = 0.3 if song and recipe["music"] == "song" else 0.15  # a song takes a while to write
             progress(0, f"reading the lines in {voice['name']}’s voice")
             for i, (slide, path, line) in enumerate(zip(slides, pictures, recipe["lines"])):
-                picture = Image.open(path).convert("RGB") if path else None
+                picture = None
+                if path:
+                    with Image.open(path) as src:  # closed again: a long video otherwise keeps every file open
+                        picture = src.convert("RGB")
                 overlay = reel.layer(size, lambda img, sl=slide: self._draw_texts(img, sl, fonts, safe)[0]) \
                     if slide.texts else None
                 # A shot per sentence, each moving its own way: one picture still looks filmed

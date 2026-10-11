@@ -8,8 +8,10 @@ If there are files ({{count}} > 0), they were just put on the phone: in the gall
 newest items, already in the right order (the newest, top left in the picker, is the first). Use exactly
 those, nothing older.
 
-1. Open the X app (package com.twitter.android). If it is not installed, stop and say so. If it shows a login
-   or "Create account" screen, stop and say the account must be logged in first; never type a password.
+1. The X app was just closed and opened anew, so it should show its timeline; if it isn't open, open it
+   (package com.twitter.android). If it is not installed, stop and say so. If it shows a login or "Create
+   account" screen, stop and say the account must be logged in first; never type a password. If it offers an
+   earlier unsent draft, don't use it: start a new post.
 2. Close anything in the way (notification prompts, "Not now" dialogs, a premium offer) with "Not now",
    "Maybe later", "Cancel" or the X.
 3. Tap the round blue "+" button at the bottom right. If it opens a small menu (Go Live, Spaces, Photos,

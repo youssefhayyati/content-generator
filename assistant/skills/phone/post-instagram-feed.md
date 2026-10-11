@@ -8,8 +8,11 @@ The {{media}} for it were just put on the phone. In the gallery they are the {{c
 in the right order: the newest (top left in the picker) is the first slide, the next one is the second, and so
 on. Use exactly those, nothing older.
 
-1. Open the Instagram app (package com.instagram.android). If it is not installed, stop and say so. If it
-   shows a login screen, stop and say the account must be logged in first; never type a password.
+1. The Instagram app was just closed and opened anew, so it should show its home feed; if it isn't open, open
+   it (package com.instagram.android). If it is not installed, stop and say so. If it shows a login screen,
+   stop and say the account must be logged in first; never type a password. If it offers to continue an
+   earlier draft or unfinished post, don't: start a new one ("Start new", "Discard" or "Not now"), even if
+   that drops the old draft. It is never the post asked for here.
 2. Close anything in the way (a "Turn on notifications" prompt, a "Not now" dialog, a story or ad) with
    "Not now", "Cancel" or the X.
 3. Start a new post: tap the "+" (Create) button at the top left of the Home feed (the middle of the bottom bar

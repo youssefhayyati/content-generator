@@ -9,6 +9,7 @@ use App\Models\Generation;
 use App\Models\NodeRun;
 use App\Models\Project;
 use App\Models\User;
+use App\Services\Ai\Media\GenerationRunner;
 use App\Services\Ai\Models\ModelRegistry;
 use App\Services\Lab\Catalog;
 use App\Services\Lab\Graph;
@@ -310,5 +311,42 @@ class LabHiggsfieldTest extends TestCase
         // Its words are drawn on it after: none in the picture.
         $this->assertStringContainsString('No text, letters, labels or logos', $g->prompt);
         $this->assertStringContainsString('logo', $g->params['negative_prompt']);
+    }
+
+    public function test_every_picture_of_several_comes_back_on_the_node_even_when_each_is_made_at_once(): void
+    {
+        $n = 0;
+        $this->fakeHiggsfield([
+            'api.higgsfield.ai/higgsfield-ai/soul/v2/standard' => function () use (&$n) {
+                $n++;
+
+                return Http::response(['status' => 'queued', 'request_id' => "soul-{$n}", 'status_url' => "https://api.higgsfield.ai/requests/soul-{$n}/status"]);
+            },
+            'api.higgsfield.ai/requests/*' => Http::response(['status' => 'completed', 'images' => [['url' => 'https://cdn.example/out/pic.png']]]),
+        ]);
+        $this->ops([['op' => 'add', 'node' => ['id' => 'three', 'type' => 'image.generate', 'params' => ['model' => 'higgsfield/soul-v2', 'prompt' => 'A mug', 'variations' => 3]]]])->assertOk();
+
+        // The first one finishing doesn't end the run before the other two are even asked for.
+        $this->runNode('three')->assertCreated();
+        $run = NodeRun::where('node_id', 'three')->latest('id')->firstOrFail();
+        $this->assertSame('succeeded', $run->status);
+        $this->assertCount(3, $run->outputs['image']['assets']);
+    }
+
+    public function test_an_error_page_instead_of_a_status_is_asked_again_not_a_failed_picture(): void
+    {
+        $this->fakeHiggsfield([
+            'api.higgsfield.ai/higgsfield-ai/soul/v2/standard' => Http::response(['status' => 'queued', 'request_id' => 'soul-9', 'status_url' => 'https://api.higgsfield.ai/requests/soul-9/status']),
+            // A proxy in the way answers 200 with its own HTML page.
+            'api.higgsfield.ai/requests/soul-9/status' => Http::response('<html><body>502 Bad Gateway</body></html>', 200, ['Content-Type' => 'text/html']),
+        ]);
+        Queue::fake([PollGeneration::class]);
+        $this->ops([['op' => 'add', 'node' => ['id' => 'pic', 'type' => 'image.generate', 'params' => ['model' => 'higgsfield/soul-v2', 'prompt' => 'A mug']]]])->assertOk();
+        $this->runNode('pic')->assertCreated();
+
+        $g = Generation::where('kind', 'image')->latest('id')->firstOrFail();
+        (new PollGeneration($g->id))->handle(app(GenerationRunner::class));
+        $this->assertSame('running', $g->fresh()->status);
+        Queue::assertPushed(PollGeneration::class, fn ($job) => $job->attempt === 1);
     }
 }

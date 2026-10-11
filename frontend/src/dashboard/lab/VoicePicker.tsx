@@ -30,15 +30,20 @@ export function LabVoicePicker({ id, value, onChange, prefix = '', emptyLabel }:
   const [playing, setPlaying] = useState<{ id: string; loading: boolean } | null>(null)
   const audio = useRef<HTMLAudioElement | null>(null)
 
-  const load = (words = q, language = lang) =>
-    api<List>('/lab/voices/list', { query: { q: words.trim(), lang: language } })
+  // Searches can answer out of order: only the latest one's list is shown.
+  const asked = useRef(0)
+  const load = (words = q, language = lang) => {
+    const n = ++asked.current
+    return api<List>('/lab/voices/list', { query: { q: words.trim(), lang: language } })
       .then((l) => {
+        if (!words.trim()) setKnown(l.ready)
+        if (n !== asked.current) return
         setList(l)
         setError('')
-        if (!words.trim()) setKnown(l.ready)
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : 'The voices couldn’t be listed.'))
-      .finally(() => setSearching(false))
+      .catch((e) => n === asked.current && setError(e instanceof ApiError ? e.message : 'The voices couldn’t be listed.'))
+      .finally(() => n === asked.current && setSearching(false))
+  }
 
   // The ready voices once, to name the one picked; the catalog as you type, a moment after the last key.
   useEffect(() => {

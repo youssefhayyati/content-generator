@@ -352,6 +352,8 @@ class LabController extends Controller
             'campaign.audience.required_with' => 'Say who it’s for.',
             'campaign.message.required_with' => 'Say what it has to get across.',
         ]);
+        // An unknown template is refused before anything (a campaign, the project) is made.
+        $graph = $this->templateGraph($request, $data['template'] ?? null) ?? self::startGraph($data['start'] ?? null);
         $campaign = ! empty($data['campaign_id']) ? $user->campaigns()->find($data['campaign_id']) : null;
         if (! empty($data['campaign'])) {
             $c = $data['campaign'];
@@ -401,7 +403,6 @@ class LabController extends Controller
 
         $name = filled($data['name'] ?? null) ? $data['name'] : ($campaign?->title() ?? 'Untitled project');
         $project = $user->projects()->create(['name' => $name, 'canvas' => Graph::normalize(['version' => 2])]);
-        $graph = $this->templateGraph($request, $data['template'] ?? null) ?? self::startGraph($data['start'] ?? null);
         $left = $graph['nodes'] ? min(array_map(fn ($n) => (float) ($n['x'] ?? 0), $graph['nodes'])) - 360 : 0;
         if ($briefParams) {
             // The brief goes first: into the template's Brief node, or a Brief node of its own at the start.

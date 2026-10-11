@@ -501,4 +501,16 @@ class LabTest extends TestCase
         $this->assertSame(['x'], $post->platforms);
         $this->assertSame('draft', $post->status->value);
     }
+
+    public function test_an_unknown_template_or_a_malformed_operation_is_refused_and_changes_nothing(): void
+    {
+        $this->spa()->actingAs($this->user)->postJson('/api/lab/projects', ['name' => 'Ghost', 'template' => 'no-such-template', 'campaign' => ['goal' => 'Sell', 'audience' => 'All', 'message' => 'Buy']])->assertNotFound();
+        $this->assertFalse($this->user->projects()->where('name', 'Ghost')->exists());
+        $this->assertSame(0, $this->user->campaigns()->count());
+
+        // An id sent as a list (an assistant's slip) is a 422 saying which operation, not a 500.
+        $this->ops([['op' => 'add', 'node' => ['id' => 'a', 'type' => 'source.text']]])->assertOk();
+        $this->ops([['op' => 'move', 'id' => ['a'], 'x' => 5]])->assertStatus(422)->assertJsonPath('message', 'Operation 1 (move): a field has the wrong type.');
+        $this->ops([['op' => ['add']]])->assertStatus(422);
+    }
 }

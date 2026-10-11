@@ -33,7 +33,8 @@ log = logging.getLogger(__name__)
 MAX_RUNNING = 10  # generations per conversation at once, e.g. a whole carousel (the pod runs them one by one)
 MAX_UPLOAD = 15 * 1024 * 1024
 MAX_WORKFLOW_DOWNLOAD = 10 * 1024 * 1024
-POLL_ERRORS = 5  # consecutive failed polls before giving up on a job
+POD_BLIP = 90  # seconds the pod may not answer while a job runs (RunPod's proxy, a restart) before it fails
+POLL_ERRORS = 5  # consecutive failed polls before giving up watching an install
 NAME_RE = re.compile(r"[A-Za-z0-9_\-.]{1,120}")
 MEDIA_KEY_RE = re.compile(r"(image|video|audio)(_\d+)?")
 CONTROL_KEYS = {"name", "template", "workflow", "wait", "timeout", "return_base64", "images", "videos", "audios"}
@@ -365,16 +366,16 @@ class MediaSession:
     async def _wait_for(self, job: MediaJob) -> dict:
         """Polls the pod until the job is done, showing how far it has got (stage, step) as it goes."""
         deadline = time.monotonic() + self.timeout_s
-        delay, errors = 1.0, 0
+        delay, failing = 1.0, None  # failing: since when the pod hasn't answered
         while time.monotonic() < deadline:
             await asyncio.sleep(delay)
             delay = min(delay * 1.25, 3)
             try:
                 res = await self.comfy.result(job.prompt_id)
-                errors = 0
+                failing = None
             except ComfyError:
-                errors += 1  # a network blip shouldn't lose a five-minute video
-                if errors >= POLL_ERRORS:
+                failing = failing or time.monotonic()  # a blip or a restart shouldn't lose a five-minute video
+                if time.monotonic() - failing > POD_BLIP:
                     raise
                 continue
             if res.get("status") == "done":

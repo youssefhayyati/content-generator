@@ -41,7 +41,10 @@ class DubError(ComfyError):
 
 
 def _run(cmd: list[str], what: str) -> bytes:
-    proc = subprocess.run(cmd, capture_output=True, timeout=600)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        raise DubError(f"{what} took over ten minutes") from None
     if proc.returncode != 0:
         err = proc.stderr.decode(errors="replace").strip()
         raise DubError(f"{what} failed: {err.splitlines()[-1] if err else 'no output'}")

@@ -208,7 +208,10 @@ class ComfyClient:
         return await self._json("GET", f"/result/{prompt_id}")
 
     async def download(self, url: str) -> bytes:
-        return (await self._request("GET", url, timeout=300)).content
+        r = await self._request("GET", url, timeout=300)
+        if "text/html" in r.headers.get("content-type", ""):  # RunPod's proxy page while the pod restarts
+            raise ComfyError("the ComfyUI pod didn't hand over the result (is it restarting?)")
+        return r.content
 
     async def cancel(self, prompt_id: str) -> dict:
         try:

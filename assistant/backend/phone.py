@@ -78,9 +78,16 @@ QUEUE_POLL_S = 5  # posts waiting their turn check this often whether the phone 
 STEPS_KEPT = 80  # of a post's steps, for FlowAI's record
 PROOF_URL = "media/phone/"  # where the proofs in MEDIA_DIR/phone are served (next to the page, like all media)
 # The phone's agent sends something (a model call's usage, a screenshot, a step) every 10 to 40 s while it works;
-# silent this long, it has no model to think with (its account ran dry: it hangs, retrying)
+# silent this long before its first step, it has no model to think with (its account ran dry: it hangs, retrying)
 AGENT_QUIET_S = 75
+# Once it has shown life, one step of a pro run can think for two minutes: only this long a silence, with no new
+# step on the task either, is a stall
+AGENT_STALL_S = 180
 HANDOVER_SETTLE_S = 10  # a cancelled task of the phone's agent has this long to end before ours takes the phone
+# The app a job uses, closed and opened anew before its first try so it starts on its home screen, not on what an
+# earlier job left (a half-made post)
+APPS = {"instagram": "com.instagram.android", "x": "com.twitter.android"}
+APP_START_S = 4  # an app opened anew takes this long to show its home screen
 
 # The phone dropping out, not the job going wrong: worth another try, if nothing public happened yet
 DROPPED = re.compile(r"PolicyViolation|TargetLost|unreachable|DEVICE_ERROR|can't be reached|answered 5\d\d|"
@@ -189,8 +196,8 @@ def agent_problem(why: str) -> str:
         return "has no model to think with (the organisers' model account ran out of balance)"
     if re.search(r"LLM error|Model\w*Error", why, re.I):
         return "has no model to think with (its model call failed)"
-    if "agent went quiet" in why:
-        return f"went quiet (no sign of life in {AGENT_QUIET_S} s)"
+    if m := re.search(r"agent went quiet: nothing from it in ([\d.]+) s", why):
+        return f"went quiet (no sign of life in {m.group(1)} s)"
     return f"failed ({why[:120]})"
 
 
@@ -211,6 +218,7 @@ class PhoneClient:
         self.agent_down_until = 0.0  # auto: the API's agent had no model to think with; ours until then
         self.agent_problem = ""
         self.choice_file: Path | None = None  # the user's pick on the page (choose)
+        self.tasks: set[str] = set()  # the API tasks we started: one still holding the phone is ours to end
 
     def direct_now(self) -> bool:
         """Whether a job starts on our own agent."""
@@ -296,7 +304,9 @@ class PhoneClient:
         body = {"goal": goal, "mode": mode, "max_steps": max_steps}
         if output_schema:
             body |= {"output_format": "json", "output_schema": output_schema}
-        return await self.call("POST", "/tasks", json=body)
+        task = await self.call("POST", "/tasks", json=body)
+        self.tasks.add(str(task["id"]))
+        return task
 
     async def task(self, task_id: str) -> dict:
         return await self.call("GET", f"/tasks/{task_id}")
@@ -454,7 +464,10 @@ class PhoneJob:
     approval: dict | None = None  # waiting for the user's OK on this
     before: "PhoneJob | None" = None  # the phone's job before this one (closed first if it's idle)
     attempts: int = 1
-    tapped_post: bool = False  # a tap meant to share it went through: it may be up, so never again
+    tapped_post: bool = False  # a tap meant to share it went through (or a task that may share it won't stop): it
+    #                            may be up, so never again
+    fresh: bool = False  # the phone checked and the job's app opened anew (fresh_start), before its first try
+    touched: bool = False  # something was done on the phone: a try after this carries on from where the app is
     direct: bool = False  # run by our own agent on the direct controls, not the API's agent
     handed_over: str = ""  # why ours took it over from the API's agent (which started it)
     run_args: tuple = ()  # direct: the goal, max steps and schema it runs
@@ -594,7 +607,42 @@ class PhoneWork:
             old.status = "done"
         await self.on_started(job)
 
+    async def fresh_start(self, job: PhoneJob):
+        """Before a job's first try: the phone online and free (a task of ours still holding it is ended), and
+        the app the job uses closed and opened anew, so it starts on the app's home screen rather than wherever
+        an earlier job left it (a half-made post, an open dialog). Offline or busy with someone else's task is a
+        PhoneError worth another try (DROPPED); an app that won't restart only costs the clean start."""
+        status = await self.client.status() or {}
+        if not status.get("online", True):
+            raise PhoneError("the phone can't be reached: it's offline")
+        if busy := status.get("busy"):
+            task = str((busy.get("task_id") or busy.get("id")) if isinstance(busy, dict) else busy)
+            if task not in self.client.tasks or not await self._stop_task(task):
+                raise PhoneError(f"BUSY: the phone is doing something else ({json.dumps(busy)[:120]})")
+            log.info("phone job %s: our earlier task %s still held the phone; ended it", job.id, task)
+        job.fresh = True
+        package = APPS.get(job.post.platform) if job.post and job.kind in ("post", "publish", "feedback") else None
+        if not package:
+            return
+        try:
+            await self.client.call("POST", "/phone/app-stop", json={"package": package})
+            await asyncio.sleep(1)
+            await self.client.call("POST", "/phone/app-start", json={"package": package})
+            await asyncio.sleep(APP_START_S)
+            ok, note = True, f"closed and reopened {package}, so it starts on its home screen"
+        except PhoneError as exc:
+            ok, note = False, f"{package} couldn't be restarted ({exc}); it starts from the screen as it is"
+            log.warning("phone job %s: %s", job.id, note)
+        job.steps.append(note)
+        job.act("reset", ok, note)
+        await self.on_step(job, "reset", {"package": package}, ok, note)
+
     async def failed(self, job: PhoneJob, why: str):
+        if job.task and not job.direct and not await self._stop_task(job.task):
+            # Given up on, but the phone's agent goes on: it may still share the post, so it's never posted again
+            log.warning("phone job %s: task %s doesn't stop; it may still go on", job.id, job.task)
+            why += " (and the phone's task wouldn't stop, so it may still have gone on)"
+            job.tapped_post = job.tapped_post or job.kind in ("post", "publish")
         job.status, job.result, job.success = "failed", why, False
         await self.finished(job)
 
@@ -609,6 +657,8 @@ class PhoneWork:
             new = goal is not None
             while True:
                 try:
+                    if new and not (job.fresh or job.touched):
+                        await self.fresh_start(job)
                     if new:
                         await self._start(job, RETRY_NOTE + goal if job.attempts > 1 else goal, mode, schema,
                                           self._steps_left(job, max_steps))
@@ -782,24 +832,44 @@ class PhoneWork:
 
     async def _follow(self, job: PhoneJob, watch: bool = False) -> bool:
         """Reads the task's events until it answers (True) or ends without an answer (False). watch: with our own
-        agent to take over (PHONE_DRIVER=auto), the phone's agent silent for AGENT_QUIET_S while it should be
-        working is out of service."""
+        agent to take over (PHONE_DRIVER=auto), the phone's agent silent while it should be working (AGENT_QUIET_S
+        before its first step, AGENT_STALL_S after), with no new step on the task either, is out of service."""
         answered = False
-        quiet = AGENT_QUIET_S if watch and self.client.driver and self._prefer(job) == "auto" else None
-        async with aclosing(self.client.events(job.task, job.seq)) as events:
-            while True:
-                try:
-                    event = await asyncio.wait_for(anext(events), quiet if job.status == "running" else None)
-                except StopAsyncIteration:
-                    break
-                except TimeoutError:
-                    raise PhoneError(f"the phone's agent went quiet: nothing from it in {quiet} s") from None
-                if await self._event(job, event, answered):
-                    return True
-                answered = answered or event.get("type") == "result"
-                if job.status == "done":
-                    return answered
-        return answered
+        watch = watch and bool(self.client.driver) and self._prefer(job) == "auto"
+        while True:
+            async with aclosing(self.client.events(job.task, job.seq)) as events:
+                while True:
+                    quiet = (AGENT_STALL_S if job.last_step else AGENT_QUIET_S) if watch else None
+                    try:
+                        event = await asyncio.wait_for(anext(events), quiet if job.status == "running" else None)
+                    except StopAsyncIteration:
+                        return answered
+                    except TimeoutError:
+                        break
+                    if await self._event(job, event, answered):
+                        return True
+                    answered = answered or event.get("type") == "result"
+                    if job.status == "done":
+                        return answered
+            if not await self._still_working(job):
+                raise PhoneError(f"the phone's agent went quiet: nothing from it in {quiet} s")
+            log.info("phone job %s: the phone's agent is quiet but its task goes on; following it", job.id)
+
+    async def _still_working(self, job: PhoneJob) -> bool:
+        """After a long silence: the task got further than its events said (a new step, counted from now on, so
+        the next silence needs another), or isn't running any more (it ended, answered or waits for an OK: its
+        events tell which)."""
+        try:
+            task = await self.client.task(job.task)
+        except PhoneError:
+            return True  # can't tell: following its events again decides
+        if task.get("status") != "running":
+            return True
+        steps = int(task.get("steps") or 0)
+        if steps > int(job.last_step or 0):
+            job.last_step = steps
+            return True
+        return False
 
     async def _event(self, job: PhoneJob, event: dict, answered: bool) -> bool:
         """Takes in one event; True once the task has answered and waits for more."""
@@ -807,7 +877,9 @@ class PhoneWork:
         kind, data = event.get("type"), event.get("data") or {}
         if kind == "step":
             job.intent = str(data.get("next_goal") or "")
+            job.last_step = data.get("n") or job.last_step
         elif kind == "action":
+            job.touched = True
             name = data.get("name", "")
             params = {k: v for k, v in (data.get("params") or {}).items() if k not in ("transport", "perception")}
             ok = bool(data.get("ok"))
@@ -1254,7 +1326,7 @@ class PhoneSession(PhoneWork):
             await self.send(type="phone_post", **job.post.event())
 
     async def on_step(self, job: PhoneJob, name: str, params: dict, ok: bool, result: str):
-        own = name in ("transfer", "approval", "retry", "handover")  # ours, not an agent's: no screenshot of its own
+        own = name in ("transfer", "reset", "approval", "retry", "handover")  # ours, not an agent's: no screenshot of its own
         if job.direct:
             shot = None if own else job.shot  # what our agent looked at for this step
         else:

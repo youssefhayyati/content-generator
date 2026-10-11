@@ -287,7 +287,8 @@ async def lab_run(node: str, session, project: int | None = None):
         payload = await client.request("POST", f"/api/projects/{pid}/lab/nodes/{node}/run", json={"upstream": True})
     except Exception as exc:
         return {"error": str(exc)}
-    return {"started": [n["label"] for n in plan.get("nodes", [])], "takes": f"about {plan.get('seconds')} seconds",
+    return {"started": [n.get("label") or n.get("id") for n in plan.get("nodes") or []],
+            "takes": f"about {plan.get('seconds')} seconds",
             "cost": plan.get("cost"), "note": "it runs in the background; look again with lab_graph"}
 
 

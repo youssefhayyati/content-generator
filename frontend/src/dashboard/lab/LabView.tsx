@@ -26,7 +26,7 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
   const toast = useToast()
   const { navigate } = useRouter()
   const invalidate = useInvalidate()
-  const { data: catalog, setData: setCatalog } = useApi<LabCatalog>('/lab/catalog')
+  const { data: catalog, error: catalogError, setData: setCatalog } = useApi<LabCatalog>('/lab/catalog')
   const lab = useLab(id, toast)
   const [selected, setSelected] = useState<string | null>(node ?? null)
   // The right side: the assistant from the start, a node's settings when one is selected.
@@ -96,16 +96,26 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
   )
 
   const rename = async () => {
-    if (!data || !name.trim() || name === data.project.name) return
-    await api(`/projects/${id}`, { method: 'PATCH', body: { name: name.trim() } }).catch(() => toast('The name couldn’t be saved.'))
-    invalidate()
+    if (!data || name === data.project.name) return
+    // An emptied name isn't saved: the one it has comes back.
+    if (!name.trim()) return setName(data.project.name)
+    try {
+      await api(`/projects/${id}`, { method: 'PATCH', body: { name: name.trim() } })
+      invalidate()
+    } catch (e) {
+      // Back to the name it really has.
+      setName(data.project.name)
+      toast(e instanceof ApiError ? e.message : 'The name couldn’t be saved.')
+    }
   }
 
-  if (lab.failed) {
+  // The canvas can't be drawn without the catalog either: say so rather than load forever.
+  const failed = lab.failed ?? (!catalog && catalogError ? catalogError.message || 'The nodes couldn’t be loaded.' : null)
+  if (failed) {
     return (
       <div className="grid h-[60vh] place-items-center text-center">
         <div>
-          <p className="text-[15px] font-medium">{lab.failed}</p>
+          <p className="text-[15px] font-medium">{failed}</p>
           <Btn className="mt-4" icon={ArrowLeft} onClick={() => navigate('/dashboard/studio')}>
             All projects
           </Btn>
@@ -135,7 +145,7 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
             Keep up to date
             <Toggle on={!!data.canvas.auto} onChange={(on) => void lab.ops([{ op: 'auto', on }])} label="Keep the nodes you’ve run up to date" />
           </label>
-          <Btn size="sm" icon={Play} onClick={() => void lab.runAll(false).then(setRunAll).catch(() => toast('That couldn’t be worked out.'))}>
+          <Btn size="sm" icon={Play} onClick={() => void lab.runAll(false).then(setRunAll).catch((e) => toast(e instanceof ApiError ? e.message : 'That couldn’t be worked out.'))}>
             Run all
           </Btn>
           <Btn size="sm" icon={LayoutTemplate} onClick={() => setSaving(true)}>
@@ -234,7 +244,7 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
           void a.say(`Build ${t.name.toLowerCase()} on this canvas, like the template's example: ${t.tagline}`)
         }}
       />
-      <SaveTemplate open={saving} onClose={() => setSaving(false)} projectId={id} defaultName={data.project.name} onSaved={() => api<LabCatalog>('/lab/catalog').then(setCatalog)} />
+      <SaveTemplate open={saving} onClose={() => setSaving(false)} projectId={id} defaultName={data.project.name} onSaved={() => void api<LabCatalog>('/lab/catalog').then(setCatalog).catch(() => {})} />
     </div>
   )
 }

@@ -153,7 +153,7 @@ export const LAB_EXAMPLES: Record<string, LabExample> = {
         sm: "/showcase/lab/tips-carousel/slide-1-sm.webp",
         w: 1024,
         h: 1280,
-        tone: "#a79f92",
+        tone: "#a59f98",
         alt: "Stoneware cups on studio shelves, the headline across the top"
       },
       {
@@ -162,7 +162,7 @@ export const LAB_EXAMPLES: Record<string, LabExample> = {
         sm: "/showcase/lab/tips-carousel/slide-2-sm.webp",
         w: 1024,
         h: 1280,
-        tone: "#938a7b",
+        tone: "#978c7a",
         alt: "Stoneware cups in warm studio light"
       },
       {
@@ -171,7 +171,7 @@ export const LAB_EXAMPLES: Record<string, LabExample> = {
         sm: "/showcase/lab/tips-carousel/slide-3-sm.webp",
         w: 1024,
         h: 1280,
-        tone: "#948676",
+        tone: "#9b9081",
         alt: "Stoneware cups in warm studio light"
       },
       {
@@ -180,7 +180,7 @@ export const LAB_EXAMPLES: Record<string, LabExample> = {
         sm: "/showcase/lab/tips-carousel/slide-4-sm.webp",
         w: 1024,
         h: 1280,
-        tone: "#bbb5ab",
+        tone: "#95846f",
         alt: "Stoneware cups in warm studio light"
       }
     ],
@@ -1115,6 +1115,84 @@ export const LAB_EXAMPLES: Record<string, LabExample> = {
       }
     ],
     note: "Higgsfield wasn’t connected for this example, so the pod stood in: FLUX.2 Klein made the scenes and the headlines were drawn here. Ads Studio designs the whole ad, words and all, several ideas at once."
+  },
+  "hf-restyle": {
+    brand: BRANDS.lowtidecoffee,
+    key: "hf-restyle",
+    look: "panes",
+    platform: "instagram",
+    given: "The cold brew clip, turned into claymation, with a hook over it.",
+    made: [
+      {
+        kind: "video",
+        src: "/showcase/lab/hf-restyle/clip.mp4",
+        poster: "/showcase/lab/hf-restyle/clip-poster.webp",
+        w: 414,
+        h: 720,
+        tone: "#9a877d",
+        seconds: 5,
+        sound: false,
+        alt: "The cold brew pour as claymation, a hook over it"
+      }
+    ],
+    panes: [
+      {
+        m: {
+          kind: "video",
+          src: "/showcase/the-pour.mp4",
+          poster: "/showcase/the-pour-sm.webp",
+          w: 720,
+          h: 1280,
+          tone: "#4e4844",
+          alt: "Cold brew poured over ice in a tall glass on a harbour wall",
+          seconds: 5
+        },
+        label: "The clip"
+      },
+      {
+        m: {
+          kind: "video",
+          src: "/showcase/lab/hf-restyle/clip.mp4",
+          poster: "/showcase/lab/hf-restyle/clip-poster.webp",
+          w: 414,
+          h: 720,
+          tone: "#9a877d",
+          seconds: 5,
+          sound: false,
+          alt: "The cold brew pour as claymation, a hook over it"
+        },
+        label: "In clay"
+      }
+    ],
+    words: [
+      {
+        label: "The hook over it",
+        text: "Cold brew season is open at Low Tide. Plan accordingly."
+      },
+      {
+        label: "The caption",
+        text: "Cold brew season is open at Low Tide. The ice machine has been training all winter for this exact moment.\n\nEighteen hours of slow steep, poured over ice, no fuss beyond that. It tastes like the quay at golden hour, weathered stone and all, and frankly it's the best-looking thing in the harbour besides that one boat we won't name.\n\nCome by the harbour and get one before the regulars clear us out.\n\n#LowTideCoffee #ColdBrewSeason #IcedColdBrew #HarbourSide"
+      }
+    ],
+    steps: [
+      {
+        did: "Turned its first frame into claymation",
+        model: "FLUX.2 Klein"
+      },
+      {
+        did: "Moved it again, stop-motion style",
+        model: "Wan 2.2"
+      },
+      {
+        did: "Wrote the hook",
+        model: "Kimi K3"
+      },
+      {
+        did: "Drew it over the clip",
+        model: "FlowAI"
+      }
+    ],
+    note: "Higgsfield wasn’t connected for this example, so the pod stood in: the first frame was restyled, then animated again. Genjutsu restyles the whole clip, keeping its motion and sound."
   },
   "youtube-clips": {
     brand: BRANDS.ledgerly,

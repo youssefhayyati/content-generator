@@ -44,8 +44,10 @@ class JobService:
             h = self.http.get("/health", timeout=10).raise_for_status().json()
             self.status = f"ok, {h.get('model')}" if h.get("status") == "ok" else \
                 f"{h.get('status')}: {h.get('error') or 'downloading its models'}"
-        except (httpx.HTTPError, ValueError) as exc:
+        except httpx.HTTPError as exc:
             self.status = f"not reachable ({type(exc).__name__})"
+        except (ValueError, AttributeError):  # RunPod's proxy page (200 and HTML) while it restarts
+            self.status = "not answering yet (restarting?)"
         return self.status
 
     def run(self, files: dict, data: dict, progress: Callable[[str, float | None], None],
@@ -68,22 +70,31 @@ class JobService:
                 if time.perf_counter() - t0 > self.timeout:
                     raise JobError(f"{self.what} took over {self.timeout / 60:.0f} minutes")
                 try:
-                    st = self._json(self.http.get(f"{self.path}/{job}"))
+                    r = self.http.get(f"{self.path}/{job}")
                 except httpx.HTTPError:
-                    time.sleep(POLL)  # a blip shouldn't lose a few minutes of work
+                    r = None
+                if r is None or r.status_code in (502, 503, 504) or not _is_json(r):
+                    # A blip, or RunPod's proxy page while the service restarts (200 and HTML): it shouldn't
+                    # lose a few minutes of work, and the time limit still holds
+                    time.sleep(POLL)
                     continue
-                if st["status"] == "done":
+                st = self._json(r)
+                if st.get("status") == "done":
                     break
-                if st["status"] in ("failed", "cancelled"):
+                if st.get("status") in ("failed", "cancelled"):
                     raise JobError(f"{st['status']}: {st.get('error') or 'no reason given'}")
-                now = st.get("stage") or st["status"], round(st["progress"], 2) if st.get("progress") else None
+                now = st.get("stage") or st.get("status") or "working", round(st["progress"], 2) if st.get("progress") else None
                 if now != shown:
                     shown = now
                     progress(*now)
                 time.sleep(POLL)
             progress("downloading the result", None)
-            made = self.http.get(f"{self.path}/{job}/{self.result}", timeout=300)
-            made.raise_for_status()
+            try:
+                made = self.http.get(f"{self.path}/{job}/{self.result}", timeout=300)
+            except httpx.HTTPError as exc:
+                raise JobError(f"{self.what}'s result couldn't be downloaded ({type(exc).__name__})") from None
+            if made.status_code >= 400 or "text/html" in made.headers.get("content-type", ""):
+                raise JobError(f"{self.what}'s result couldn't be downloaded (HTTP {made.status_code})")
         except (Stopped, JobError):
             self._forget(job)
             raise
@@ -101,10 +112,17 @@ class JobService:
         if r.status_code >= 400:
             try:
                 detail = r.json().get("detail")
-            except ValueError:
-                detail = r.text[:200]
-            raise JobError(f"{self.what} said: {detail or r.status_code}")
-        return r.json()
+            except (ValueError, AttributeError):
+                detail = None if "text/html" in r.headers.get("content-type", "") else r.text[:200]
+            raise JobError(f"{self.what} said: {detail or f'HTTP {r.status_code}'}")
+        try:
+            return r.json()
+        except ValueError:  # RunPod's proxy page (200 and HTML) while the service restarts
+            raise JobError(f"{self.what} at {self.url} isn't answering yet (is it restarting?)") from None
+
+
+def _is_json(r: httpx.Response) -> bool:
+    return "json" in r.headers.get("content-type", "")
 
 
 class LipSync(JobService):

@@ -44,23 +44,33 @@ class SongWriter:
                 "use_cot_caption": False, "use_cot_language": False}
         if seed is not None:
             body.update(use_random_seed=False, seed=int(seed))
-        task = self._data(self.http.post("/release_task", json=body))["task_id"]
+        try:
+            task = self._data(self.http.post("/release_task", json=body))["task_id"]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            raise MusicError(f"ACE-Step at {self.url} isn't answering ({type(exc).__name__}); is it running?") from None
         while True:
-            found = self._data(self.http.post("/query_result", json={"task_id_list": [task]}))
-            done = found[0] if found else {}
+            if time.perf_counter() - t0 > self.timeout:
+                raise MusicError(f"ACE-Step took over {self.timeout:.0f} seconds")
+            try:
+                found = self._data(self.http.post("/query_result", json={"task_id_list": [task]}))
+            except (httpx.HTTPError, ValueError, KeyError):
+                found = None  # a blip, or RunPod's proxy page while it restarts: the time limit still holds
+            done = found[0] if isinstance(found, list) and found and isinstance(found[0], dict) else {}
             if done.get("status") == 1:
                 break
             if done.get("status") == 2:
                 raise MusicError(f"ACE-Step couldn't make it: {done.get('result') or done.get('error') or 'no reason'}")
             if progress and (share := self._share(done)) is not None:
                 progress(share)
-            if time.perf_counter() - t0 > self.timeout:
-                raise MusicError(f"ACE-Step took over {self.timeout:.0f} seconds")
             time.sleep(POLL)
-        result = done["result"]
-        result = json.loads(result) if isinstance(result, str) else result
-        r = self.http.get(result[0]["file"], timeout=120)
-        r.raise_for_status()
+        try:
+            result = done["result"]
+            result = json.loads(result) if isinstance(result, str) else result
+            r = self.http.get(result[0]["file"], timeout=120)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            raise MusicError(f"ACE-Step's song couldn't be downloaded ({type(exc).__name__})") from None
+        if r.status_code >= 400 or "text/html" in r.headers.get("content-type", ""):
+            raise MusicError(f"ACE-Step's song couldn't be downloaded (HTTP {r.status_code})")
         log.info("song for %r: %.0f s in %.1f s", description[:60], seconds, time.perf_counter() - t0)
         return r.content
 
@@ -77,8 +87,17 @@ class SongWriter:
 
     @staticmethod
     def _data(r: httpx.Response):
+        """Its answer's data. MusicError when ACE-Step said no; httpx.HTTPError or ValueError when the answer
+        isn't its own (a blip, or RunPod's proxy page while it restarts)."""
+        try:
+            reply = r.json()
+        except ValueError:
+            r.raise_for_status()
+            raise
+        if not isinstance(reply, dict):
+            r.raise_for_status()
+            raise ValueError("not ACE-Step's answer")
+        if reply.get("code", 200) != 200 or reply.get("error") or (r.status_code >= 400 and reply.get("detail")):
+            raise MusicError(f"ACE-Step: {reply.get('error') or reply.get('detail') or reply.get('code')}")
         r.raise_for_status()
-        reply = r.json()
-        if reply.get("code", 200) != 200 or reply.get("error"):
-            raise MusicError(f"ACE-Step: {reply.get('error') or reply.get('code')}")
         return reply["data"]

@@ -39,7 +39,8 @@ INPUT_TRIES = 3
 ACTION_GAP_S = 5.0  # at least this long between two inputs to the phone (PHONE_ACTION_GAP_SECONDS): one at a time
 MODEL_TRIES = 3
 KEYS = {"enter", "back", "home", "tab", "esc", "search"}
-# Apps the phone won't start by name (only a few system apps are on its allowlist): opened from the app list
+# Apps that, if the phone won't start them by name (it once allowed only a few system apps), are opened from the
+# app list instead
 APP_NAMES = {"com.instagram.android": "Instagram", "com.twitter.android": "X"}
 
 FIND_APP = """This is an Android phone's app list. Where is the icon of the app named "{name}" (its label under it \
@@ -223,11 +224,15 @@ class DirectDriver:
 
     async def open_app(self, package: str):
         """By its package name when the phone allows it, else from the app list: home, swipe up, its icon."""
-        from .phone import PhoneError
+        from .phone import DROPPED, PhoneError
         name = APP_NAMES.get(package)
-        if not name:
+        try:
             await self.input("/phone/app-start", {"package": package})
             return
+        except PhoneError as exc:
+            if not name or DROPPED.search(str(exc)):
+                raise
+            log.info("the phone won't start %s by name (%s): opening it from the app list", package, exc)
         await self.input("/phone/key", {"key": "home"})
         await asyncio.sleep(1.0)
         for swipe in ("medium", "long"):

@@ -53,6 +53,7 @@ from . import dub, platforms, reel, retouch
 from .comfyui import ComfyError, describe_error, describe_progress
 from .config import settings
 from .media import _size, data_url, made_files
+from .music import MusicError
 from .studio import (EDIT_PROMPTS, POSITIONS, SIZES, Text, _behind, _color, _sentences, draw_text, find_font,
                      font_catalog, picture_colours, readability)
 
@@ -60,6 +61,7 @@ log = logging.getLogger(__name__)
 
 KEEP_SECONDS = 2 * 3600
 POLL = 1.5
+POD_BLIP = 90  # seconds the pod may not answer while a job runs (RunPod's proxy, a restart) before it fails
 VIDEO_PLACEMENT = {"instagram": "reel", "x": "post"}
 MAX_UPLOAD = 400 * 2**20
 
@@ -141,8 +143,12 @@ class Engine:
         except asyncio.CancelledError:
             job.status, job.error = "canceled", "stopped"
             raise
-        except (EngineError, ComfyError, dub.DubError) as exc:
+        except (EngineError, ComfyError, dub.DubError, MusicError) as exc:
             job.status, job.error = "failed", str(exc)
+        except httpx.HTTPError as exc:  # a pod service that didn't answer, or not with its API
+            log.warning("engine job %s (%s): %s", job.id, job.task, exc)
+            job.status, job.error = "failed", (f"a service on the pod didn't answer ({type(exc).__name__}); "
+                                               "it may be restarting")
         except Exception as exc:
             log.exception("engine job %s (%s) failed", job.id, job.task)
             job.status, job.error = "failed", f"something went wrong ({type(exc).__name__})"
@@ -161,7 +167,8 @@ class Engine:
                 pass
         if job.handle and not job.handle.done():
             job.handle.cancel()
-        job.status = "canceled"
+        if job.status == "running":  # one that already finished keeps its files and outcome
+            job.status = "canceled"
 
     def _forget_old(self):
         now = time.time()
@@ -211,7 +218,9 @@ class Engine:
         if self._music_up and time.monotonic() - self._music_up[0] < 60:
             return "ok" if self._music_up[1] else "not answering"
         try:
-            up = songs.http.get("/health", timeout=6).status_code < 500
+            # RunPod's proxy answers 200 with a web page while the service restarts: only its JSON counts
+            r = songs.http.get("/health", timeout=6)
+            up = r.status_code == 200 and "json" in r.headers.get("content-type", "")
         except httpx.HTTPError:
             up = False
         self._music_up = (time.monotonic(), up)
@@ -302,17 +311,17 @@ class Engine:
         prompt_id = queued["prompt_id"]
         job.on_cancel.append(lambda: asyncio.get_event_loop().create_task(comfy.cancel(prompt_id)))
         deadline = time.monotonic() + settings.comfyui_timeout_minutes * 60
-        errors = 0
+        failing = None  # since when the pod hasn't answered
         while True:
             await asyncio.sleep(POLL)
             if time.monotonic() > deadline:
                 raise EngineError("the pod didn't finish in time; it may have restarted")
             try:
                 res = await comfy.result(prompt_id)
-                errors = 0
+                failing = None
             except ComfyError:
-                errors += 1
-                if errors >= 5:
+                failing = failing or time.monotonic()
+                if time.monotonic() - failing > POD_BLIP:
                     raise
                 continue
             if res.get("status") == "done":
@@ -354,6 +363,8 @@ class Engine:
         tts = self.m.tts
         if not wanted:
             return None
+        if not tts:
+            raise EngineError("speech is off on the assistant (no voice server)")
         found = await asyncio.to_thread(tts.find, wanted)
         if found:
             v, catalog = found
@@ -372,14 +383,19 @@ class Engine:
         except Exception as exc:
             log.info("the voice server didn't transcribe it (%s)", exc)
         if settings.sound_url:
-            async with httpx.AsyncClient(timeout=300) as http:
-                r = await http.post(f"{settings.sound_url.rstrip('/')}/v1/transcribe", content=wav,
-                                    headers={"Content-Type": "audio/wav"})
-                r.raise_for_status()
-                return " ".join(str(r.json().get("text") or "").split())
+            try:
+                async with httpx.AsyncClient(timeout=300) as http:
+                    r = await http.post(f"{settings.sound_url.rstrip('/')}/v1/transcribe", content=wav,
+                                        headers={"Content-Type": "audio/wav"})
+                    r.raise_for_status()
+                    return " ".join(str(r.json().get("text") or "").split())
+            except (httpx.HTTPError, ValueError, AttributeError) as exc:
+                log.info("FlowAI Sound didn't transcribe it (%s)", exc)
         return ""
 
     async def _clone_from(self, path: Path, name: str) -> dict:
+        if not self.m.tts:
+            raise EngineError("speech is off on the assistant (no voice server)")
         clip = await asyncio.to_thread(dub.reference, await asyncio.to_thread(dub.sound_of, path))
         heard = await self._hear(clip)
         if not heard:
@@ -552,6 +568,8 @@ class Engine:
         if len(lines) > n:  # more lines than pictures: the last picture takes the rest
             lines = [*lines[:n - 1], " ".join(lines[n - 1:])]
         lines += [""] * (n - len(lines))
+        if any(lines) and not tts:
+            raise EngineError("speech is off on the assistant (no voice server), so the lines can't be read")
         platform = str(p.get("platform") or "instagram")
         platform = platform if platform in platforms.SPECS else "instagram"
         placement = VIDEO_PLACEMENT[platform]
@@ -665,8 +683,8 @@ class Engine:
 
         base, area, box, part = await asyncio.to_thread(prepare)
         instruction = EDIT_PROMPTS[mode].format(what=f": {what}" if mode == "improve" and what else what)
-        sub = Job(job.id + "-edit", "comfy", job.dir)
-        sub.step = job.step  # its progress is this job's
+        sub = Job(job.id + "-edit", "comfy", job.dir, stop=job.stop, on_cancel=job.on_cancel)
+        sub.step = job.step  # its progress is this job's, and stopping this job stops its run on the pod
         part_path = job.dir / "in-part.png"
         part_path.write_bytes(part)
         await self._comfy(sub, {"workflow": found[0], "prompt": instruction}, {"image": [part_path]})
@@ -696,7 +714,10 @@ class Engine:
             if r.status_code == 404:
                 raise EngineError("the pod's face service has no face detection yet: redeploy it (runpod/deploy.sh)")
             r.raise_for_status()
-            return r.json()
+            try:
+                return r.json()
+            except ValueError:  # RunPod's proxy page while the service restarts
+                raise EngineError("the pod's face service isn't answering yet; try again in a minute") from None
 
         return await asyncio.to_thread(ask)
 
@@ -769,11 +790,19 @@ async def voice_sample(request: Request, id: str, catalog: bool = False):
 @router.post("/voices/use", dependencies=[Depends(_auth)])
 async def voice_use(request: Request):
     """A catalog voice set up as a ready one (rendered once, about three seconds): its profile."""
-    wanted = str((await request.json()).get("id") or "")
     try:
-        return await _engine(request)._voice(wanted) or _missing()
+        wanted = str((await request.json()).get("id") or "")
+    except (ValueError, AttributeError):
+        raise HTTPException(422, "send the voice's id as JSON") from None
+    if not wanted:
+        raise HTTPException(422, "send the voice's id")
+    try:
+        return await _engine(request)._voice(wanted)
     except EngineError as exc:
         raise HTTPException(422, str(exc)) from None
+    except Exception as exc:
+        log.warning("voice use %s: %s", wanted, exc)
+        raise HTTPException(502, "the voice server couldn't set up that voice") from None
 
 
 @router.post("/voices/clone", dependencies=[Depends(_auth)])
