@@ -115,7 +115,10 @@ export type LinkClip = {
   source_type: 'youtube' | 'article'
   status: 'queued' | 'downloading' | 'reading' | 'analyzing' | 'writing' | 'rendering' | 'ready' | 'failed'
   title: string | null
-  platform: 'instagram' | 'tiktok'
+  platform: 'instagram' | 'tiktok' | 'facebook' | 'youtube'
+  /** What the draft becomes: a reel or a story (Instagram, Facebook), a TikTok video, a YouTube Short. */
+  placement: 'reel' | 'story' | 'video' | 'short'
+  source_title: string | null
   seconds: number
   progress: number
   start: number | null
@@ -124,9 +127,48 @@ export type LinkClip = {
   caption: string | null
   asset: Asset | null
   post_id: number | null
+  /** Ready with a video: its subtitles, look and music can be changed. */
+  editable: boolean
+  edited: boolean
   error: string | null
   created_at: string
   updated_at: string
+}
+
+/** How a highlight's subtitles look. `y` is where their middle sits, from the top (0) to the bottom (1), on 1080 × 1920. */
+export type ClipStyle = {
+  captions: boolean
+  font: string
+  size: number
+  color: string
+  highlight: string | null
+  outline: string
+  backdrop: 'outline' | 'box' | 'shadow' | 'none'
+  uppercase: boolean
+  words: number
+  y: number
+  title: boolean
+  title_text: string | null
+}
+
+export type ClipMusic = { asset_id: number | null; volume: number; original: number; asset?: Asset | null }
+
+/** `em`: the font's em per pixel of subtitle size (libass sizes by ascent + descent, the browser by the em). */
+export type ClipFont = { key: string; label: string; style: string; scale: number; em: number; url: string }
+
+/** GET /clips/{id}/edit */
+export type ClipEdit = {
+  clip: LinkClip
+  seconds: number
+  title: string | null
+  words: TimedWord[]
+  style: ClipStyle
+  defaults: ClipStyle
+  music: ClipMusic
+  /** The video without any text, to preview over; null for highlights made before editing existed. */
+  master_url: string | null
+  batch_ready: number
+  fonts: ClipFont[]
 }
 
 /** GET /assets/{id}/words */

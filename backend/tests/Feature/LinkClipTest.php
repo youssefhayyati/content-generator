@@ -3,17 +3,22 @@
 namespace Tests\Feature;
 
 use App\Jobs\CreateLinkClip;
+use App\Jobs\RestyleLinkClip;
 use App\Models\Asset;
 use App\Models\LinkClip;
 use App\Models\User;
+use App\Services\Clips\ClipFonts;
 use App\Services\Clips\ClipPlanner;
 use App\Services\Clips\ClipRenderer;
+use App\Services\Clips\ClipStyle;
 use App\Services\Clips\LinkClipper;
+use App\Services\Sound\Captions;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -42,6 +47,23 @@ class LinkClipTest extends TestCase
         $this->spa()->actingAs($user)->postJson('/api/clips', [
             'url' => 'https://example.com/a-good-article', 'platform' => 'instagram', 'seconds' => 45, 'rights_confirmed' => true,
         ])->assertStatus(202)->assertJsonPath('data.0.source_type', 'article');
+    }
+
+    public function test_a_highlight_goes_to_a_platform_as_a_reel_a_story_or_a_short_with_a_caption_colour(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        $base = ['url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'seconds' => 30, 'count' => 1, 'rights_confirmed' => true];
+
+        $story = $this->spa()->actingAs($user)->postJson('/api/clips', [...$base, 'platform' => 'facebook', 'placement' => 'story', 'caption_color' => '#FDE047'])
+            ->assertStatus(202)->assertJsonPath('data.0.platform', 'facebook')->assertJsonPath('data.0.placement', 'story')->json('data.0.id');
+        $this->assertSame('#fde047', LinkClip::find($story)->settings['style']['color']);
+        $this->spa()->actingAs($user)->postJson('/api/clips', [...$base, 'platform' => 'youtube'])->assertStatus(202)->assertJsonPath('data.0.placement', 'short');
+        $this->spa()->actingAs($user)->postJson('/api/clips', [...$base, 'platform' => 'tiktok'])->assertStatus(202)->assertJsonPath('data.0.placement', 'video');
+
+        $this->spa()->actingAs($user)->postJson('/api/clips', [...$base, 'platform' => 'tiktok', 'placement' => 'story'])->assertUnprocessable()->assertJsonValidationErrors('placement');
+        $this->spa()->actingAs($user)->postJson('/api/clips', [...$base, 'platform' => 'instagram', 'placement' => 'story', 'seconds' => 90])->assertUnprocessable()->assertJsonValidationErrors('seconds');
+        $this->spa()->actingAs($user)->postJson('/api/clips', [...$base, 'platform' => ['x']])->assertUnprocessable()->assertJsonValidationErrors('platform');
     }
 
     public function test_rights_and_public_urls_are_required(): void
@@ -185,6 +207,119 @@ class LinkClipTest extends TestCase
                 $this->assertLessThanOrEqual(6.0, $intersection);
             }
         }
+    }
+
+    public function test_the_editor_saves_words_style_and_music_and_renders_again(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        $batch = (string) Str::uuid();
+        $make = fn (int $index) => $user->linkClips()->create([
+            'batch_id' => $batch, 'batch_index' => $index, 'batch_total' => 2,
+            'source_url' => 'https://youtube.com/watch?v=edit', 'source_type' => 'youtube', 'status' => 'ready', 'title' => "Moment {$index}",
+            'settings' => ['platform' => 'tiktok', 'seconds' => 30, 'accent' => '#ff3366'],
+            'analysis' => ['start' => 10, 'end' => 20, 'title' => "Moment {$index}", 'words' => [['text' => 'hello', 'start' => 0.1, 'end' => 0.5]]],
+            'asset_id' => Asset::factory()->create(['user_id' => $user->id])->id,
+        ]);
+        $clip = $make(1);
+        $sibling = $make(2);
+        $song = Asset::factory()->create(['user_id' => $user->id, 'kind' => 'audio', 'mime' => 'audio/mpeg']);
+        $foreign = Asset::factory()->create(['user_id' => User::factory()->create()->id, 'kind' => 'audio', 'mime' => 'audio/mpeg']);
+
+        $this->spa()->actingAs($user)->getJson("/api/clips/{$clip->id}/edit")->assertOk()
+            ->assertJsonPath('words.0.text', 'hello')
+            ->assertJsonPath('style.font', 'bold')
+            ->assertJsonPath('style.highlight', '#ff7094')
+            ->assertJsonPath('master_url', null)
+            ->assertJsonPath('batch_ready', 2)
+            ->assertJsonPath('fonts.0.url', '/api/clips/fonts/bold');
+
+        $this->spa()->actingAs($user)->patchJson("/api/clips/{$clip->id}", ['music' => ['asset_id' => $foreign->id]])
+            ->assertUnprocessable()->assertJsonValidationErrors('music.asset_id');
+        $this->spa()->actingAs($user)->patchJson("/api/clips/{$clip->id}", ['style' => ['font' => 'comic-sans', 'y' => 2]])
+            ->assertUnprocessable()->assertJsonValidationErrors(['style.font', 'style.y']);
+
+        $this->spa()->actingAs($user)->patchJson("/api/clips/{$clip->id}", [
+            'words' => [['text' => '  Hello ', 'start' => 0.1, 'end' => 0.5], ['text' => 'world', 'start' => 0.5, 'end' => 0.5], ['text' => ' ', 'start' => 1, 'end' => 2]],
+            'style' => ['font' => 'anton', 'color' => '#ffee00', 'backdrop' => 'box', 'y' => 0.5, 'uppercase' => true],
+            'music' => ['asset_id' => $song->id, 'volume' => 0.4],
+            'apply_to_batch' => true,
+        ])->assertStatus(202)->assertJsonCount(2, 'data')->assertJsonPath('data.0.status', 'rendering');
+
+        $clip->refresh();
+        $sibling->refresh();
+        $this->assertSame([['text' => 'Hello', 'start' => 0.1, 'end' => 0.5], ['text' => 'world', 'start' => 0.5, 'end' => 0.55]], $clip->analysis['words']);
+        $this->assertSame('anton', $sibling->settings['style']['font']);
+        $this->assertSame($song->id, $sibling->settings['music']['asset_id']);
+        $this->assertSame('hello', $sibling->analysis['words'][0]['text'], 'the words stay each clip\'s own');
+        Queue::assertPushed(RestyleLinkClip::class, 2);
+
+        $this->spa()->actingAs($user)->patchJson("/api/clips/{$clip->id}", ['style' => ['size' => 120]])->assertStatus(409);
+        $this->spa()->actingAs(User::factory()->create())->getJson("/api/clips/{$clip->id}/edit")->assertNotFound();
+        $this->spa()->actingAs($user)->get('/api/clips/fonts/anton')->assertOk()->assertHeader('Content-Type', 'font/ttf');
+        $this->spa()->actingAs($user)->get('/api/clips/fonts/..%2F..%2F.env')->assertNotFound();
+    }
+
+    public function test_an_edited_highlight_is_rendered_from_its_master_with_music_and_replaces_the_old_video(): void
+    {
+        Storage::fake('local');
+        $user = User::factory()->create();
+        $tmp = tempnam(sys_get_temp_dir(), 'master');
+        $made = Process::timeout(30)->run([
+            'ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=#24324a:s=1080x1920:r=30',
+            '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000', '-t', '2',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-f', 'mp4', $tmp,
+        ]);
+        $this->assertTrue($made->successful(), $made->errorOutput());
+        Storage::disk('local')->put('clips/master.mp4', file_get_contents($tmp));
+        @unlink($tmp);
+        Storage::disk('local')->put('assets/song.wav', self::wav(3));
+        $song = Asset::factory()->create(['user_id' => $user->id, 'kind' => 'audio', 'mime' => 'audio/wav', 'path' => 'assets/song.wav']);
+        $old = Asset::factory()->create(['user_id' => $user->id]);
+        $post = $user->posts()->create(['title' => 'Draft', 'body' => 'Body', 'format' => 'video', 'platforms' => ['tiktok'], 'status' => 'draft']);
+        $post->syncAssets([$old->id]);
+        $clip = $user->linkClips()->create([
+            'source_url' => 'https://youtube.com/watch?v=edit', 'source_type' => 'youtube', 'status' => 'rendering', 'title' => 'A moment',
+            'settings' => ['platform' => 'tiktok', 'seconds' => 30, 'style' => ['font' => 'caveat', 'backdrop' => 'box', 'highlight' => null, 'words' => 1], 'music' => ['asset_id' => $song->id, 'volume' => 0.3]],
+            'analysis' => ['start' => 0, 'end' => 2, 'title' => 'A moment', 'words' => [['text' => 'Edited', 'start' => 0.1, 'end' => 0.6], ['text' => 'words', 'start' => 0.6, 'end' => 1.2]]],
+            'asset_id' => $old->id, 'post_id' => $post->id, 'master_path' => 'clips/master.mp4',
+        ]);
+
+        (new RestyleLinkClip($clip->id))->handle(app(LinkClipper::class));
+        $clip->refresh();
+
+        $this->assertSame('ready', $clip->status, (string) $clip->error);
+        $this->assertNotSame($old->id, $clip->asset_id);
+        $this->assertSame([1080, 1920], [$clip->asset->width, $clip->asset->height]);
+        $this->assertSame([$clip->asset_id], $post->assets()->pluck('assets.id')->all());
+        $this->assertNull(Asset::find($old->id), 'the old render is removed');
+        $this->assertSame('Edited', $clip->asset->meta['words'][0]['text']);
+
+        $clip->delete();
+        Storage::disk('local')->assertMissing('clips/master.mp4');
+    }
+
+    public function test_arabic_subtitles_get_an_arabic_font_and_one_run_per_word(): void
+    {
+        foreach (array_keys(ClipFonts::FONTS) as $key) {
+            $this->assertFileExists((string) ClipFonts::path($key));
+        }
+        $arabic = [['text' => 'الكم', 'start' => 0.0, 'end' => 0.4], ['text' => 'فرنزد', 'start' => 0.4, 'end' => 0.8], ['text' => 'برس', 'start' => 0.8, 'end' => 1.2]];
+        $this->assertTrue(ClipStyle::arabic($arabic));
+        $this->assertFalse(ClipStyle::arabic([['text' => 'hello', 'start' => 0, 'end' => 1]]));
+        $this->assertSame(ClipFonts::ARABIC_DEFAULT, ClipStyle::resolve(null, '#a5b4fc', 'youtube', true)['font']);
+        $this->assertSame('bold', ClipStyle::resolve(['font' => 'bold'], '#a5b4fc', 'youtube', true)['font'], 'a chosen font stays');
+
+        // libass draws words left to right in the order they come, so Arabic lines are written back
+        // to front, each word its own run, and broken by hand (\q2).
+        $ass = Captions::ass($arabic, 'bold', ClipStyle::look(ClipStyle::defaults(arabic: true), 'عنوان قصير', 3), 3);
+        $this->assertStringContainsString('فرنزد{\r} {\1a&H00&}الكم', $ass);
+        $this->assertStringContainsString('\q2\pos(540,250)}{\1a&H01&}قصير {\1a&H00&}عنوان', $ass);
+        $this->assertStringContainsString('Style: Bold,Noto Sans Arabic ExtraBold,', $ass);
+
+        $english = Captions::ass([['text' => 'one', 'start' => 0, 'end' => 0.4], ['text' => 'two', 'start' => 0.4, 'end' => 0.8]], 'bold', ClipStyle::look(ClipStyle::defaults(), 'A title', 1), 1);
+        $this->assertStringContainsString('one{\r} {\1a&H01&}two', $english);
+        $this->assertStringNotContainsString('\q2', $english);
     }
 
     private static function wav(float $seconds, int $rate = 24000): string
