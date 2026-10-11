@@ -367,10 +367,6 @@ html[data-palette='mono'] {
 @media (prefers-reduced-motion: reduce) {
   .flap-cell-flip { animation: none; }
 }
-@keyframes scan {
-  from { transform: translateY(-100%); }
-  to { transform: translateY(300%); }
-}
 
 /* ------------------------------------------------------------------ */
 /* Sidebar                                                              */
@@ -462,6 +458,18 @@ html.glass-app {
   --glass-blur: blur(26px) saturate(190%);
 }
 
+/* The panes take a little of the palette's own colour, so a card belongs to the palette it sits
+   in: the same lightness and see-through as above, turned to the accent's hue with some of its
+   strength. Mono has no hue to give and stays as it was. Only where the browser can take a
+   colour apart; elsewhere the neutral panes above stand. */
+@supports (color: oklch(from red l c h)) {
+  html.glass-app {
+    --color-panel: oklch(from var(--color-accent) 0.76 calc(c * 0.6) h / 0.1);
+    --color-panel-2: color-mix(in oklab, oklch(from var(--color-accent) 0.27 calc(c * 0.22) h) 56%, transparent);
+    --color-panel-3: color-mix(in oklab, oklch(from var(--color-accent) 0.3 calc(c * 0.22) h) 60%, transparent);
+  }
+}
+
 /* Each pane catches light along its top edge and sits a little off the page. In a layer below
    the utilities, so a surface that sets its own shadow keeps it. */
 @layer components {
@@ -496,8 +504,11 @@ html.glass-app .glass-solid :is(.bg-panel-3, .bg-panel-3\/95)[class*='shadow'] {
 }
 
 /* The wash behind the studio: wide fields of the palette across the whole window, like a dark
-   wallpaper. Glass is only glass over something; this is what the panes carry and blur. */
+   wallpaper. Glass is only glass over something; this is what the panes carry and blur.
+   How strong it is is the reader's choice (Settings → Appearance sets --wash, lib/wash.ts);
+   the fields below are the wash at full strength. */
 @utility glass-ambient {
+  opacity: var(--wash, 0.5);
   background:
     radial-gradient(62vw 62vh at 0% 0%, color-mix(in oklab, var(--color-accent) 64%, transparent), transparent 68%),
     radial-gradient(50vw 54vh at 100% 0%, color-mix(in oklab, var(--color-accent-2) 48%, transparent), transparent 68%),

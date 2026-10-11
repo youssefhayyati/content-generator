@@ -74,7 +74,7 @@ export default function Phones() {
   )
 }
 
-const STATUS: Record<string, { dot: string; label: string }> = {
+export const STATUS: Record<string, { dot: string; label: string }> = {
   idle: { dot: 'bg-ok', label: 'Idle' },
   busy: { dot: 'bg-accent-soft animate-pulse', label: 'Working' },
   paused: { dot: 'bg-warn', label: 'Paused' },
