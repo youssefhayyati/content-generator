@@ -26,9 +26,37 @@ class LinkClipTest extends TestCase
 {
     use RefreshDatabase;
 
+    /** yt-dlp's answer for a video, without going to YouTube. */
+    private static function youtube(float $duration = 600, string $live = 'not_live'): void
+    {
+        Process::fake(['*yt-dlp*' => Process::result(json_encode(['title' => 'A talk', 'duration' => $duration, 'live_status' => $live]))]);
+    }
+
+    public function test_a_video_that_cant_be_clipped_is_refused_with_the_reason_before_anything_is_queued(): void
+    {
+        Queue::fake();
+        $user = User::factory()->create();
+        $body = ['url' => 'https://www.youtube.com/watch?v=IJwnDrnqjUA', 'platform' => 'instagram', 'placement' => 'story', 'seconds' => 15, 'count' => 3, 'rights_confirmed' => true];
+
+        Process::fake(['*yt-dlp*' => Process::sequence()
+            ->push(Process::result(json_encode(['duration' => 3361, 'live_status' => 'not_live'])))
+            ->push(Process::result(json_encode(['duration' => 0, 'live_status' => 'is_live'])))
+            ->push(Process::result('', 'ERROR: [youtube] IJwnDrnqjUA: This video is unavailable', 1))]);
+        $this->spa()->actingAs($user)->postJson('/api/clips', $body)->assertUnprocessable()
+            ->assertJsonPath('errors.url.0', 'This video is 57 minutes long. For now, use one up to 30 minutes.');
+        $this->spa()->actingAs($user)->postJson('/api/clips', $body)->assertUnprocessable()
+            ->assertJsonPath('errors.url.0', 'This is a live stream or a premiere that hasn’t ended. Try again once it is a regular video.');
+        $this->spa()->actingAs($user)->postJson('/api/clips', $body)->assertUnprocessable()
+            ->assertJsonPath('errors.url.0', 'YouTube says: This video is unavailable');
+
+        Queue::assertNothingPushed();
+        $this->assertSame(0, LinkClip::count());
+    }
+
     public function test_a_link_is_queued_with_the_right_source_type_and_settings(): void
     {
         Queue::fake();
+        self::youtube();
         $user = User::factory()->create();
         $clip = $this->spa()->actingAs($user)->postJson('/api/clips', [
             'url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -52,6 +80,7 @@ class LinkClipTest extends TestCase
     public function test_a_highlight_goes_to_a_platform_as_a_reel_a_story_or_a_short_with_a_caption_colour(): void
     {
         Queue::fake();
+        self::youtube();
         $user = User::factory()->create();
         $base = ['url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'seconds' => 30, 'count' => 1, 'rights_confirmed' => true];
 

@@ -18,6 +18,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 class LinkClipController extends Controller
 {
@@ -50,6 +51,14 @@ class LinkClipController extends Controller
         ]);
         if ($problem = SafeUrl::problem($data['url'])) {
             throw ValidationException::withMessages(['url' => $problem]);
+        }
+        // A video that can't be clipped (too long, live, unavailable) is said now, not after a download.
+        if (YouTubeDownloader::supports($data['url'])) {
+            try {
+                app(YouTubeDownloader::class)->check($data['url']);
+            } catch (RuntimeException $e) {
+                throw ValidationException::withMessages(['url' => $e->getMessage()]);
+            }
         }
         $placement = $data['placement'] ?? LinkClip::PLACEMENTS[$data['platform']][0];
         // A story is at most 60 seconds.
