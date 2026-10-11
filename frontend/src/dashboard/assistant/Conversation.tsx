@@ -140,7 +140,7 @@ function VoiceBar() {
             transition={{ duration: 0.25, ease }}
             className="flex items-center gap-2 text-[14px] font-medium tracking-[-0.01em]"
           >
-            {words}
+            <span className={cn(voice === 'thinking' && 'text-shimmer text-muted')}>{words}</span>
             {voice === 'thinking' && <LoaderCircle className="size-3.5 animate-spin text-accent-soft" />}
           </motion.p>
         </AnimatePresence>

@@ -25,7 +25,9 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [open, setOpen] = useState(false)
+  const [paper, setPaper] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
+  const bar = useRef<HTMLElement>(null)
 
   useMotionValueEvent(scrollY, 'change', (y) => {
     const prev = scrollY.getPrevious() ?? 0
@@ -33,6 +35,31 @@ export function Navbar() {
     // Get out of the way while reading down; come back as soon as the reader scrolls up.
     setHidden(y > 640 && y > prev + 2)
   })
+
+  // What the bar is floating over. Over a paper chapter it turns to paper too, instead of a dark
+  // smudge on a light page. The plates are clipped as they open and fold, and hit-testing follows
+  // the clip, so this reads the paper actually showing under the bar, not the section's box.
+  useEffect(() => {
+    let raf = 0
+    const look = () => {
+      raf = 0
+      const r = bar.current?.getBoundingClientRect()
+      const y = r ? r.top + 32 : 32
+      const under = document.elementsFromPoint(window.innerWidth / 2, y).find((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.surface)
+      setPaper(under?.dataset.surface === 'paper')
+    }
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(look)
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    look()
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [])
 
   // Only take the scroll away while the menu is open, and always hand it back,
   // including when the page unmounts underneath an open menu.
@@ -55,15 +82,16 @@ export function Navbar() {
   return (
     <>
       <motion.header
+        ref={bar}
         initial={{ y: -100, opacity: 0 }}
         animate={ready ? { y: shown ? 0 : -110, opacity: 1 } : undefined}
         transition={{ duration: 0.8, ease }}
-        className="fixed inset-x-0 top-0 z-100"
+        className={cn('fixed inset-x-0 top-0 z-100', paper && sheet && 'nav-paper')}
       >
         <div className={cn('transition-[padding] duration-700 ease-expo', sheet ? 'px-2 pt-2 md:px-3 md:pt-3' : 'px-0 pt-0')}>
           <div
             className={cn(
-              'relative mx-auto max-w-[1920px] overflow-hidden border transition-[border-radius,background-color,border-color,box-shadow] duration-700 ease-expo',
+              'nav-sheet relative mx-auto max-w-[1920px] overflow-hidden border transition-[border-radius,background-color,border-color,box-shadow] duration-700 ease-expo',
               sheet
                 ? 'rounded-[18px] border-line bg-panel/80 shadow-[0_30px_80px_-30px_rgb(0_0_0_/_0.9)] backdrop-blur-xl backdrop-saturate-150'
                 : 'rounded-none border-transparent bg-transparent',

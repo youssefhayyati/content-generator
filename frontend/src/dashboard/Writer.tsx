@@ -175,7 +175,7 @@ export function Writer({ body, onBody, format, platforms, onWriting, seed }: Pro
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 pt-3.5 md:px-5">
         <p className="flex items-center gap-2 text-[13px] font-medium">
           <Sparkles className={cn('size-3.5 text-accent-soft', writing && 'animate-pulse')} strokeWidth={1.75} />
-          {writing ? (rewrite ? 'Rewriting…' : 'Writing…') : rewrite ? 'Rewrite with AI' : 'Write with AI'}
+          {writing ? <span className="text-shimmer text-muted">{rewrite ? 'Rewriting…' : 'Writing…'}</span> : rewrite ? 'Rewrite with AI' : 'Write with AI'}
         </p>
         <div className="flex items-center gap-1.5">
           <Picker

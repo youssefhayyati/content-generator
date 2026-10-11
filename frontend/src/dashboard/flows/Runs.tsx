@@ -201,7 +201,7 @@ export function RunDetail({ run, catalog, shown, onChange }: { run: FlowRun; cat
               <span className="absolute -left-6 top-0 grid size-[19px] place-items-center rounded-full border border-accent-soft/50 bg-panel">
                 <LoaderCircle className="size-2.5 animate-spin" />
               </span>
-              Working…
+              <span className="text-shimmer">Working…</span>
             </li>
           )}
         </ol>

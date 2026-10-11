@@ -111,7 +111,7 @@ function PinnedWorkflow() {
       className="relative isolate text-on-accent"
       style={{ height: `calc(100vh + ${dist}px)` }}
     >
-      <Plate target={sectionRef} className="bg-accent" />
+      <Plate target={sectionRef} className="bg-accent" surface="signal" />
       <div className="sticky top-0 flex h-screen flex-col justify-center overflow-hidden">
         <motion.div
           ref={trackRef}
@@ -205,7 +205,7 @@ function StackedWorkflow() {
       data-thread-surface="signal"
       className="relative isolate py-28 text-on-accent md:py-36"
     >
-      <Plate target={sectionRef} className="bg-accent" />
+      <Plate target={sectionRef} className="bg-accent" surface="signal" />
       <div className="container-x">
         <Heading thread />
         <div ref={listRef} data-thread="rail" data-side-sm="right" className="relative mt-16 pl-8">

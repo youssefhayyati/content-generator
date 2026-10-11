@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Check } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { ease } from '../../lib/motion'
 
 /*
  * The palettes in index.css, chosen in Settings → Appearance.
@@ -44,7 +46,31 @@ export function applyPalette(id: string) {
   }
 }
 
-/** A card per palette; picking one applies it straight away. */
+/**
+ * Puts a palette on the page as a circle of the new colours growing from `from` (a point on screen)
+ * until it covers the window. `commit` is any state that should already show in the new colours,
+ * like the picker's tick. Without view transitions, or with reduced motion, it simply switches.
+ */
+export function washPalette(id: string, from: { x: number; y: number }, commit?: () => void) {
+  const apply = () => {
+    if (commit) flushSync(commit)
+    applyPalette(id)
+  }
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return apply()
+  const { x, y } = from
+  const reach = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y))
+  document
+    .startViewTransition(apply)
+    .ready.then(() => {
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${reach}px at ${x}px ${y}px)`] },
+        { duration: 950, easing: `cubic-bezier(${ease.join(', ')})`, pseudoElement: '::view-transition-new(root)' },
+      )
+    })
+    .catch(() => {})
+}
+
+/** A card per palette; picking one washes it over the page from that card. */
 export function PalettePicker() {
   const [current, setCurrent] = useState(() => document.documentElement.dataset.palette ?? 'indigo')
 
@@ -60,7 +86,10 @@ export function PalettePicker() {
             type="button"
             role="radio"
             aria-checked={on}
-            onClick={() => setCurrent(p.id)}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              washPalette(p.id, { x: r.left + 36, y: r.top + r.height / 2 }, () => setCurrent(p.id))
+            }}
             className={cn(
               'flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors duration-300',
               on ? 'border-accent/70 bg-accent/10' : 'border-line hover:border-line-2 hover:bg-fg/[0.03]',

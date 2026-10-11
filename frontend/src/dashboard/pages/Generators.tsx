@@ -353,7 +353,7 @@ function Generator({ kind, models, defaultText }: { kind: 'text' | 'image' | 'vi
         <AnimatePresence>
           {streaming !== null && (
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="rounded-xl border border-accent/30 bg-panel p-4">
-              <p className="font-mono text-[10.5px] text-accent-soft">Writing…</p>
+              <p className="text-shimmer font-mono text-[10.5px] text-accent-soft">Writing…</p>
               <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-relaxed">{streaming || ' '}</p>
             </motion.div>
           )}

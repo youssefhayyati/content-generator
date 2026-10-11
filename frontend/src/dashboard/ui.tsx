@@ -138,7 +138,7 @@ export function Btn({ variant = 'ghost', size = 'md', icon: Icon, loading, child
       {...rest}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-[background-color,color,border-color,box-shadow] duration-300 active:scale-[0.98] disabled:cursor-not-allowed disabled:active:scale-100',
+        'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-[background-color,color,border-color,box-shadow,scale] duration-200 ease-quint active:scale-[0.96] disabled:cursor-not-allowed disabled:active:scale-100',
         size === 'sm' ? 'h-7 px-2.5 text-[12px]' : 'h-9 px-3.5 text-[12.5px]',
         BTN_VARIANT[variant],
         className,
@@ -391,8 +391,9 @@ export function CountUp({ value, className }: { value: number; className?: strin
     return () => controls.stop()
   }, [value, inView, reduce])
 
+  // Figures of one width, so the number doesn't shuffle sideways as it counts.
   return (
-    <span ref={ref} className={className}>
+    <span ref={ref} className={cn('tabular-nums', className)}>
       0
     </span>
   )

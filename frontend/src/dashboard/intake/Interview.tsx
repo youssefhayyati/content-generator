@@ -627,7 +627,7 @@ function KitPanel({
           <Sparkles className={cn('size-3.5 text-accent-soft', writing && 'animate-pulse')} strokeWidth={1.75} />
           Content kit
         </p>
-        <span className="font-mono text-[10.5px] text-dim">
+        <span className={cn('font-mono text-[10.5px] text-dim', writing && 'text-shimmer')}>
           {writing ? 'Writing…' : state === 'stopped' ? 'Stopped, not saved' : state === 'failed' ? 'Not finished' : 'Saved with the campaign'}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
@@ -656,7 +656,7 @@ function KitPanel({
           <KitMarkdown text={text} />
         ) : writing ? (
           <div className="space-y-2.5">
-            <p className="text-[12.5px] text-dim">Thinking it through. This takes about a minute.</p>
+            <p className="text-shimmer text-[12.5px]">Thinking it through. This takes about a minute.</p>
             {[92, 78, 85, 60].map((w) => (
               <div key={w} className="skeleton h-3 rounded" style={{ width: `${w}%` }} />
             ))}

@@ -141,7 +141,9 @@ export function AgentTimeline({ steps, working }: { steps: AgentStepInfo[]; work
               <span className="font-medium">{A.label}</span>
               {s.cost > 0 && <span className="font-mono text-[10px] text-dim">${s.cost.toFixed(3)}</span>}
             </p>
-            <p className={cn('mt-0.5 text-[12px] leading-snug', s.status === 'failed' ? 'text-fail' : 'text-dim')}>{s.status === 'failed' ? s.error : (s.summary ?? 'Working…')}</p>
+            <p className={cn('mt-0.5 text-[12px] leading-snug', s.status === 'failed' ? 'text-fail' : 'text-dim', s.status === 'running' && 'text-shimmer')}>
+              {s.status === 'failed' ? s.error : (s.summary ?? 'Working…')}
+            </p>
           </motion.li>
         )
       })}
@@ -150,7 +152,7 @@ export function AgentTimeline({ steps, working }: { steps: AgentStepInfo[]; work
           <span className="absolute -left-6 top-0.5 grid size-[19px] place-items-center rounded-full border border-accent-soft/60 bg-panel text-accent-soft">
             <LoaderCircle className="size-3 animate-spin" />
           </span>
-          <p className="text-[12.5px] text-accent-soft">{working}</p>
+          <p className="text-shimmer text-[12.5px] text-accent-soft">{working}</p>
         </li>
       )}
     </ol>

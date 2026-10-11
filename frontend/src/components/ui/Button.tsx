@@ -106,7 +106,7 @@ export function Button({ href, children, variant = 'primary', size = 'md', arrow
         href={href}
         onClick={onClick}
         className={cn(
-          'group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-[-0.01em] transition-[background-color,box-shadow,border-color] duration-300',
+          'group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-[-0.01em] transition-[background-color,box-shadow,border-color,scale] duration-300 active:scale-[0.96] active:duration-100',
           sizes[size],
           variants[variant],
           className,

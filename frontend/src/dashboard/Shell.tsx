@@ -9,7 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion'
 import {
   ArrowLeft,
   ChevronRight,
@@ -19,6 +19,7 @@ import {
   LogOut,
   Mail,
   Menu as MenuIcon,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   PenLine,
@@ -30,13 +31,14 @@ import {
 } from 'lucide-react'
 import { useLenis } from 'lenis/react'
 import { LogoMark } from '../components/ui/Logo'
+import { PALETTES, washPalette } from '../components/ui/PalettePicker'
 import { api, type Page, type Post, type User } from '../lib/api'
 import { authApi } from '../lib/auth'
 import { ease } from '../lib/motion'
 import { cn } from '../lib/cn'
 import { useRouter } from '../lib/router'
 import { useSession } from '../lib/session'
-import { firstName, fmtRelative, postState, titleOf, useApi, type Overview } from './data'
+import { count, firstName, fmtRelative, postState, titleOf, useApi, type Overview } from './data'
 import { covers, NAV, NAV_GROUPS, NEW_POST, pageLabel, SETTINGS, VIEWS, type NavItem } from './nav'
 import { useToast } from './toast'
 import { Avatar, Kbd, Menu, Platforms, StateBadge } from './ui'
@@ -90,6 +92,42 @@ export function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => remember('flowai.sidebar.rail', rail), [rail])
 
+  // While the studio is open, keep the sidebar's counts and Up next current, and say so when a
+  // post goes out (a phone finishing its run) wherever you are in the studio.
+  const toast = useToast()
+  const latest = useRef(overview.data)
+  latest.current = overview.data
+  const setOverview = overview.setData
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (document.hidden) return
+      api<Overview>('/overview')
+        .then((next) => {
+          const prev = latest.current
+          setOverview(next)
+          const out = prev ? next.counts.published - prev.counts.published : 0
+          if (!prev || out <= 0) return
+          const gone = prev.upcoming.find((p) => !next.upcoming.some((q) => q.id === p.id))
+          toast(
+            <span>
+              {gone && out === 1 ? (
+                <>
+                  Out now: <span className="font-medium">“{titleOf(gone)}”</span>
+                </>
+              ) : (
+                `${count(out, 'post')} just went out.`
+              )}{' '}
+              <button type="button" onClick={() => navigate('/dashboard/publishing')} className="text-accent-soft underline-offset-2 hover:underline">
+                See the proof
+              </button>
+            </span>,
+          )
+        })
+        .catch(() => {})
+    }, 20_000)
+    return () => window.clearInterval(t)
+  }, [setOverview, toast, navigate])
+
   // ⌘K / Ctrl+K opens the palette; N starts a post and [ folds the sidebar when you're not typing somewhere.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -119,6 +157,23 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.classList.add('glass-app')
     return () => document.documentElement.classList.remove('glass-app')
+  }, [])
+
+  // A picture whose file is missing shows the browser's broken-image text. Anywhere in the studio
+  // it's marked instead (data-broken, styled in index.css) so its frame stays a quiet empty tile.
+  useEffect(() => {
+    const mark = (e: Event) => {
+      const img = e.target
+      if (!(img instanceof HTMLImageElement)) return
+      if (e.type === 'error') img.dataset.broken = ''
+      else delete img.dataset.broken
+    }
+    document.addEventListener('error', mark, true)
+    document.addEventListener('load', mark, true)
+    return () => {
+      document.removeEventListener('error', mark, true)
+      document.removeEventListener('load', mark, true)
+    }
   }, [])
 
   return (
@@ -221,11 +276,20 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
         aria-current={active ? 'page' : undefined}
         {...tipProps(n.label)}
         className={cn(
-          'group flex h-7 items-center gap-2.5 rounded-md pl-3 pr-2 text-[13px] transition-[width,background-color,color] duration-300 ease-expo',
+          'group relative isolate flex h-7 items-center gap-2.5 rounded-md pl-3 pr-2 text-[13px] transition-[width,background-color,color] duration-300 ease-expo',
           rail ? 'w-10' : 'w-full',
-          active ? 'bg-white/[0.08] text-fg' : 'text-muted hover:bg-white/[0.04] hover:text-fg',
+          active ? 'text-fg' : 'text-muted hover:bg-white/[0.04] hover:text-fg',
         )}
       >
+        {/* One marker for the page you're on: it slides from the last page to this one. */}
+        {active && (
+          <motion.span
+            layoutId="nav-active"
+            aria-hidden
+            className="absolute inset-0 -z-10 rounded-md bg-white/[0.085] shadow-[inset_0_1px_0_rgb(255_255_255/0.07)]"
+            transition={{ type: 'spring', stiffness: 520, damping: 42, mass: 0.8 }}
+          />
+        )}
         <span className="relative shrink-0">
           <Icon className={cn('size-4 transition-colors', active ? 'text-fg' : 'text-dim group-hover:text-muted')} strokeWidth={1.75} />
           {rail && n.urgent && count > 0 && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-accent ring-2 ring-panel" />}
@@ -247,139 +311,142 @@ function Sidebar({ overview, rail = false, onClose }: { overview: Overview | nul
   }
 
   return (
-    <div className={cn('flex h-full flex-col', onClose ? 'w-full' : 'w-[248px]')}>
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3">
-        <Menu
-          className="min-w-0 flex-1"
-          align="left"
-          header={
-            <div className="mb-1 flex items-center gap-2.5 border-b border-line px-2.5 pb-2.5 pt-1.5">
-              <Avatar user={user} />
-              <div className="min-w-0">
-                <p className="truncate text-[12.5px] text-fg">{user.name}</p>
-                <p className="truncate text-[11.5px] text-dim">{user.email}</p>
+    // The drawer and the desktop sidebar each slide their own page marker.
+    <LayoutGroup id={onClose ? 'drawer' : 'sidebar'}>
+      <div className={cn('flex h-full flex-col', onClose ? 'w-full' : 'w-[248px]')}>
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-3">
+          <Menu
+            className="min-w-0 flex-1"
+            align="left"
+            header={
+              <div className="mb-1 flex items-center gap-2.5 border-b border-line px-2.5 pb-2.5 pt-1.5">
+                <Avatar user={user} />
+                <div className="min-w-0">
+                  <p className="truncate text-[12.5px] text-fg">{user.name}</p>
+                  <p className="truncate text-[11.5px] text-dim">{user.email}</p>
+                </div>
               </div>
-            </div>
-          }
-          items={[
-            { label: 'Settings', icon: Settings, onSelect: () => navigate(SETTINGS.path) },
-            { label: 'Back to the site', icon: ArrowLeft, onSelect: () => navigate('/') },
-            { label: 'Log out', icon: LogOut, onSelect: logOut, danger: true },
-          ]}
-          trigger={({ toggle, open }) => (
-            <button
-              type="button"
-              onClick={toggle}
-              aria-expanded={open}
-              aria-label={rail ? workspaceName(user) : undefined}
-              {...tipProps(workspaceName(user))}
-              className={cn(
-                'flex min-w-0 items-center gap-2.5 rounded-md py-1.5 pl-1.5 pr-2 text-left transition-[width,background-color] duration-300 ease-expo hover:bg-white/[0.04]',
-                rail ? 'w-10' : 'w-full',
-              )}
-            >
-              <span className="grid size-7 shrink-0 place-items-center rounded-md bg-bone text-ink">
-                <LogoMark className="size-4" />
-              </span>
-              <span className={cn('min-w-0 flex-1', fade)}>
-                <span className="block truncate text-[13px] font-medium leading-tight">{workspaceName(user)}</span>
-                <span className="block truncate text-[11px] leading-tight text-dim">{user.email}</span>
-              </span>
-              <ChevronsUpDown className={cn('size-3.5 shrink-0 text-dim', fade)} />
+            }
+            items={[
+              { label: 'Settings', icon: Settings, onSelect: () => navigate(SETTINGS.path) },
+              { label: 'Back to the site', icon: ArrowLeft, onSelect: () => navigate('/') },
+              { label: 'Log out', icon: LogOut, onSelect: logOut, danger: true },
+            ]}
+            trigger={({ toggle, open }) => (
+              <button
+                type="button"
+                onClick={toggle}
+                aria-expanded={open}
+                aria-label={rail ? workspaceName(user) : undefined}
+                {...tipProps(workspaceName(user))}
+                className={cn(
+                  'flex min-w-0 items-center gap-2.5 rounded-md py-1.5 pl-1.5 pr-2 text-left transition-[width,background-color] duration-300 ease-expo hover:bg-white/[0.04]',
+                  rail ? 'w-10' : 'w-full',
+                )}
+              >
+                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-bone text-ink">
+                  <LogoMark className="size-4" />
+                </span>
+                <span className={cn('min-w-0 flex-1', fade)}>
+                  <span className="block truncate text-[13px] font-medium leading-tight">{workspaceName(user)}</span>
+                  <span className="block truncate text-[11px] leading-tight text-dim">{user.email}</span>
+                </span>
+                <ChevronsUpDown className={cn('size-3.5 shrink-0 text-dim', fade)} />
+              </button>
+            )}
+          />
+          {onClose && (
+            <button type="button" onClick={onClose} aria-label="Close menu" className="grid size-8 place-items-center text-dim hover:text-fg">
+              <X className="size-4" />
             </button>
           )}
-        />
-        {onClose && (
-          <button type="button" onClick={onClose} aria-label="Close menu" className="grid size-8 place-items-center text-dim hover:text-fg">
-            <X className="size-4" />
-          </button>
-        )}
-      </div>
+        </div>
 
-      <div className="shrink-0 px-3 pb-1 pt-3">
-        <button
-          type="button"
-          onClick={() => navigate(NEW_POST)}
-          aria-label={rail ? 'New post' : undefined}
-          {...tipProps('New post  N')}
-          className={cn(
-            // In the palette's own colour, like every other place the accent asks to be pressed.
-            'group flex h-8 items-center gap-2 rounded-md bg-accent px-3 text-[13px] font-medium text-on-accent transition-[width,background-color] duration-300 ease-expo hover:bg-[color-mix(in_oklab,var(--color-accent)_82%,white)]',
-            rail ? 'w-10' : 'w-full',
-          )}
-        >
-          <Plus className="size-4 shrink-0" strokeWidth={2} />
-          <span className={fade}>New post</span>
-          <Kbd className={cn('ml-auto border-on-accent/25 text-on-accent/60', fade)}>N</Kbd>
-        </button>
-      </div>
-
-      <nav className="no-scrollbar mask-y min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2" aria-label="Workspace" data-lenis-prevent>
-        {NAV_GROUPS.map((group, i) => {
-          const isFolded = !rail && !!group.label && folded.includes(group.label)
-          // A folded section still shows the page you're on.
-          const shown = isFolded ? group.items.filter((n) => covers(n, path)) : group.items
-          return (
-            <div key={group.label ?? i}>
-              {group.label && (
-                <button
-                  type="button"
-                  disabled={rail}
-                  aria-expanded={!isFolded}
-                  onClick={() => setFolded((f) => (f.includes(group.label!) ? f.filter((l) => l !== group.label) : [...f, group.label!]))}
-                  className="group relative mt-2 flex h-6 w-full items-center gap-1 rounded-md pl-3 pr-2 text-left text-[11.5px] font-medium text-dim transition-colors hover:text-muted"
-                >
-                  <span className={fade}>{group.label}</span>
-                  <ChevronRight
-                    className={cn(
-                      'size-3 transition-[rotate,opacity] duration-200',
-                      isFolded ? 'opacity-100' : 'rotate-90 opacity-0 group-hover:opacity-100',
-                      rail && 'hidden',
-                    )}
-                  />
-                  {rail && <span aria-hidden className="absolute left-[22px] h-px w-5 bg-line-2" />}
-                </button>
-              )}
-              <AnimatePresence initial={false}>
-                {shown.map((n) => (
-                  <motion.div
-                    key={n.path}
-                    className="overflow-hidden"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.22, ease }}
-                  >
-                    {item(n)}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          )
-        })}
-      </nav>
-
-      <div className="shrink-0 border-t border-line p-3">
-        <UpNext overview={overview} rail={rail} tipProps={tipProps} />
-      </div>
-
-      <AnimatePresence>
-        {rail && tip && (
-          <motion.div
-            key={tip.label}
-            role="tooltip"
-            className="glass-menu pointer-events-none fixed left-[72px] z-[60] -translate-y-1/2 whitespace-pre rounded-[8px] px-2 py-1 text-[12px] text-fg"
-            style={{ top: tip.top }}
-            initial={{ opacity: 0, x: -4 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
+        <div className="shrink-0 px-3 pb-1 pt-3">
+          <button
+            type="button"
+            onClick={() => navigate(NEW_POST)}
+            aria-label={rail ? 'New post' : undefined}
+            {...tipProps('New post  N')}
+            className={cn(
+              // In the palette's own colour, like every other place the accent asks to be pressed.
+              'group flex h-8 items-center gap-2 rounded-md bg-accent px-3 text-[13px] font-medium text-on-accent transition-[width,background-color] duration-300 ease-expo hover:bg-[color-mix(in_oklab,var(--color-accent)_82%,white)]',
+              rail ? 'w-10' : 'w-full',
+            )}
           >
-            {tip.label}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+            <Plus className="size-4 shrink-0" strokeWidth={2} />
+            <span className={fade}>New post</span>
+            <Kbd className={cn('ml-auto border-on-accent/25 text-on-accent/60', fade)}>N</Kbd>
+          </button>
+        </div>
+
+        <nav className="no-scrollbar mask-y min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2" aria-label="Workspace" data-lenis-prevent>
+          {NAV_GROUPS.map((group, i) => {
+            const isFolded = !rail && !!group.label && folded.includes(group.label)
+            // A folded section still shows the page you're on.
+            const shown = isFolded ? group.items.filter((n) => covers(n, path)) : group.items
+            return (
+              <div key={group.label ?? i}>
+                {group.label && (
+                  <button
+                    type="button"
+                    disabled={rail}
+                    aria-expanded={!isFolded}
+                    onClick={() => setFolded((f) => (f.includes(group.label!) ? f.filter((l) => l !== group.label) : [...f, group.label!]))}
+                    className="group relative mt-2 flex h-6 w-full items-center gap-1 rounded-md pl-3 pr-2 text-left text-[11.5px] font-medium text-dim transition-colors hover:text-muted"
+                  >
+                    <span className={fade}>{group.label}</span>
+                    <ChevronRight
+                      className={cn(
+                        'size-3 transition-[rotate,opacity] duration-200',
+                        isFolded ? 'opacity-100' : 'rotate-90 opacity-0 group-hover:opacity-100',
+                        rail && 'hidden',
+                      )}
+                    />
+                    {rail && <span aria-hidden className="absolute left-[22px] h-px w-5 bg-line-2" />}
+                  </button>
+                )}
+                <AnimatePresence initial={false}>
+                  {shown.map((n) => (
+                    <motion.div
+                      key={n.path}
+                      // Clipped only while it folds or unfolds, so the page marker can slide across rows.
+                      initial={{ height: 0, opacity: 0, overflow: 'hidden' }}
+                      animate={{ height: 'auto', opacity: 1, transitionEnd: { overflow: 'visible' } }}
+                      exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
+                      transition={{ duration: 0.22, ease }}
+                    >
+                      {item(n)}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )
+          })}
+        </nav>
+
+        <div className="shrink-0 border-t border-line p-3">
+          <UpNext overview={overview} rail={rail} tipProps={tipProps} />
+        </div>
+
+        <AnimatePresence>
+          {rail && tip && (
+            <motion.div
+              key={tip.label}
+              role="tooltip"
+              className="glass-menu pointer-events-none fixed left-[72px] z-[60] -translate-y-1/2 whitespace-pre rounded-[8px] px-2 py-1 text-[12px] text-fg"
+              style={{ top: tip.top }}
+              initial={{ opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              {tip.label}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </LayoutGroup>
   )
 }
 
@@ -576,7 +643,8 @@ function VerifyBanner({ email }: { email: string }) {
 /* ⌘K                                                                   */
 /* ------------------------------------------------------------------ */
 
-type Result = { key: string; label: string; hint?: ReactNode; icon: LucideIcon; to: string }
+/** A place to go (`to`), or something to do on the spot (`run`). */
+type Result = { key: string; label: string; hint?: ReactNode; icon: LucideIcon; to?: string; run?: () => void }
 
 function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { navigate } = useRouter()
@@ -627,12 +695,31 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
       </span>
     ),
   }))
-  const results = [...pages, ...found]
+  // Palettes, when the search names one or asks for a look: picked here, the new colours wash
+  // over the studio from where the search was.
+  const inUse = document.documentElement.dataset.palette ?? 'indigo'
+  const wantsLook = needle.length >= 3 && ['palette', 'theme', 'colour', 'color', 'look'].some((w) => w.startsWith(needle) || needle.includes(w))
+  const looks: Result[] = needle
+    ? PALETTES.filter((p) => wantsLook || p.name.toLowerCase().startsWith(needle) || needle.includes(p.name.toLowerCase())).map((p) => ({
+        key: `palette-${p.id}`,
+        label: `${p.name} palette`,
+        icon: Palette,
+        hint: (
+          <span className="flex items-center gap-2 text-[11px] text-dim">
+            {p.id === inUse && 'In use'}
+            <span className="size-2.5 rounded-full ring-1 ring-white/20" style={{ background: p.swatch.accent }} />
+          </span>
+        ),
+        run: () => washPalette(p.id, { x: window.innerWidth / 2, y: window.innerHeight * 0.22 }),
+      }))
+    : []
+  const results = [...pages, ...looks, ...found]
 
   const go = (r: Result | undefined) => {
     if (!r) return
     onClose()
-    navigate(r.to)
+    if (r.run) r.run()
+    else if (r.to) navigate(r.to)
   }
 
   const onKey = (e: ReactKeyboardEvent) => {
@@ -698,7 +785,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
                   setActive(0)
                 }}
                 onKeyDown={onKey}
-                placeholder="Search posts, or jump to a page…"
+                placeholder="Search posts, jump to a page, or name a palette…"
                 className="h-12 flex-1 bg-transparent text-[14px] outline-none placeholder:text-dim"
               />
               <Kbd>Esc</Kbd>
@@ -706,8 +793,10 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
             <div className="max-h-[50vh] overflow-y-auto p-2">
               {pages.length > 0 && <p className="px-3 pb-1 pt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Go to</p>}
               {pages.map((r, i) => row(r, i))}
+              {looks.length > 0 && <p className="px-3 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Look</p>}
+              {looks.map((r, i) => row(r, pages.length + i))}
               {found.length > 0 && <p className="px-3 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.14em] text-dim">Posts</p>}
-              {found.map((r, i) => row(r, pages.length + i))}
+              {found.map((r, i) => row(r, pages.length + looks.length + i))}
               {results.length === 0 && <p className="px-3 py-8 text-center text-[13px] text-dim">Nothing matches “{q}”.</p>}
             </div>
           </motion.div>
