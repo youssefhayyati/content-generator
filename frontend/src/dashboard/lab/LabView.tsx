@@ -9,7 +9,7 @@ import { Conversation } from '../assistant/Conversation'
 import { useAssistant } from '../assistant/store'
 import { useApi, useInvalidate } from '../data'
 import { useToast } from '../toast'
-import { Btn, Label, Modal, Skeleton, Toggle, inputClass } from '../ui'
+import { Btn, BusyBadge, Label, Modal, Skeleton, Toggle, inputClass } from '../ui'
 import { Canvas, canvasCenter } from './Canvas'
 import { TemplateBrowser } from './Gallery'
 import { useLeftLab } from './Home'
@@ -135,7 +135,10 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
   }
   if (!data || !catalog) return <Skeleton className="h-[calc(100dvh-140px)] rounded-xl" />
 
-  const running = Object.values(data.nodes).filter((n) => n.status === 'running' || n.status === 'queued').length
+  const active = Object.values(data.nodes).filter((n) => n.status === 'running' || n.status === 'queued')
+  // Queued behind nodes before them: they start by themselves once those finish.
+  const waiting = active.filter((n) => n.status === 'queued' && !!n.active?.waiting_for?.length).length
+  const running = active.length - waiting
   const untitled = !name.trim() || name.trim() === UNTITLED
 
   return (
@@ -150,12 +153,8 @@ export function LabView({ id, node }: { id: number; node?: string | null }) {
         </label>
         {untitled && <span className="hidden text-[11px] text-accent-soft md:inline">Name it to find it again</span>}
         <SaveStatus save={lab.save} />
-        {running > 0 && (
-          <span className="flex items-center gap-1.5 text-[11.5px] text-accent-soft">
-            <LoaderCircle className="size-3.5 animate-spin" />
-            {running} running
-          </span>
-        )}
+        {running > 0 && <BusyBadge state="working" label={`${running} running`} />}
+        {waiting > 0 && <BusyBadge state="waiting" label={`${waiting} waiting`} title="Queued behind nodes that haven’t finished; they start by themselves" />}
         {!catalog.engine.up && <span className="hidden text-[11.5px] text-warn lg:inline" title={catalog.engine.error ?? ''}>The pod’s models are off: {catalog.engine.error}</span>}
         <div className="ml-auto flex items-center gap-1.5">
           <label className="mr-1 flex items-center gap-2 text-[12px] text-muted" title="Off: nothing runs until you press Run. On: nodes you’ve run once run again by themselves when what they use changes (quick, free ones only).">

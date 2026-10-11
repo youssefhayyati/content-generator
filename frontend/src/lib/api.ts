@@ -588,7 +588,17 @@ export type Generation = {
 
 export type CanvasNode = { id: string; type: 'note' | 'text' | 'asset' | 'generation'; x: number; y: number; text?: string | null; ref?: number | null }
 export type Canvas = { nodes: CanvasNode[]; edges: Array<{ from: string; to: string }>; view: { x: number; y: number; zoom: number } }
-export type Project = { id: number; name: string; nodes: number; generations: number; updated_at: string; canvas?: Canvas }
+export type Project = {
+  id: number
+  name: string
+  nodes: number
+  generations: number
+  updated_at: string
+  /** Nodes running now, and nodes queued behind ones before them that haven't finished. */
+  working: number
+  waiting: number
+  canvas?: Canvas
+}
 
 export type CampaignStage = 'brief' | 'planning' | 'plan_review' | 'producing' | 'adapting' | 'content_review' | 'scheduled'
 

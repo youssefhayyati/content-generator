@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { AlertTriangle, AudioLines, Check, CircleDashed, Clock, LoaderCircle, Pin, Play, Sparkles, Square, X } from 'lucide-react'
+import { AlertTriangle, AudioLines, Check, CircleDashed, Clock, Hourglass, LoaderCircle, Pin, Play, Sparkles, Square, X } from 'lucide-react'
 import type { Asset, LabNode, LabNodeKind, LabNodeState, LabPortType, LabValue } from '../../lib/api'
 import { ease } from '../../lib/motion'
 import { cn } from '../../lib/cn'
@@ -13,6 +13,7 @@ const STATUS: Record<string, { label: string; cls: string; icon: typeof Check }>
   done: { label: 'Done', cls: 'text-ok', icon: Check },
   running: { label: 'Running', cls: 'text-accent-soft', icon: LoaderCircle },
   queued: { label: 'Queued', cls: 'text-muted', icon: Clock },
+  waiting: { label: 'Waiting', cls: 'text-warn', icon: Hourglass },
   stale: { label: 'Out of date', cls: 'text-warn', icon: AlertTriangle },
   ready: { label: 'Ready to run', cls: 'text-muted', icon: CircleDashed },
   missing: { label: 'Needs input', cls: 'text-dim', icon: CircleDashed },
@@ -67,9 +68,11 @@ export function NodeCard({
   const hue = hueOf(kind)
   const Icon = iconOf(node.type)
   const status = state?.status ?? 'empty'
-  const s = STATUS[status] ?? STATUS.empty
-  const running = status === 'running' || status === 'queued'
   const run = state?.active ?? null
+  // Queued behind nodes before it that haven't finished: it starts by itself once they do.
+  const waiting = status === 'queued' && !!run?.waiting_for?.length
+  const s = (waiting ? STATUS.waiting : STATUS[status]) ?? STATUS.empty
+  const running = status === 'running' || status === 'queued'
   const rows = portRows(kind)
   const note = node.type === 'util.note'
   const runnable = state && state.policy !== 'none'
@@ -188,7 +191,7 @@ export function NodeCard({
             {node.pin && !node.soft && <Pin className="size-3 shrink-0 text-accent-soft" />}
             <AiBadge kind={kind} className="ml-auto" />
           </span>
-          <span className={cn('mt-0.5 flex items-center gap-1 text-[10.5px] leading-none', s.cls)}>
+          <span className={cn('mt-0.5 flex items-center gap-1 text-[10.5px] leading-none', s.cls)} title={waiting ? 'Waiting for the nodes before it to finish; it starts by itself' : undefined}>
             <s.icon className={cn('size-3', status === 'running' && 'animate-spin')} strokeWidth={2} />
             <span className="truncate">{status === 'running' && run?.stage ? run.stage : s.label}</span>
             {(state?.versions ?? 0) > 1 && <span className="ml-auto shrink-0 font-mono text-[9.5px] text-dim">v{state?.current?.version}</span>}

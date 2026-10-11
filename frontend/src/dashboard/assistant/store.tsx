@@ -159,6 +159,8 @@ export type ConversationSummary = {
   posts?: Array<{ draft: number; title: string; what: string; thumb: { url: string; kind: 'image' | 'video' } | null; status: string; when: string | null }>
   /** How many are scheduled or out. */
   scheduled?: number
+  /** What's under way for it right now (only while the assistant has it open). */
+  activity?: { state: 'working' | 'waiting'; what: string } | null
 }
 /** A voice the assistant can speak in (assistant/backend/voicestudio.py): a ready one, or one from the voice server's catalog. */
 export type Voice = {

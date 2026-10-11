@@ -13,7 +13,7 @@ import { useAssistant } from '../assistant/store'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
-import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger, inputClass } from '../ui'
+import { Btn, BusyBadge, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger, inputClass } from '../ui'
 import { TemplateBrowser, TemplateSheet, TemplateStrip } from './Gallery'
 import { confirm } from '../confirm'
 
@@ -265,10 +265,16 @@ export function useLeftLab() {
 function MadeAsDrafts() {
   const a = useAssistant()
   const { navigate } = useRouter()
-  useEffect(() => {
-    if (a.conn === 'online') a.refreshConversations()
-  }, [a.conn])
   const list = a.conversations.filter((c) => c.drafts > 0 && c.mode !== 'canvas')
+  const busy = list.some((c) => c.activity)
+  useEffect(() => {
+    if (a.conn !== 'online') return
+    a.refreshConversations()
+    // While something is being made or posted for one of them, check back so the badge goes when it's done.
+    if (!busy) return
+    const t = window.setInterval(() => a.refreshConversations(), 4000)
+    return () => window.clearInterval(t)
+  }, [a.conn, busy])
   if (!list.length) return null
   const open = (id: string, draft?: number) => {
     a.openConversation(id, draft)
@@ -282,6 +288,7 @@ function MadeAsDrafts() {
           <div key={c.id} className="flex min-w-0 flex-col rounded-xl border border-line bg-panel p-4 transition-colors hover:border-line-2">
             <button type="button" onClick={() => open(c.id)} className="group flex items-start justify-between gap-3 text-left">
               <span className="truncate text-[14px] font-medium">{c.title}</span>
+              {c.activity && <BusyBadge state={c.activity.state} title={c.activity.what} className="ml-auto" />}
               <ArrowUpRight className="size-4 shrink-0 text-dim transition-transform duration-300 group-hover:rotate-45 group-hover:text-fg" strokeWidth={1.75} />
             </button>
             {!!c.posts?.length && (
@@ -406,10 +413,18 @@ function StartFrom() {
 }
 
 export function LabProjects() {
-  const { data: projects, error } = useApi<Project[]>('/projects')
+  const { data: projects, error, setData } = useApi<Project[]>('/projects')
   const { navigate } = useRouter()
   const invalidate = useInvalidate()
   const toast = useToast()
+  const busy = !!projects?.some((p) => p.working || p.waiting)
+
+  // While a canvas has nodes running or waiting, check back every few seconds so the badges stay true.
+  useEffect(() => {
+    if (!busy) return
+    const t = window.setInterval(() => api<Project[]>('/projects').then(setData).catch(() => {}), 4000)
+    return () => window.clearInterval(t)
+  }, [busy, setData])
 
   if (!projects && error) return <EmptyState icon={FolderKanban} title="The projects couldn’t be loaded" body={error.message || 'Reload the page to try again.'} />
   if (!projects) return <Skeleton className="h-[160px] rounded-xl" />
@@ -429,6 +444,11 @@ export function LabProjects() {
           <button type="button" onClick={() => navigate(studio(p.id))} className="absolute inset-0 rounded-xl" aria-label={`Open ${p.name}`} />
           <span className="flex items-start justify-between gap-3">
             <span className="truncate text-[14px] font-medium">{p.name}</span>
+            {p.working > 0 ? (
+              <BusyBadge state="working" title={`${p.working} node${p.working === 1 ? '' : 's'} running${p.waiting ? `, ${p.waiting} waiting for them` : ''}`} className="ml-auto" />
+            ) : p.waiting > 0 ? (
+              <BusyBadge state="waiting" title={`${p.waiting} node${p.waiting === 1 ? '' : 's'} waiting for nodes before them`} className="ml-auto" />
+            ) : null}
             <ArrowUpRight className="size-4 shrink-0 text-dim transition-transform duration-300 group-hover:rotate-45 group-hover:text-fg" strokeWidth={1.75} />
           </span>
           <span className="mt-6 flex items-center gap-2 font-mono text-[10.5px] text-dim">
