@@ -17,6 +17,7 @@ import {
   SearchCheck,
   Send,
   Settings,
+  Shapes,
   Smartphone,
   UsersRound,
   Wand2,
@@ -41,6 +42,9 @@ export type NavGroup = { label: string | null; items: NavItem[] }
 
 export const SETTINGS: NavItem = { path: '/dashboard/settings', label: 'Settings', icon: Settings }
 
+/** The one-off generators (text, pictures, video, sound, reels, recipes): a page of their own, apart from the canvas. */
+export const GENERATORS = '/dashboard/generate'
+
 /** The studio's pages, in the order the sidebar shows them. */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -55,8 +59,14 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Create',
     items: [
-      // Everything that makes content lives here now: nodes on a canvas, the assistant beside them.
+      { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
+      // Creative Lab is the canvas of nodes; the one-off generators keep a page of their own beside it.
       { path: '/dashboard/studio', label: 'Creative Lab', icon: Wand2 },
+      { path: GENERATORS, label: 'Generators', icon: Shapes },
+      { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
+      { path: '/dashboard/create', label: 'Composer', icon: PenLine },
+      { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
+      { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
     ],
   },
   {
@@ -93,19 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
 /** Every page, Settings included. */
 export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items)
 
-/**
- * Pages kept off the sidebar since Creative Lab took in everything that makes content; still opened
- * from links (a campaign's gates, a post in the composer, the showcase), so they keep their titles.
- */
-export const OFF_NAV: NavItem[] = [
-  { path: '/dashboard/assistant', label: 'Assistant', icon: AudioWaveform },
-  { path: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
-  { path: '/dashboard/create', label: 'Composer', icon: PenLine },
-  { path: '/dashboard/reposts', label: 'Reposts', icon: Repeat2 },
-  { path: '/dashboard/showcase', label: 'Showcase', icon: GalleryVerticalEnd },
-]
+/** Where every "New post" goes, from anywhere: the Composer. */
+export const NEW_POST = '/dashboard/create'
 
-/** Where every "New post" goes, from anywhere: Creative Lab, which starts with the brief. */
-export const NEW_POST = '/dashboard/studio'
-
-export const pageLabel = (path: string) => [...NAV, ...OFF_NAV].find((n) => n.path === path)?.label ?? 'Overview'
+export const pageLabel = (path: string) => NAV.find((n) => n.path === path)?.label ?? 'Overview'

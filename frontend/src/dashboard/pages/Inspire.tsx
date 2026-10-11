@@ -102,7 +102,7 @@ export default function Inspire() {
     }
   }
 
-  /** Turn one post into a video prompt and hand it to the Creative Lab. */
+  /** Turn one post into a video prompt and hand it to the video generator. */
   const make = async (item: Trend) => {
     setMaking(idOf(item))
     try {
@@ -119,7 +119,7 @@ export default function Inspire() {
         },
       })
       toast(`${brief.model} wrote the scene. Pick a model and make it.`)
-      navigate(`/dashboard/studio?make=video&prompt=${encodeURIComponent(brief.video_prompt)}`)
+      navigate(`/dashboard/generate?tab=video&prompt=${encodeURIComponent(brief.video_prompt)}`)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not write the prompt.', 'error')
     } finally {
@@ -138,7 +138,7 @@ export default function Inspire() {
             What's working <Serif>right now.</Serif>
           </>
         }
-        sub="Search a hashtag on TikTok or Instagram, see what the platform is rewarding, then turn any post into a video prompt and make your own in the Creative Lab."
+        sub="Search a hashtag on TikTok or Instagram, see what the platform is rewarding, then turn any post into a video prompt and make your own with the video generator."
       />
 
       <Stagger i={0} className="mt-10">

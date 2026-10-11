@@ -369,7 +369,7 @@ export function makePath(make: Make) {
       return `/dashboard/create?${q({ brief: make.brief, tone: make.tone, platforms: make.platforms.join(','), ...(make.model ? { model: make.model } : {}) })}`
     case 'image':
     case 'video':
-      return `/dashboard/studio?${q({ tab: make.tool, prompt: make.prompt, ratio: make.ratio, model: make.model })}`
+      return `/dashboard/generate?${q({ tab: make.tool, prompt: make.prompt, ratio: make.ratio, model: make.model })}`
     case 'flows':
       return `/dashboard/flows?${q({ say: make.say })}`
     case 'campaigns':

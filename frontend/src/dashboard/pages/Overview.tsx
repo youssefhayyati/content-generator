@@ -1012,7 +1012,7 @@ function GettingStarted({ overview }: { overview: OverviewData }) {
       icon: PenLine,
       title: 'Write your first post',
       body: 'One idea, shaped for every platform you pick.',
-      action: 'Open Creative Lab',
+      action: 'Open the composer',
       to: NEW_POST,
       done: overview.counts.total > 0,
     },

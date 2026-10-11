@@ -1,10 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CircleAlert, CircleCheck, Cpu, FileCog, FlaskConical, HardDrive, Link2, PlugZap } from 'lucide-react'
+import { CircleAlert, CircleCheck, Cpu, FileCog, FlaskConical, HardDrive, Link2, PlugZap, Wand2 } from 'lucide-react'
 import { Serif } from '../../components/ui/Reveal'
 import { api, ApiError, type EnvSetting, type ModelInfo, type Registry } from '../../lib/api'
 import { cn } from '../../lib/cn'
+import { ease } from '../../lib/motion'
+import { useRouter } from '../../lib/router'
 import { fmtRelative, useApi, useInvalidate } from '../data'
+import { GENERATORS } from '../nav'
 import { KIND_ICON, reachLabel } from '../studio/parts'
 import { useToast } from '../toast'
 import { Btn, Label, PageHeader, Panel, Segmented, Skeleton, Stagger } from '../ui'
@@ -98,6 +101,10 @@ export default function Models() {
 
           <Stagger i={2} className="mt-6">
             <EvalsPanel models={registry.models.filter((m) => m.kind === 'text')} />
+          </Stagger>
+
+          <Stagger i={3} className="mt-6">
+            <RecipesPanel registry={registry} />
           </Stagger>
         </>
       )}
@@ -350,6 +357,40 @@ function EvalsPanel({ models }: { models: ModelInfo[] }) {
             })}
           </tbody>
         </table>
+      </div>
+    </Panel>
+  )
+}
+
+function RecipesPanel({ registry }: { registry: Registry }) {
+  const { navigate } = useRouter()
+  return (
+    <Panel
+      title="Media recipes"
+      sub="Ready-made pipelines: each step’s output feeds the next."
+      actions={
+        <Btn size="sm" icon={Wand2} onClick={() => navigate(`${GENERATORS}?tab=recipes`)}>
+          Open in Generators
+        </Btn>
+      }
+    >
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Object.entries(registry.recipes).map(([id, r], i) => (
+          <motion.div key={id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease, delay: i * 0.04 }} className="rounded-lg border border-line p-3.5">
+            <p className="text-[13px] font-medium">{r.label}</p>
+            <p className="mt-1 text-[12px] leading-snug text-dim">{r.body}</p>
+            <p className="mt-3 flex items-center gap-1.5 font-mono text-[10px] text-muted">
+              {r.needs && <span>image →</span>}
+              {r.steps.map((s, j) => (
+                <span key={j} className="flex items-center gap-1.5">
+                  {j > 0 && '→'}
+                  <Cpu className="size-3" strokeWidth={1.75} />
+                  {s}
+                </span>
+              ))}
+            </p>
+          </motion.div>
+        ))}
       </div>
     </Panel>
   )
