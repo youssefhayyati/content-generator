@@ -58,6 +58,7 @@ STAGES = {"brief": "brief being written", "planning": "being planned", "plan_rev
           "producing": "in production", "adapting": "being adapted to each account",
           "content_review": "posts waiting for approval (gate 6B)", "scheduled": "scheduled"}
 BRIEF_CHARS = 2500  # of the campaign's brief, in the prompt
+LAB_WATCH_S = 30 * 60  # how long a Creative Lab run is watched for its end
 QUEUE_WORDS = ("queue", "slot")  # "when" meaning the account's next free posting time
 OUTCOMES = {"posted": "confirmed", "unsure": "uncertain", "failed": "failed"}  # a phone post's, as FlowAI's run
 
@@ -281,6 +282,7 @@ class FlowAISession:
         self.error = ""  # why FlowAI could not be read
         self.tz = timezone.utc  # the user's, from the page
         self.lock = asyncio.Lock()  # one save at a time: the Save button and the assistant may race
+        self.watching: set[asyncio.Task] = set()  # Creative Lab runs, until they end (_watch_run)
         self.attach(conv)
 
     def attach(self, conv: "Conversation"):
@@ -1002,8 +1004,8 @@ class FlowAISession:
                 return
             a.status, a.detail = "approved", "Running"
             await self._send_approval(a)
-            self.notify(f"The user approved it on screen and it's running: {a.text}. Look with lab_graph when "
-                        "it's done; say in a few words that it started.")
+            self.notify(f"The user approved it on screen and it's running: {a.text}. You are told when it "
+                        "ends; say in a few words that it started.")
             return
         # lab_post: only the person can schedule a Post node, so the page does it with their own session
         if not done:
@@ -1024,7 +1026,37 @@ class FlowAISession:
         if n and n["type"] == "finish.post" and (n.get("params") or {}).get("when", "draft") != "draft":
             await self.client.request("POST", f"/api/projects/{project}/lab/ops",
                                       json={"ops": [{"op": "set", "id": node, "params": {"when": "draft"}}]})
+        plan = await self.client.get(f"/api/projects/{project}/lab/nodes/{node}/plan")
         await self.client.request("POST", f"/api/projects/{project}/lab/nodes/{node}/run", json={"upstream": True})
+        ids = [n["id"] for n in plan.get("nodes") or [] if n.get("id")] or [node]
+        task = asyncio.create_task(self._watch_run(project, node, ids))
+        self.watching.add(task)
+        task.add_done_callback(self.watching.discard)
+
+    async def _watch_run(self, project: int, node: str, ids: list[str]):
+        """Tells the assistant when a node it ran (and the ones it waited on) has finished, and how it went:
+        else it is never told, and can't say what was made."""
+        conv, began, seen = self.conv, asyncio.get_running_loop().time(), False
+        while (waited := asyncio.get_running_loop().time() - began) < LAB_WATCH_S:
+            await asyncio.sleep(3)
+            try:
+                nodes = (await self.client.get(f"/api/projects/{project}/lab/state", rev=-1)).get("nodes") or {}
+            except Exception:
+                continue
+            states = {i: nodes.get(i) or {} for i in ids}
+            if any(s.get("status") in ("queued", "running") for s in states.values()):
+                seen = True
+                continue
+            if not seen and waited < 15:  # not queued yet
+                continue
+            failed = [f"{i}: {(s.get('failed') or {}).get('error') or 'failed'}" for i, s in states.items()
+                      if s.get("status") == "failed"]
+            conv.notify(f"Creative Lab: running {node} finished" + (f", but these failed: {'; '.join(failed)}"
+                        if failed else "") + ". The canvas shows it. Look with lab_graph at what it made, then tell "
+                        "the user in one or two short sentences.")
+            return
+        conv.notify(f"Creative Lab: {node} is still running after {LAB_WATCH_S // 60} minutes. Tell the user "
+                    "briefly; lab_graph shows where it is.")
 
     async def _approval(self, d: Draft, text: str, **fields) -> Approval:
         changed = False

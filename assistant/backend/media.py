@@ -59,6 +59,11 @@ class MediaItem:
                 "workflow": self.workflow, "prompt": self.prompt, "job": job}
 
 
+# Said of a result that went into no draft: the page opens its Media tab to show it (store.tsx: showMade)
+MEDIA_TAB = ("It is in no draft: it is shown in the Media tab, which the page has opened. To put it in a post, "
+             "update_draft with its number in media.")
+
+
 @dataclass
 class MediaJob:
     id: int
@@ -343,13 +348,10 @@ class MediaSession:
                     log.exception("generation %d: follow-up failed", job.id)
             took = _seconds(time.monotonic() - job.started)
             await self.send(type="media_job", id=job.id, kind="generate", status="done", text=f"took {took}")
-            note = (f"Generation {job.id} ({job.workflow}) finished in {took}: {job.result} is now shown on the "
-                    "user's screen.")
-            if then:
-                note += f" {then}"
+            note = f"Generation {job.id} ({job.workflow}) finished in {took}: {job.result}. {then or MEDIA_TAB}"
             if queued.get("ignored_keys"):
                 note += f" The workflow ignored these options: {', '.join(queued['ignored_keys'])}."
-            note += " Tell the user it is ready in one short sentence."
+            note += " Tell the user it is ready in one short sentence, and where it is."
         except asyncio.CancelledError:
             job.status, job.result = "cancelled", "cancelled"
             await self.send(type="media_job", id=job.id, kind="generate", status="cancelled")
@@ -453,8 +455,8 @@ class MediaSession:
             took = _seconds(time.monotonic() - job.started)
             await self.send(type="media_job", id=job.id, kind="generate", status="done", text=f"took {took}")
             note = " ".join(filter(None, [
-                f"{job.label} finished in {took}: {job.result} is now on the user's screen"
-                + (f" ({job.detail})." if job.detail else "."), then, "Tell the user it is ready in one short sentence."]))
+                f"{job.label} finished in {took}: {job.result}" + (f" ({job.detail})." if job.detail else "."),
+                then or MEDIA_TAB, "Tell the user it is ready in one short sentence, and where it is."]))
         except asyncio.CancelledError:
             job.status, job.result = "cancelled", "cancelled"
             await self.send(type="media_job", id=job.id, kind="generate", status="cancelled")
@@ -514,8 +516,8 @@ class MediaSession:
                     log.exception("render %d: follow-up failed", job.id)
             took = _seconds(time.monotonic() - job.started)
             await self.send(type="media_job", id=job.id, kind="generate", status="done", text=f"took {took}")
-            note = f"The video ({job.result}) was made in {took} and is on the user's screen. {then} " \
-                   "Tell the user it is ready in one short sentence."
+            note = f"The video ({job.result}) was made in {took}. {then or MEDIA_TAB} " \
+                   "Tell the user it is ready in one short sentence, and where it is."
         except asyncio.CancelledError:
             job.status, job.result = "cancelled", "cancelled"
             await self.send(type="media_job", id=job.id, kind="generate", status="cancelled")

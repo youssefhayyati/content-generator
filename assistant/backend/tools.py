@@ -57,6 +57,11 @@ async def run(name: str, arguments: dict, **context) -> str:
     missing = [k for k in schema["function"]["parameters"].get("required", []) if arguments.get(k) in (None, "")]
     if missing:
         return json.dumps({"error": f"{name} needs {' and '.join(missing)}; nothing was done"})
+    if not any(p.kind is p.VAR_KEYWORD for p in params.values()):
+        known = [k for k in schema["function"]["parameters"].get("properties", {})]
+        if unknown := [k for k in arguments if k not in params]:
+            return json.dumps({"error": f"{name} has no {', '.join(unknown)}; its inputs are "
+                                        f"{', '.join(known) or 'none'}. Nothing was done"})
     try:
         result = fn(**arguments, **{k: v for k, v in context.items() if k in params})
         if inspect.isawaitable(result):
@@ -261,8 +266,9 @@ async def transcribe_media(session, media: int | None = None):
 @tool(
     "dub_video",
     "Make the person in a video say other words: the words are read in their own voice, cloned from the video "
-    "(or in another voice), and a lip-sync model redraws their mouth to match. The result is a new video. It "
-    "runs in the background for a few minutes; you are told when it is ready.",
+    "(or in another voice), and a lip-sync model redraws their mouth to match. The result is a new video; on a "
+    "draft it takes the place of that slide's video. It runs in the background for a few minutes; you are told "
+    "when it is ready.",
     {
         "type": "object",
         "properties": {
@@ -273,12 +279,18 @@ async def transcribe_media(session, media: int | None = None):
             "voice": {"type": "string", "description": "Leave out for the speaker's own voice. Else a voice id "
                                                        "(find_voices, clone_voice), a description of a voice, or "
                                                        "'mine' for the one you speak in"},
+            "draft": {"type": "integer", "description": "Dub the video on this draft's slide instead: the result "
+                                                        "takes its place. A video on the draft on screen is "
+                                                        "replaced there anyway"},
+            "slide": {"type": "integer", "description": "Which slide of the draft (default 1)"},
         },
         "required": ["script"],
     },
 )
-async def dub_video(session, script: str, video: int | None = None, voice: str | None = None):
-    return await session.dub_video(video, script, voice)
+async def dub_video(session, script: str, video: int | None = None, voice: str | None = None,
+                    draft: int | None = None, slide: int | None = None, media: int | None = None):
+    # Models sometimes call the video "media", as in transcribe_media
+    return await session.dub_video(video if video is not None else media, script, voice, draft, slide)
 
 
 @tool(
@@ -291,7 +303,8 @@ async def dub_video(session, script: str, video: int | None = None, voice: str |
         "type": "object",
         "properties": {
             "face": {"type": "integer", "description": "Number of the picture with the face to use"},
-            "target": {"type": "integer", "description": "Number of the picture or video to put it on (or give draft)"},
+            "target": {"type": "integer", "description": "Number of the picture or video to put it on (or give draft). "
+                                                         "One on the draft on screen is replaced there"},
             "draft": {"type": "integer", "description": "Put it on this draft's slide instead: its picture or video is "
                                                         "changed and replaced"},
             "slide": {"type": "integer", "description": "Which slide of the draft (default 1)"},

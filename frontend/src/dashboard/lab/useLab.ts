@@ -116,18 +116,24 @@ export function useLab(projectId: number, onError: (message: string) => void) {
     }
   }, [projectId, take])
 
-  // Keep fresh: every 1.5 s while something runs, every 5 s otherwise; not while hidden.
+  // Keep fresh: every 1.5 s while something runs, every 5 s otherwise; not while hidden. And at once when the
+  // assistant changed or ran this project (store.tsx: lab_changed).
   const busy = !!data && Object.values(data.nodes).some((n) => n.status === 'queued' || n.status === 'running')
   useEffect(() => {
     if (!data) return
-    const every = busy ? 1500 : 5000
-    const t = window.setInterval(() => {
+    const look = () => {
       if (document.hidden || pending.current > 0) return
       api<Omit<LabPayload, 'canvas' | 'project'> & { canvas: LabCanvas | null }>(`/projects/${projectId}/lab/state`, { query: { rev: latest.current?.rev ?? -1 } })
         .then((s) => take({ ...(latest.current as LabPayload), ...s, canvas: s.canvas ?? (undefined as unknown as LabCanvas) }, !s.canvas))
         .catch(() => {})
-    }, every)
-    return () => window.clearInterval(t)
+    }
+    const changed = (e: Event) => (e as CustomEvent<number>).detail === projectId && look()
+    const t = window.setInterval(look, busy ? 1500 : 5000)
+    window.addEventListener('flowai:lab-changed', changed)
+    return () => {
+      window.clearInterval(t)
+      window.removeEventListener('flowai:lab-changed', changed)
+    }
   }, [projectId, busy, !!data, take])
 
   /** Apply operations: shown at once, then as the API has them. */

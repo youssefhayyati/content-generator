@@ -473,6 +473,13 @@ class StudioSession:
             raise StudioError(f"slide {slide or 1} of draft {d.id} has no picture or video")
         return d.id, n, d.slides[n - 1].media
 
+    def showing(self, media_id: int) -> tuple[int, int] | None:
+        """The slide of the draft on screen that shows this picture or video, if one does: (draft, slide). A
+        change of it made elsewhere (a dub, a face swap) then goes in its place, where the user is looking."""
+        d = self.drafts.get(self.shown)
+        n = next((k for k, s in enumerate(d.slides, 1) if s.media == media_id), None) if d else None
+        return (d.id, n) if n else None
+
     def into_slide(self, draft_id: int, n: int):
         """What puts a result made elsewhere on that slide, once made (MediaJob.then)."""
         return lambda items: self._made(draft_id, n, items)
