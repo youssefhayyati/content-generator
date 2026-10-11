@@ -167,7 +167,7 @@ export default function Clips() {
                 label="Platform"
                 value={platform}
                 onChange={choosePlatform}
-                options={(Object.keys(PLACEMENTS) as Platform[]).map((id) => ({ value: id, label: <><PlatformIcon id={id} className="size-3.5" /> {PLATFORM_NAMES[id]}</> }))}
+                options={(Object.keys(PLACEMENTS) as Platform[]).map((id) => ({ value: id, label: <><PlatformIcon id={id} className="hidden size-3.5 sm:block" /> {PLATFORM_NAMES[id]}</> }))}
               />
             </div>
             <div>

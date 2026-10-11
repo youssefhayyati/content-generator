@@ -351,7 +351,7 @@ function PhoneCard({
         </div>
       )}
 
-      {d.screenshot_url && <Screen url={d.screenshot_url} name={d.name} />}
+      <Screen url={d.screenshot_url} name={d.name} simulator={d.driver === 'simulator'} />
 
       {confirming && (
         <div className="mt-auto border-t border-fail/25 bg-fail/[0.05] px-4 py-3">
@@ -498,13 +498,20 @@ function AutomationService() {
 }
 
 /** The phone's latest screen; if its file can't be loaded, the card simply goes without. */
-function Screen({ url, name }: { url: string; name: string }) {
+/** The phone's latest screen, or a frame of the same size saying why there isn't one, so cards in a row line up. */
+function Screen({ url, name, simulator }: { url?: string | null; name: string; simulator: boolean }) {
   const [broken, setBroken] = useState(false)
   useEffect(() => setBroken(false), [url])
-  if (broken) return null
+  if (!url || broken) {
+    return (
+      <div className="mx-4 mb-3 grid h-44 place-items-center rounded-lg border border-dashed border-line px-4 text-center text-[11.5px] text-dim">
+        {simulator ? 'A simulator has no screen to show.' : 'No screen yet. It shows here after the phone’s next job.'}
+      </div>
+    )
+  }
   return (
     <a href={url} target="_blank" rel="noreferrer" className="mx-4 mb-3 block overflow-hidden rounded-lg border border-line" title="The phone's latest screen">
-      <img src={url} alt={`${name}'s latest screen`} className="max-h-44 w-full object-cover object-top" loading="lazy" onError={() => setBroken(true)} />
+      <img src={url} alt={`${name}'s latest screen`} className="h-44 w-full object-cover object-top" loading="lazy" onError={() => setBroken(true)} />
     </a>
   )
 }
