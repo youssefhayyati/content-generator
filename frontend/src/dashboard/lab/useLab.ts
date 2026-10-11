@@ -4,6 +4,10 @@ import type { Asset } from '../../lib/api'
 
 export type LabOp = Record<string, unknown> & { op: string }
 
+/** Whether the canvas's edits are all in FlowAI: saving while some are on their way (or typed and about to go),
+ * failed when the last one wasn't taken. at: when everything was last saved. */
+export type LabSave = { status: 'saved' | 'saving' | 'failed'; at: number | null }
+
 /** A run in a node's history, with what it made. */
 export type LabHistoryRun = LabRun & { outputs: Record<string, LabValue>; params: Record<string, unknown>; created_at: string | null }
 
@@ -90,6 +94,10 @@ export function useLab(projectId: number, onError: (message: string) => void) {
   const latest = useRef<LabPayload | null>(null)
   latest.current = data
   const paramTimers = useRef(new Map<string, { patch: Record<string, unknown>; timer: number }>())
+  // Edits on their way: moving the view around isn't one (it's sent too, but nothing is lost without it)
+  const sending = useRef(0)
+  const [save, setSave] = useState<LabSave>({ status: 'saved', at: null })
+  const unsaved = () => sending.current > 0 || paramTimers.current.size > 0
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
 
@@ -141,14 +149,23 @@ export function useLab(projectId: number, onError: (message: string) => void) {
     async (list: LabOp[]) => {
       if (!list.length) return null
       setData((d) => (d ? { ...d, canvas: applyLocal(d.canvas, list) } : d))
+      const edit = list.some((o) => o.op !== 'view')
       pending.current++
+      if (edit) {
+        sending.current++
+        setSave((v) => ({ ...v, status: 'saving' }))
+      }
       try {
         const res = await api<LabPayload>(`/projects/${projectId}/lab/ops`, { method: 'POST', body: { ops: list } })
         pending.current--
+        if (edit) sending.current--
         take(res)
+        if (edit && !unsaved()) setSave({ status: 'saved', at: Date.now() })
         return res
       } catch (e) {
         pending.current--
+        if (edit) sending.current--
+        setSave((v) => ({ ...v, status: 'failed' }))
         const err = e instanceof ApiError ? e : null
         onErrorRef.current(err?.message ?? 'That didn’t work. Try again.')
         // Back to the canvas as it really is.
@@ -172,7 +189,10 @@ export function useLab(projectId: number, onError: (message: string) => void) {
         void ops([{ op: 'set', id: nodeId, params: merged }])
       }
       if (now) send()
-      else timers.set(nodeId, { patch: merged, timer: window.setTimeout(send, 700) })
+      else {
+        timers.set(nodeId, { patch: merged, timer: window.setTimeout(send, 700) })
+        setSave((v) => ({ ...v, status: 'saving' }))
+      }
     },
     [ops],
   )
@@ -184,6 +204,23 @@ export function useLab(projectId: number, onError: (message: string) => void) {
     waiting.forEach(([, e]) => window.clearTimeout(e.timer))
     if (waiting.length) await ops(waiting.map(([id, e]) => ({ op: 'set', id, params: e.patch })))
   }, [ops])
+
+  // Nothing typed is lost: settings still waiting go when the page closes the project (another page, another
+  // project), and closing the tab before they're in asks first.
+  const flushRef = useRef(flush)
+  flushRef.current = flush
+  // This project's flush (flush changes with the project): what's waiting goes to the one it was typed in
+  useEffect(() => () => void flush(), [flush])
+  useEffect(() => {
+    const leaving = (e: BeforeUnloadEvent) => {
+      if (!unsaved()) return
+      void flushRef.current()
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', leaving)
+    return () => window.removeEventListener('beforeunload', leaving)
+  }, [])
 
   /** Move a node on screen only (while dragging); `ops` with a move commits it. */
   const moveLocal = useCallback((nodeId: string, x: number, y: number) => {
@@ -245,7 +282,7 @@ export function useLab(projectId: number, onError: (message: string) => void) {
     [ops],
   )
 
-  return { data, failed, busy, ops, setParams, flush, moveLocal, run, stop, plan, runAll, history, refresh, restore }
+  return { data, failed, busy, save, ops, setParams, flush, moveLocal, run, stop, plan, runAll, history, refresh, restore }
 }
 
 export type Lab = ReturnType<typeof useLab>

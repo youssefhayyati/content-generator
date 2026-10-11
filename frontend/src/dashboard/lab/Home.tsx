@@ -13,7 +13,7 @@ import { useAssistant } from '../assistant/store'
 import { fmtRelative, useApi, useInvalidate } from '../data'
 import { Interview } from '../intake/Interview'
 import { useToast } from '../toast'
-import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger } from '../ui'
+import { Btn, EmptyState, Label, Modal, PageHeader, Select, Skeleton, Stagger, inputClass } from '../ui'
 import { TemplateBrowser, TemplateSheet, TemplateStrip } from './Gallery'
 import { confirm } from '../confirm'
 
@@ -33,6 +33,7 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
   const panel = useRef<HTMLElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
+  const [naming, setNaming] = useState(false)
 
   // A fresh conversation where the assistant asks what to make; below the projects on narrower screens, so it comes up.
   const newPost = () => {
@@ -52,10 +53,11 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
       setBusy(null)
     }
   }
-  const blank = async () => {
+  const blank = async (name: string) => {
+    setNaming(false)
     setBusy('blank')
     try {
-      const p = await api<LabPayload>('/lab/projects', { method: 'POST', body: {} })
+      const p = await api<LabPayload>('/lab/projects', { method: 'POST', body: { name: name.trim() || null } })
       navigate(studio(p.project.id))
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'The project couldn’t be made.')
@@ -90,7 +92,7 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
               <Label className="mb-3">Make a post</Label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <StartCard icon={Plus} title="New post" meta="no questions" body="Tell the assistant what you want, a post, a reel or a story, and it makes it. No campaign to set up." onClick={newPost} busy={a.switching} primary />
-                <StartCard icon={SquareDashed} title="Blank canvas" meta="no brief for now" body="Put the nodes yourself. A brief can be added later, as a node." onClick={() => void blank()} busy={busy === 'blank'} />
+                <StartCard icon={SquareDashed} title="Blank canvas" meta="no brief for now" body="Put the nodes yourself. A brief can be added later, as a node." onClick={() => setNaming(true)} busy={busy === 'blank'} />
               </div>
             </div>
             <div>
@@ -114,7 +116,40 @@ export function LabHome({ actions }: { actions?: ReactNode }) {
       </div>
 
       <PickCampaign open={picking} onClose={() => setPicking(false)} />
+      <NameCanvas open={naming} onClose={() => setNaming(false)} onCreate={(name) => void blank(name)} />
     </div>
+  )
+}
+
+/** A blank canvas gets its name first (it can't be made without one), so it's easy to find again with the projects. */
+function NameCanvas({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: (name: string) => void }) {
+  const [name, setName] = useState('')
+  useEffect(() => {
+    if (open) setName('')
+  }, [open])
+  return (
+    <Modal open={open} onClose={onClose} title="Name your canvas">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (name.trim()) onCreate(name)
+        }}
+        className="space-y-4"
+      >
+        <div>
+          <input autoFocus className={inputClass} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="e.g. Autumn menu launch" aria-label="Canvas name" />
+          <p className="mt-2 text-[11.5px] leading-snug text-dim">It’s saved as you work, under this name with your projects, so you can come back to it any time. You can rename it from the top of the canvas.</p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Btn type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn type="submit" variant="primary" disabled={!name.trim()}>
+            Create canvas
+          </Btn>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
